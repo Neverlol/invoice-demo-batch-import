@@ -1,0 +1,6 @@
+rule_id,rule_type,rule_name,scenario,rule_statement,source_case_ids,primary_evidence,confidence,status
+RULEV1-001,tax_treatment,鲜活农产品免税判断,农产品/蔬菜类开票,当聊天和票面都指向鲜活农产品时应优先判断是否走免税口径，不能直接按普通商品税率默认处理,10,"10/summary.review.md; 10/chat/wechat_longscreenshot_2026-04-19_092129_950.png; 10/invoice/dzfp_26212000000526484206_沈阳市和平区王龙伟蔬菜.pdf",high,ready
+RULEV1-002,classification,主材优先于表面关键词,名称里带容易误导的材质或结构词,像“钢带木箱”这类名称不能只按表面词命中分类，必须综合主材、客户确认、合同与送货单来判断最终类目,14,"14/summary.review.md; 14/chat/wechat_longscreenshot_2026-04-19_093133_423.png; 14/source/沈阳市东海包装材料有限公司39900合同.xlsx",high,ready
+RULEV1-003,classification,同一供应商可拆成多个商品类目,礼品/促销/杂货混合采购,不能把同一供应商或同一案例粗暴压成一个大类，必须按商品本体拆成多行并分别分类,15,"15/summary.review.md; 15/source/塑料杯.pdf; 15/source/平安利顺 手机支架 雨伞 风扇.pdf; 15/source/鹏新旭 帆布袋.pdf",high,ready
+RULEV1-004,service_template,明确服务描述可直转草稿,聊天里已给出服务名和税率,当客户或助理在聊天里已经明确给出服务名称/税率/票种时，可优先走“文本直转明细”的服务模板路径,12,"12/summary.review.md; 12/source; 12/invoice/dzfp_26212000000519421426_吉林路威工程咨询有限公.pdf",high,ready
+RULEV1-005,execution,红冲后重开需逐台核验,机动车/电动车批量重开,红冲后的机动车重开不是简单批量复制，需要按车型、车架号、票种与一车一票规则逐台核验后再重开,9,"9/summary.review.md; 9/chat/wechat_longscreenshot_2026-04-19_091400_340.png; 9/source/茨榆坨.txt",high,ready

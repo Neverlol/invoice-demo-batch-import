@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>批量草稿 {{ batch.batch_id }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260423-v15') }}">
+  </head>
+  <body>
+    <main class="shell wide">
+      <nav class="topbar">
+        <a href="{{ url_for('index') }}">新建草稿</a>
+        <a href="{{ url_for('download_batch_template', batch_id=batch.batch_id) }}">下载批量导入模板</a>
+      </nav>
+      <section class="hero compact-hero">
+        <p class="eyebrow">Batch {{ batch.batch_id }}</p>
+        <h1>批量草稿</h1>
+        <p>系统识别为一份输入拆多张发票。当前先支持下载整批官方导入模板，逐张编辑入口保留在下表。</p>
+      </section>
+
+      {% if export.error_count %}
+        <section class="alert">
+          {% for issue in export.validation_issues %}
+            <p>{{ issue.sheet }} 第 {{ issue.row }} 行 {{ issue.header }}：{{ issue.message }}</p>
+          {% endfor %}
+        </section>
+      {% endif %}
+
+      <section class="card">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>草稿</th>
+                <th>购买方</th>
+                <th>票种</th>
+                <th>金额</th>
+                <th>项目</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in batch.items %}
+                <tr>
+                  <td>{{ item.draft_id }}</td>
+                  <td>{{ item.buyer_name }}</td>
+                  <td>{{ item.invoice_kind }}</td>
+                  <td>{{ item.amount_total }}</td>
+                  <td>{{ item.project_summary }}</td>
+                  <td><a href="{{ url_for('draft_detail', draft_id=item.draft_id) }}">编辑</a></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

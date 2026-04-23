@@ -1,0 +1,411 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Callable
+
+from openpyxl import load_workbook
+
+from .failure_details import build_failure_report
+
+
+StatusHook = Callable[[str, str], None]
+DOWNLOAD_ROOT = Path(__file__).resolve().parents[1] / "output" / "batch_import_preview" / "failure_downloads"
+
+
+@dataclass
+class BatchRunResult:
+    status: str
+    current_step: str
+    logs: list[str] = field(default_factory=list)
+    error: str = ""
+    downloaded_failure_path: str = ""
+    failure_report: dict | None = None
+    preview_clicked: bool = False
+
+
+class BatchImportRunner:
+    """Best-effort CDP runner for the tax bureau batch-import page.
+
+    The operator must already be logged in and positioned inside the tax site.
+    This runner avoids opening a new controlled browser; it attaches to the
+    already opened Edge instance through CDP, then uploads the generated Excel.
+    """
+
+    def __init__(
+        self,
+        *,
+        template_path: str | Path,
+        cdp_endpoint: str = "http://127.0.0.1:9222",
+        status_hook: StatusHook | None = None,
+    ) -> None:
+        self.template_path = Path(template_path)
+        self.cdp_endpoint = cdp_endpoint
+        self.status_hook = status_hook
+        self.logs: list[str] = []
+        self.expected_serials = _read_template_serials(self.template_path)
+
+    def run(self) -> BatchRunResult:
+        try:
+            from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+            from playwright.sync_api import sync_playwright
+        except Exception as exc:  # noqa: BLE001
+            return self._error("init", f"Playwright 不可用: {type(exc).__name__}: {exc}")
+
+        if not self.template_path.exists():
+            return self._error("init", f"模板文件不存在: {self.template_path}")
+
+        with sync_playwright() as p:
+            browser = p.chromium.connect_over_cdp(self.cdp_endpoint)
+            try:
+                page = self._select_tax_page(browser)
+                self._log("attach", f"已连接税局页面: {page.title()} | {page.url}")
+                if self.expected_serials:
+                    self._log("template", "本次模板流水号: " + "、".join(self.expected_serials))
+                self._open_batch_import_page(page)
+                self._upload_template(page, PlaywrightTimeoutError)
+                import_state = self._wait_for_import_result(page)
+                if import_state == "failed":
+                    failure_path, failure_report = self._download_failure_details(page, PlaywrightTimeoutError)
+                    self._log("failed", "税局导入失败，已下载并解析失败明细。")
+                    return BatchRunResult(
+                        status="failed",
+                        current_step="failed",
+                        logs=self.logs,
+                        downloaded_failure_path=str(failure_path) if failure_path else "",
+                        failure_report=failure_report,
+                    )
+                preview_clicked = self._try_preview_invoice(page, PlaywrightTimeoutError)
+                self._log("done", "批量导入流程已执行；请在税局页面确认预览和最终开具。")
+                return BatchRunResult(
+                    status="done",
+                    current_step="done",
+                    logs=self.logs,
+                    preview_clicked=preview_clicked,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._log("error", f"{type(exc).__name__}: {exc}")
+                return BatchRunResult(status="error", current_step="error", logs=self.logs, error=str(exc))
+            finally:
+                browser.close()
+
+    def _select_tax_page(self, browser):
+        pages = [page for context in browser.contexts for page in context.pages]
+        for page in pages:
+            if "chinatax.gov.cn" in page.url or "电子税务局" in _safe_title(page):
+                return page
+        if pages:
+            return pages[0]
+        raise RuntimeError("未找到可附着的 Edge 标签页。请先用 CDP Edge 登录电子税务局。")
+
+    def _open_batch_import_page(self, page) -> None:
+        self._log("navigate", "准备进入批量开票页面。")
+        if "批量开票" in page.content():
+            self._log("navigate", "当前页面已出现批量开票入口或页面内容。")
+            return
+        if "blue-invoice-makeout" not in page.url:
+            origin = _origin_from_url(page.url)
+            page.goto(f"{origin}/blue-invoice-makeout", wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(1500)
+        for text in ("批量开票", "批量导入", "导入开票"):
+            target = page.get_by_text(text, exact=False).first
+            if target.count():
+                target.click(timeout=5000)
+                page.wait_for_timeout(1500)
+                self._log("navigate", f"已点击入口: {text}")
+                return
+        raise RuntimeError("未找到“批量开票/批量导入”入口。请先手动进入批量开票页后重试。")
+
+    def _upload_template(self, page, timeout_error_cls) -> None:
+        self._log("upload", f"准备上传模板: {self.template_path.name}")
+        file_input = page.locator("input[type=file]").first
+        if file_input.count():
+            file_input.set_input_files(str(self.template_path))
+        else:
+            with page.expect_file_chooser(timeout=8000) as chooser_info:
+                clicked = False
+                for text in ("选择", "重新选择", "上传", "导入"):
+                    target = page.get_by_text(text, exact=False).first
+                    if target.count():
+                        target.click(timeout=3000)
+                        clicked = True
+                        break
+                if not clicked:
+                    raise RuntimeError("未找到文件选择按钮。")
+            chooser_info.value.set_files(str(self.template_path))
+        page.wait_for_timeout(1000)
+        for text in ("批量导入", "导入", "上传"):
+            target = page.get_by_text(text, exact=False).first
+            if target.count():
+                try:
+                    target.click(timeout=5000)
+                    self._log("upload", f"已点击提交按钮: {text}")
+                    break
+                except timeout_error_cls:
+                    continue
+        page.wait_for_timeout(3000)
+
+    def _wait_for_import_result(self, page) -> str:
+        self._log("wait_result", "等待税局处理导入结果。")
+        success_tokens = ("导入完成", "处理成功", "预览发票", "发票价税合计")
+        failure_tokens = ("下载失败明细", "处理失败", "导入失败", "失败明细")
+        for _ in range(90):
+            page.wait_for_timeout(1000)
+            text = _safe_body_text(page)
+            if any(token in text for token in failure_tokens):
+                self._log("wait_result", "检测到导入失败信号。")
+                return "failed"
+            if any(token in text for token in success_tokens) and self._current_serial_visible(text):
+                self._log("wait_result", "检测到本次流水号的导入成功信号。")
+                return "success"
+            if any(token in text for token in success_tokens) and self.expected_serials:
+                self._log("wait_result", "页面存在成功/预览字样，但未出现本次流水号，继续等待以避免点击旧记录。")
+        self._log("wait_result", "未在 90 秒内识别明确成功/失败信号，继续尝试预览。")
+        return "unknown"
+
+    def _download_failure_details(self, page, timeout_error_cls) -> tuple[Path | None, dict | None]:
+        DOWNLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+        for text in ("下载失败明细", "下载失败明细模板", "失败明细"):
+            target = page.get_by_text(text, exact=False).first
+            if not target.count():
+                continue
+            try:
+                with page.expect_download(timeout=10000) as download_info:
+                    target.click(timeout=5000)
+                download = download_info.value
+                suggested = download.suggested_filename or "tax_import_failure.xlsx"
+                output_path = DOWNLOAD_ROOT / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{suggested}"
+                download.save_as(str(output_path))
+                self._log("download_failure", f"已下载失败明细: {output_path}")
+                report = build_failure_report(output_path)
+                failure_serials = {
+                    record.get("serial_no", "")
+                    for record in report.get("records", [])
+                    if record.get("serial_no")
+                }
+                matched_serials = sorted(set(self.expected_serials) & failure_serials)
+                if matched_serials:
+                    self._log("download_failure", "失败明细确认命中本次流水号: " + "、".join(matched_serials))
+                elif self.expected_serials and failure_serials:
+                    self._log(
+                        "download_failure",
+                        "失败明细流水号与本次模板不一致，请人工确认页面是否残留旧导入状态。",
+                    )
+                for record in report.get("records", []):
+                    field = record.get("field_name") or "未识别字段"
+                    failure_type = record.get("failure_type") or "未识别类型"
+                    reason = record.get("reason") or ""
+                    self._log("failure_report", f"{record.get('serial_no', '')} | {field} | {failure_type} | {reason}")
+                return output_path, report
+            except timeout_error_cls:
+                continue
+        self._log("download_failure", "未能自动下载失败明细；请在税局页面手动下载后回传工作台。")
+        return None, None
+
+    def _try_preview_invoice(self, page, timeout_error_cls) -> bool:
+        if self.expected_serials:
+            for attempt in range(1, 9):
+                for serial in self.expected_serials:
+                    preview = _preview_locator_for_serial(page, serial)
+                    if preview is not None:
+                        try:
+                            preview.click(timeout=5000)
+                            page.wait_for_timeout(1500)
+                            self._log("preview", f"已点击本次流水号 {serial} 的预览发票。")
+                            return True
+                        except timeout_error_cls:
+                            pass
+
+                    clicked = _click_preview_for_serial_by_dom(page, serial)
+                    if clicked:
+                        page.wait_for_timeout(1500)
+                        self._log("preview", f"已通过流水号邻近定位点击预览发票: {serial}")
+                        return True
+
+                if attempt in (1, 4):
+                    self._log("preview", "本次流水号已出现，但预览按钮尚未完成行内定位，继续短暂重试。")
+                page.wait_for_timeout(750)
+            self._log("preview", "未找到本次流水号对应的预览发票按钮；不会点击页面上的旧预览记录。")
+            return False
+
+        for text in ("预览发票", "预览"):
+            target = page.get_by_text(text, exact=False).first
+            if not target.count():
+                continue
+            try:
+                target.click(timeout=5000)
+                page.wait_for_timeout(1500)
+                self._log("preview", "已点击预览发票。")
+                return True
+            except timeout_error_cls:
+                continue
+        self._log("preview", "未自动找到预览发票按钮；请在税局页面手动查看结果。")
+        return False
+
+    def _error(self, step: str, message: str) -> BatchRunResult:
+        self._log(step, message)
+        return BatchRunResult(status="error", current_step=step, logs=self.logs, error=message)
+
+    def _log(self, step: str, message: str) -> None:
+        line = f"[{datetime.now().strftime('%H:%M:%S')}] {step}: {message}"
+        self.logs.append(line)
+        if self.status_hook:
+            self.status_hook(step, line)
+
+    def _current_serial_visible(self, page_text: str) -> bool:
+        if not self.expected_serials:
+            return True
+        return any(serial and serial in page_text for serial in self.expected_serials)
+
+
+def _safe_title(page) -> str:
+    try:
+        return page.title()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _safe_body_text(page) -> str:
+    try:
+        return page.locator("body").inner_text(timeout=2000)
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _origin_from_url(url: str) -> str:
+    if "://" not in url:
+        raise RuntimeError("当前标签页不是有效税局 URL。")
+    scheme, rest = url.split("://", 1)
+    host = rest.split("/", 1)[0]
+    return f"{scheme}://{host}"
+
+
+def _read_template_serials(template_path: Path) -> tuple[str, ...]:
+    try:
+        workbook = load_workbook(template_path, read_only=True, data_only=True)
+        sheet = workbook["1-发票基本信息"]
+        header_row = [str(cell.value or "").strip() for cell in sheet[3]]
+        serial_column = header_row.index("发票流水号") + 1
+        serials: list[str] = []
+        for row_index in range(4, sheet.max_row + 1):
+            value = sheet.cell(row=row_index, column=serial_column).value
+            serial = str(value or "").strip()
+            if serial:
+                serials.append(serial)
+        workbook.close()
+        return tuple(dict.fromkeys(serials))
+    except Exception:  # noqa: BLE001
+        fallback = template_path.stem
+        if "_batch_import" in fallback:
+            fallback = fallback.split("_batch_import", 1)[0]
+        return (fallback,) if fallback else ()
+
+
+def _preview_locator_for_serial(page, serial: str):
+    try:
+        row_selectors = (
+            "tr",
+            "[role='row']",
+            ".ant-table-row",
+            ".el-table__row",
+            ".vxe-body--row",
+            ".ivu-table-row",
+        )
+        for row_selector in row_selectors:
+            rows = page.locator(row_selector).filter(has_text=serial)
+            for row_index in range(rows.count()):
+                row = rows.nth(row_index)
+                for text in ("预览发票", "预览"):
+                    preview = row.get_by_text(text, exact=False).first
+                    if preview.count():
+                        return preview
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+def _click_preview_for_serial_by_dom(page, serial: str) -> bool:
+    """Click preview only when the clickable element is inside a serial-scoped row/ancestor."""
+
+    try:
+        result = page.evaluate(
+            """
+            (serial) => {
+              const previewPattern = /预览发票|预览/;
+              const rowSelectors = [
+                'tr',
+                '[role="row"]',
+                '.ant-table-row',
+                '.el-table__row',
+                '.vxe-body--row',
+                '.ivu-table-row',
+                '.semi-table-row',
+                '.arco-table-tr'
+              ];
+
+              const norm = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+              const isVisible = (element) => {
+                if (!element || element.closest('[aria-hidden="true"]')) {
+                  return false;
+                }
+                const style = window.getComputedStyle(element);
+                if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+                  return false;
+                }
+                const rect = element.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+              };
+              const isDisabled = (element) => {
+                return element.disabled === true
+                  || element.getAttribute('aria-disabled') === 'true'
+                  || element.className.toString().includes('disabled');
+              };
+              const clickTarget = (root) => {
+                const candidates = Array.from(root.querySelectorAll('a, button, [role="button"], span, div'))
+                  .filter((element) => previewPattern.test(norm(element.innerText || element.textContent)))
+                  .filter((element) => isVisible(element) && !isDisabled(element));
+                const target = candidates.find((element) => norm(element.innerText || element.textContent).includes('预览发票'))
+                  || candidates[0];
+                if (!target) {
+                  return false;
+                }
+                target.scrollIntoView({ block: 'center', inline: 'center' });
+                target.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true, view: window }));
+                target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+                target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+                target.click();
+                return true;
+              };
+
+              for (const selector of rowSelectors) {
+                for (const row of Array.from(document.querySelectorAll(selector))) {
+                  const rowText = norm(row.innerText || row.textContent);
+                  if (rowText.includes(serial) && previewPattern.test(rowText) && clickTarget(row)) {
+                    return true;
+                  }
+                }
+              }
+
+              const previewElements = Array.from(document.querySelectorAll('a, button, [role="button"], span, div'))
+                .filter((element) => previewPattern.test(norm(element.innerText || element.textContent)))
+                .filter((element) => isVisible(element) && !isDisabled(element));
+              for (const element of previewElements) {
+                let ancestor = element.parentElement;
+                for (let depth = 0; ancestor && depth < 8; depth += 1, ancestor = ancestor.parentElement) {
+                  const ancestorText = norm(ancestor.innerText || ancestor.textContent);
+                  if (ancestorText.length <= 2000 && ancestorText.includes(serial)) {
+                    element.scrollIntoView({ block: 'center', inline: 'center' });
+                    element.click();
+                    return true;
+                  }
+                }
+              }
+              return false;
+            }
+            """,
+            serial,
+        )
+        return bool(result)
+    except Exception:  # noqa: BLE001
+        return False

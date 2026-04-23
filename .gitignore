@@ -1,0 +1,31 @@
+# Python runtime
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local runtime state
+output/
+*.log
+*.sqlite
+*.sqlite3
+*.db
+pending_events.jsonl
+pending_uploads/
+last_sync_state.json
+
+# Windows / local bootstrap binaries
+windows_bootstrap/installers/
+windows_bootstrap/wheels/
+windows_bootstrap/tessdata/
+

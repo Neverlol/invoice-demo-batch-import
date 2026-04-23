@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    {% if run.status in ["queued", "running"] %}
+      <meta http-equiv="refresh" content="2">
+    {% endif %}
+    <title>执行 {{ run.run_id }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260423-v15') }}">
+  </head>
+  <body class="operator-body">
+    <main class="dashboard-shell">
+      <aside class="sidebar">
+        <div class="brand-block">
+          <div class="brand-logo">AI</div>
+          <div>
+            <strong>智能开票助手</strong>
+            <small>执行 {{ run.run_id }}</small>
+          </div>
+        </div>
+
+        <nav class="sidebar-nav">
+          <a class="nav-item" href="{{ url_for('index') }}">
+            <span class="nav-dot">＋</span>
+            <span>新建发票</span>
+          </a>
+          <a class="nav-item active" href="{{ url_for('run_detail', run_id=run.run_id) }}">
+            <span class="nav-dot">跑</span>
+            <span>执行监控</span>
+          </a>
+        </nav>
+
+        <section class="sidebar-panel">
+          <h3>执行要求</h3>
+          <p>运行期间保持已登录的 Edge 和税局页面开启，不要关闭浏览器。</p>
+        </section>
+      </aside>
+
+      <section class="main-stage">
+        <header class="stage-head">
+          <div>
+            <p class="eyebrow">Run {{ run.run_id }}</p>
+            <h1>税局执行监控</h1>
+          </div>
+          <a class="ghost-button" href="{{ url_for('index') }}">返回工作台</a>
+        </header>
+
+        {% if run.error %}
+          <section class="banner alert"><p>{{ run.error }}</p></section>
+        {% endif %}
+        {% if run.status == "done" %}
+          <section class="banner ok">
+            <p>执行完成。{% if run.preview_clicked %}系统已尝试点击预览发票。{% else %}未自动点击预览，请在税局页面手动查看。{% endif %}</p>
+          </section>
+        {% endif %}
+        {% if run.status == "failed" %}
+          <section class="banner alert">
+            <p>税局返回导入失败。{% if run.downloaded_failure_path %}<a href="{{ url_for('run_failure_download', run_id=run.run_id) }}">下载失败明细</a>{% endif %}</p>
+          </section>
+        {% endif %}
+
+        <section class="work-card">
+          <header class="card-head">
+            <div class="card-title">
+              <span class="card-icon">模</span>
+              <div>
+                <h2>本次模板</h2>
+                <p>当前提交到税局的官方批量导入模板。</p>
+              </div>
+            </div>
+          </header>
+          <p class="muted-copy">{{ run.template_path }}</p>
+        </section>
+
+        {% if run.failure_report %}
+          <section class="work-card">
+            <header class="card-head">
+              <div class="card-title">
+                <span class="card-icon">错</span>
+                <div>
+                  <h2>失败明细解析</h2>
+                  <p>下载后的税局失败明细已经在这里结构化展示。</p>
+                </div>
+              </div>
+            </header>
+            <div class="table-wrap">
+              <table class="line-table">
+                <thead>
+                  <tr>
+                    <th>流水号</th>
+                    <th>字段</th>
+                    <th>类型</th>
+                    <th>原因</th>
+                    <th>建议处理</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for item in run.failure_report.records %}
+                    <tr>
+                      <td>{{ item.serial_no }}</td>
+                      <td>{{ item.field_name or '未识别' }}</td>
+                      <td>{{ item.failure_type or '未识别' }}</td>
+                      <td>{{ item.reason }}</td>
+                      <td>{{ item.suggested_action }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        {% endif %}
+
+        <section class="work-card">
+          <header class="card-head">
+            <div class="card-title">
+              <span class="card-icon">志</span>
+              <div>
+                <h2>执行日志</h2>
+                <p>保留每一步税局操作和返回结果。</p>
+              </div>
+            </div>
+          </header>
+          <pre class="logs">{{ "\n".join(run.logs) }}</pre>
+        </section>
+      </section>
+
+      <aside class="status-rail">
+        <header class="rail-head">
+          <span class="rail-badge">执行步骤</span>
+          <h2>当前进度</h2>
+        </header>
+
+        <section class="status-card">
+          <ol class="timeline">
+            <li class="{% if run.current_step == 'queued' %}active{% elif run.current_step != 'queued' %}done{% endif %}">
+              <span>1</span>
+              <div><strong>排队启动</strong><small>创建执行任务</small></div>
+            </li>
+            <li class="{% if run.current_step in ['attach', 'navigate'] %}active{% elif run.current_step not in ['queued'] %}done{% endif %}">
+              <span>2</span>
+              <div><strong>连接税局</strong><small>附着已登录 Edge 并进入批量开票</small></div>
+            </li>
+            <li class="{% if run.current_step in ['upload', 'wait_result'] %}active{% elif run.status in ['done', 'failed'] %}done{% endif %}">
+              <span>3</span>
+              <div><strong>上传模板</strong><small>提交税局模板</small></div>
+            </li>
+            <li class="{% if run.status == 'failed' %}error{% elif run.status == 'done' %}done{% endif %}">
+              <span>4</span>
+              <div><strong>处理结果</strong><small>{% if run.status == 'failed' %}税局返回失败{% elif run.status == 'done' %}处理完成{% else %}等待税局处理{% endif %}</small></div>
+            </li>
+            <li class="{% if run.preview_clicked %}done{% endif %}">
+              <span>5</span>
+              <div><strong>预览发票</strong><small>{% if run.preview_clicked %}已尝试打开预览{% else %}等待预览或人工查看{% endif %}</small></div>
+            </li>
+          </ol>
+        </section>
+
+        <section class="status-card">
+          <h3>核心结果</h3>
+          <div class="result-list">
+            <div><span>状态</span><strong>{{ run.status }}</strong></div>
+            <div><span>当前步骤</span><strong>{{ run.current_step }}</strong></div>
+            <div><span>预览发票</span><strong>{% if run.preview_clicked %}已点击{% else %}未点击{% endif %}</strong></div>
+            <div><span>失败明细</span><strong>{% if run.downloaded_failure_path %}已下载{% else %}无{% endif %}</strong></div>
+          </div>
+        </section>
+      </aside>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,20 @@
+entry_id,library_segment,raw_alias,normalized_invoice_name,tax_category,tax_treatment_or_rate,decision_basis,source_case_ids,primary_evidence,confidence,status
+LIBV1-001,special_tax,芹菜,芹菜,蔬菜,免税,鲜活农产品场景优先走免税口径，不能按普通商品税率处理,10,"10/summary.review.md; 10/chat/wechat_longscreenshot_2026-04-19_092129_950.png; 10/invoice/dzfp_26212000000526484206_沈阳市和平区王龙伟蔬菜.pdf",high,ready
+LIBV1-002,service_template,设计服务费,设计服务费,设计服务,6%,服务类口径已经由聊天与开票结果双重验证，可直接作为服务模板,12,"12/summary.review.md; 12/source; 12/invoice/dzfp_26212000000519421426_吉林路威工程咨询有限公.pdf",high,ready
+LIBV1-003,goods_mapping,可拆卸式钢带木箱,钢带箱,木制品,13%,名称含钢带但主材与客户确认均指向木制品，应按主材判断,14,"14/summary.review.md; 14/chat/wechat_longscreenshot_2026-04-19_093133_423.png; 14/invoice/dzfp_26212000000515783056_中国科学院金属研究所_202.pdf",high,ready
+LIBV1-004,goods_mapping,木制托盘,托盘,木制品,13%,同一合同与票面连续验证木箱/托盘都归木制品,14,"14/summary.review.md; 14/source/沈阳市东海包装材料有限公司39900合同.xlsx; 14/invoice/dzfp_26212000000517004296_沈阳市东海包装材料有限.pdf",high,ready
+LIBV1-005,goods_mapping,帆布袋,帆布袋,纺织产品,1%,帆布袋类已有辅材和票面双重支持，类目稳定,15,"15/summary.review.md; 15/source/鹏新旭 帆布袋.pdf; 15/invoice/dzfp_26212000000484187176_前锦网络信息技术（上海）有限公司_20260410094702.pdf",high,ready
+LIBV1-006,vehicle_model_mapping,A16,电动两轮摩托车 A16优跑版CE版,机动车,1%,车型简称与票面规范名已被原始车型清单和最终发票同时验证,9,"9/summary.review.md; 9/source/茨榆坨.txt; 9/invoice/dzfp_26212000000261113551_沈阳市辽中区威驰电动车.pdf",high,ready
+LIBV1-007,vehicle_model_mapping,苍穹/超能S+,电动两轮摩托车 超能S+苍穹CE版,机动车,1%,车型营销词需要保留在规范名中，避免与其他系列混淆,9,"9/summary.review.md; 9/invoice/dzfp_26212000000262305511_沈阳市辽中区红伟电动车.pdf",high,ready
+LIBV1-008,vehicle_model_mapping,雷神,电动两轮摩托车 超能S.雷神CE版,机动车,1%,系列内不同版本需保留版本词，不能只按大类“机动车”结束,9,"9/summary.review.md; 9/invoice/dzfp_26212000000262456666_沈阳市辽中区红伟电动车.pdf",high,ready
+LIBV1-009,goods_mapping,刀盘,刀盘,金属制品,13%,案例4 Excel 明细与最终专票逐行对应，刀盘类统一落在金属制品并按 13% 开具,4,"4/summary.review.md; 4/source/宋总开发票15672元-2026.04.12.xls; 4/invoice/dzfp_26212000000497568211_沈阳株硬合金工具有限公.pdf",high,ready
+LIBV1-010,goods_mapping,刀柄,刀柄,金属制品,13%,案例4 已验证刀柄类与刀盘同属五金刀具口径，票面稳定为金属制品 13%,4,"4/summary.review.md; 4/source/宋总开发票15672元-2026.04.12.xls; 4/invoice/dzfp_26212000000497568211_沈阳株硬合金工具有限公.pdf",high,ready
+LIBV1-011,goods_mapping,渗碳拉钉,渗碳拉钉,金属制品,13%,案例4 中渗碳拉钉已在源 Excel 与最终专票中双重验证，可直接走金属制品 13%,4,"4/summary.review.md; 4/source/宋总开发票15672元-2026.04.12.xls; 4/invoice/dzfp_26212000000497568211_沈阳株硬合金工具有限公.pdf",high,ready
+LIBV1-012,goods_mapping,拉钉,拉钉,金属制品,13%,案例4 中普通拉钉与渗碳拉钉分开出票，但税务口径一致，归金属制品 13%,4,"4/summary.review.md; 4/source/宋总开发票15672元-2026.04.12.xls; 4/invoice/dzfp_26212000000497568211_沈阳株硬合金工具有限公.pdf",high,ready
+LIBV1-013,goods_mapping,粗镗头,粗镗头,金属制品,13%,案例4 已验证粗镗头并未单独走服务或设备大类，而是随刀具配件归金属制品 13%,4,"4/summary.review.md; 4/source/宋总开发票15672元-2026.04.12.xls; 4/invoice/dzfp_26212000000497568211_沈阳株硬合金工具有限公.pdf",high,ready
+LIBV1-014,goods_mapping,筒夹,筒夹,金属制品,13%,案例4 中大量筒夹明细最终全部开为金属制品 13%，适合作为高频标准条目,4,"4/summary.review.md; 4/source/宋总开发票15672元-2026.04.12.xls; 4/invoice/dzfp_26212000000497568211_沈阳株硬合金工具有限公.pdf",high,ready
+LIBV1-015,goods_mapping,延长杆,延长杆,金属制品,13%,案例4 中延长杆条目在源表和最终票面一致归入金属制品，税率稳定为 13%,4,"4/summary.review.md; 4/source/宋总开发票15672元-2026.04.12.xls; 4/invoice/dzfp_26212000000497568211_沈阳株硬合金工具有限公.pdf",high,ready
+LIBV1-016,goods_mapping,放学乐大菠萝,放学乐大菠萝,冷冻饮品,13%,案例5 的开票 Excel 与最终专票一致指向冷冻饮品货物，不应误判为服务或其他快消杂项,5,"5/summary.review.md; 5/source/开票.xlsx; 5/invoice/dzfp_26212000000519973426_黑龙江芃领飞象网络科技.pdf",high,ready
+LIBV1-017,goods_mapping,大蜜瓜,大蜜瓜,冷冻饮品,13%,案例5 的最终专票已验证大蜜瓜与放学乐大菠萝同属冷冻饮品口径，税率稳定为 13%,5,"5/summary.review.md; 5/source/开票.xlsx; 5/invoice/dzfp_26212000000519973426_黑龙江芃领飞象网络科技.pdf",high,ready
+LIBV1-018,goods_mapping,葚是喜欢,葚是喜欢,冷冻饮品,13%,案例5 的最终专票明确包含葚是喜欢条目，票面类目为冷冻饮品，适合作为快消样本固化,5,"5/summary.review.md; 5/source/开票.xlsx; 5/invoice/dzfp_26212000000519973426_黑龙江芃领飞象网络科技.pdf",high,ready
+LIBV1-019,service_seed,代理记账/税务申报/代理记账和税务申报,代理记账和税务申报,纳税申报代办,,用户纠正：票面口径为“纳税申报代办*代理记账和税务申报”，不能自动归入经纪代理服务；当前官方分类表未命中该短名，先降级为待确认候选,text_seed,operator_text_input,medium,pending

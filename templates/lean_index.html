@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>批量开票轻工作台</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260423-v15') }}">
+  </head>
+  <body class="operator-body">
+    <main class="dashboard-shell">
+      <aside class="sidebar">
+        <div class="brand-block">
+          <div class="brand-logo">AI</div>
+          <div>
+            <strong>智能开票助手</strong>
+            <small>开票工作台</small>
+          </div>
+        </div>
+
+        <nav class="sidebar-nav">
+          <a class="nav-item active" href="{{ url_for('index') }}">
+            <span class="nav-dot">＋</span>
+            <span>新建发票</span>
+          </a>
+          <a class="nav-item" href="{{ url_for('success_ledger') }}">
+            <span class="nav-dot">表</span>
+            <span>发票记录</span>
+          </a>
+        </nav>
+
+        <section class="sidebar-panel">
+          <h3>使用流程</h3>
+          <p>录入材料，生成草稿，确认后上传税局模板，再查看预览结果。</p>
+        </section>
+      </aside>
+
+      <section class="main-stage">
+        <header class="stage-head">
+          <div>
+            <p class="eyebrow">Invoice Operator</p>
+            <h1>新建发票</h1>
+          </div>
+          <div class="ghost-button">工作台说明</div>
+        </header>
+
+        {% if errors %}
+          <section class="banner alert">
+            {% for error in errors %}<p>{{ error }}</p>{% endfor %}
+          </section>
+        {% endif %}
+
+        <form class="stage-stack" method="post" action="{{ url_for('create_draft') }}" enctype="multipart/form-data">
+          <section class="work-card composer-card">
+            <header class="card-head">
+              <div class="card-title">
+                <span class="card-icon">录</span>
+                <div>
+                  <h2>材料输入</h2>
+                  <p>像聊天输入框一样录入文字，也可以直接拖入客户文件。</p>
+                </div>
+              </div>
+            </header>
+
+            <div class="composer-meta">
+              <label class="field compact-field">
+                <span>销售方 / 纳税主体</span>
+                <input name="company_name" value="{{ form.company_name or '' }}" placeholder="可留空，以税局当前登录主体为准">
+              </label>
+              <label class="field compact-field">
+                <span>补充说明</span>
+                <input name="note" value="{{ form.note or '' }}" placeholder="例如：本次先按普票 3% 生成">
+              </label>
+            </div>
+
+            <div class="chat-composer">
+              <textarea name="raw_text" rows="4" placeholder="直接粘贴客户发来的开票信息、购买方资料、项目明细、聊天整理文本等。">{{ form.raw_text or '' }}</textarea>
+              <div class="composer-toolbar">
+                <label class="file-trigger">
+                  <input type="file" name="source_files" multiple>
+                  <span>拖拽或上传图片 / Excel / PDF</span>
+                </label>
+                <small>支持文字和文件同时输入；Excel 会优先解析明细。</small>
+                <button class="primary" type="submit">生成开票草稿</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="work-card draft-card placeholder-card">
+            <header class="card-head">
+              <div class="card-title">
+                <span class="card-icon">票</span>
+                <div>
+                  <h2>发票草稿</h2>
+                  <p>生成后会在这里显示接近真实发票的复核界面。</p>
+                </div>
+              </div>
+            </header>
+
+            <div class="placeholder-surface">
+              <div class="placeholder-block wide"></div>
+              <div class="placeholder-columns">
+                <div class="placeholder-block tall"></div>
+                <div class="placeholder-block tall"></div>
+              </div>
+              <div class="placeholder-table">
+                <div class="placeholder-line"></div>
+                <div class="placeholder-line"></div>
+                <div class="placeholder-line short"></div>
+              </div>
+            </div>
+          </section>
+        </form>
+      </section>
+
+      <aside class="status-rail">
+        <header class="rail-head">
+          <span class="rail-badge">执行面板</span>
+          <h2>税局操作步骤</h2>
+        </header>
+
+        <section class="status-card">
+          <ol class="timeline">
+            <li class="active">
+              <span>1</span>
+              <div>
+                <strong>录入材料</strong>
+                <small>粘贴文本或上传客户原始文件</small>
+              </div>
+            </li>
+            <li>
+              <span>2</span>
+              <div>
+                <strong>生成草稿</strong>
+                <small>抽取购买方与开票明细</small>
+              </div>
+            </li>
+            <li>
+              <span>3</span>
+              <div>
+                <strong>复核赋码</strong>
+                <small>人工确认票种、税率、税收编码</small>
+              </div>
+            </li>
+            <li>
+              <span>4</span>
+              <div>
+                <strong>批量导入</strong>
+                <small>上传税局模板并回流失败明细</small>
+              </div>
+            </li>
+            <li>
+              <span>5</span>
+              <div>
+                <strong>预览确认</strong>
+                <small>税局预览正确后人工最终确认</small>
+              </div>
+            </li>
+          </ol>
+        </section>
+
+        <section class="status-card subdued">
+          <h3>结果展示</h3>
+          <p>生成草稿后，右侧会继续显示税局执行步骤和关键结果，不会打断中间的草稿复核。</p>
+        </section>
+      </aside>
+    </main>
+  </body>
+</html>
