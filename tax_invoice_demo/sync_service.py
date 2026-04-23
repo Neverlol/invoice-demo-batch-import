@@ -4,6 +4,7 @@ import json
 import os
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from threading import Lock, Thread
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -26,17 +27,24 @@ _FLUSH_ACTIVE = False
 
 
 def load_sync_config() -> dict[str, str]:
+    file_config = _load_sync_config_file()
+    enabled = _coerce_enabled(
+        env_value=os.getenv("TAX_INVOICE_SYNC_ENABLED"),
+        file_value=file_config.get("enabled"),
+    )
     return {
-        "endpoint": (os.getenv("TAX_INVOICE_SYNC_ENDPOINT") or "").strip(),
-        "token": (os.getenv("TAX_INVOICE_SYNC_TOKEN") or "").strip(),
-        "tenant": (os.getenv("TAX_INVOICE_SYNC_TENANT") or "").strip(),
-        "timeout_seconds": (os.getenv("TAX_INVOICE_SYNC_TIMEOUT") or "8").strip(),
+        "enabled": "1" if enabled else "0",
+        "config_path": file_config.get("_config_path", ""),
+        "endpoint": (os.getenv("TAX_INVOICE_SYNC_ENDPOINT") or file_config.get("endpoint") or "").strip(),
+        "token": (os.getenv("TAX_INVOICE_SYNC_TOKEN") or file_config.get("token") or "").strip(),
+        "tenant": (os.getenv("TAX_INVOICE_SYNC_TENANT") or file_config.get("tenant") or "").strip(),
+        "timeout_seconds": (os.getenv("TAX_INVOICE_SYNC_TIMEOUT") or str(file_config.get("timeout_seconds") or "8")).strip(),
     }
 
 
 def schedule_background_flush(limit: int = 50) -> bool:
     config = load_sync_config()
-    if not config["endpoint"]:
+    if config["enabled"] != "1" or not config["endpoint"]:
         return False
 
     global _FLUSH_ACTIVE
@@ -51,9 +59,9 @@ def schedule_background_flush(limit: int = 50) -> bool:
 
 def flush_pending_events(limit: int = 50) -> SyncResult:
     config = load_sync_config()
-    if not config["endpoint"]:
+    if config["enabled"] != "1" or not config["endpoint"]:
         pending = case_events_module.read_jsonl(case_events_module.pending_events_path())
-        result = SyncResult(status="disabled", pending_count=len(pending))
+        result = SyncResult(status="disabled", pending_count=len(pending), endpoint=config.get("config_path") or config.get("endpoint") or "")
         _write_last_sync_state(result)
         return result
 
@@ -153,3 +161,47 @@ def _write_last_sync_state(result: SyncResult, *, extra: dict[str, Any] | None =
     if extra:
         payload.update(extra)
     case_events_module.write_json(case_events_module.last_sync_state_path(), payload)
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def _candidate_config_paths() -> list[Path]:
+    explicit = (os.getenv("TAX_INVOICE_SYNC_CONFIG") or "").strip()
+    repo_root = _repo_root()
+    candidates: list[Path] = []
+    if explicit:
+        candidates.append(Path(explicit).expanduser())
+    candidates.extend(
+        [
+            repo_root / "sync_client.local.json",
+            repo_root / "sync_client.json",
+        ]
+    )
+    return candidates
+
+
+def _load_sync_config_file() -> dict[str, Any]:
+    for path in _candidate_config_paths():
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        payload["_config_path"] = str(path)
+        return payload
+    return {}
+
+
+def _coerce_enabled(*, env_value: str | None, file_value: Any) -> bool:
+    if env_value is not None and env_value.strip():
+        return env_value.strip().lower() not in {"0", "false", "off", "no"}
+    if isinstance(file_value, bool):
+        return file_value
+    if isinstance(file_value, str) and file_value.strip():
+        return file_value.strip().lower() not in {"0", "false", "off", "no"}
+    return bool(file_value) if file_value is not None else True

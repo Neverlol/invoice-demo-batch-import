@@ -76,7 +76,33 @@ C:\invoice-demo-batch-import
 python3 start_sync_center.py
 ```
 
-那么可以在 Windows 的终端里先设置：
+推荐给试用客户直接放一份：
+
+```text
+invoice-demo-batch-import\sync_client.local.json
+```
+
+可以从：
+
+```text
+invoice-demo-batch-import\sync_client.example.json
+```
+
+复制并改成类似：
+
+```json
+{
+  "enabled": true,
+  "endpoint": "http://你的Mac或服务器地址:5021/api/invoice/events",
+  "token": "你的token",
+  "tenant": "shenyang-seed-a",
+  "timeout_seconds": 8
+}
+```
+
+这样客户双击启动工作台时，就会自动尝试把 `case` 事件回传到你的中心端，不需要再手工执行 `set`。
+
+如果你只是临时联调，也可以在 Windows 的终端里先设置：
 
 ```bat
 set TAX_INVOICE_SYNC_ENDPOINT=http://你的Mac或服务器地址:5021/api/invoice/events

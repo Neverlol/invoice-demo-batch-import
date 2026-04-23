@@ -112,12 +112,42 @@
 
 如果暂时没有配置中心服务，这些事件只会留在本地，不影响工作台使用。
 
-如果要开始把种子客户试用数据回收到中心端，配置以下环境变量即可：
+如果要开始把种子客户试用数据回收到中心端，推荐优先放一份本地配置文件：
+
+- `sync_client.local.json`
+
+可直接从：
+
+- `sync_client.example.json`
+
+复制一份后改成：
+
+```json
+{
+  "enabled": true,
+  "endpoint": "http://你的中心端地址:5021/api/invoice/events",
+  "token": "你的token",
+  "tenant": "shenyang-seed-a",
+  "timeout_seconds": 8
+}
+```
+
+运行时读取顺序：
+
+1. 环境变量（优先级最高）
+2. `sync_client.local.json`
+3. `sync_client.json`
+
+也就是说，给种子客户交付时，你只要把已经填好的 `sync_client.local.json` 一起放进目录里，就能开箱自动回传。
+
+如果你临时联调，也可以继续用环境变量：
 
 - `TAX_INVOICE_SYNC_ENDPOINT`
 - `TAX_INVOICE_SYNC_TOKEN`
 - `TAX_INVOICE_SYNC_TENANT`（可选）
 - `TAX_INVOICE_SYNC_TIMEOUT`（可选，默认 8 秒）
+- `TAX_INVOICE_SYNC_ENABLED`（可选，设为 `0/false/off` 可临时关闭）
+- `TAX_INVOICE_SYNC_CONFIG`（可选，显式指定配置文件路径）
 
 手动补发命令：
 

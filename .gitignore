@@ -20,6 +20,7 @@ output/
 *.sqlite
 *.sqlite3
 *.db
+sync_client.local.json
 pending_events.jsonl
 pending_uploads/
 last_sync_state.json
@@ -28,4 +29,3 @@ last_sync_state.json
 windows_bootstrap/installers/
 windows_bootstrap/wheels/
 windows_bootstrap/tessdata/
-
