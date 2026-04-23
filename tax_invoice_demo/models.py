@@ -150,6 +150,7 @@ class DraftAttachment:
 @dataclass
 class InvoiceDraft:
     draft_id: str
+    case_id: str
     company_name: str
     buyer: BuyerInfo
     lines: List[InvoiceLine]
@@ -169,6 +170,9 @@ class InvoiceDraft:
     source_doc_status: str = "not_requested"
     source_doc_text: str = ""
     source_doc_note: str = ""
+    extract_strategy: str = "rules_only"
+    llm_provider: str = ""
+    extract_warnings: List[str] = field(default_factory=list)
 
     def detail_lines_text(self) -> str:
         headers = [
@@ -283,6 +287,7 @@ class DraftBatchItem:
 @dataclass
 class DraftBatch:
     batch_id: str
+    case_id: str
     company_name: str
     created_at: str
     items: list[DraftBatchItem]

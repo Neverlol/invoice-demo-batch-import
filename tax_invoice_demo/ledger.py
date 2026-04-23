@@ -16,6 +16,7 @@ LEDGER_XLSX_PATH = LEDGER_ROOT / "累计发票明细表.xlsx"
 FEEDBACK_CSV_PATH = LEDGER_ROOT / "赋码反馈候选池.csv"
 
 LEDGER_HEADERS = [
+    "case_id",
     "draft_id",
     "line_no",
     "saved_at",
@@ -38,6 +39,7 @@ LEDGER_HEADERS = [
 ]
 
 FEEDBACK_HEADERS = [
+    "case_id",
     "draft_id",
     "line_no",
     "saved_at",
@@ -79,6 +81,7 @@ def sync_draft_to_ledger(draft: InvoiceDraft) -> None:
         feedback_rows.append(
             {
                 "draft_id": draft.draft_id,
+                "case_id": draft.case_id,
                 "line_no": str(index),
                 "saved_at": saved_at,
                 "candidate_status": candidate_status,
@@ -105,6 +108,7 @@ def sync_draft_to_ledger(draft: InvoiceDraft) -> None:
 def _line_to_ledger_row(draft: InvoiceDraft, line: InvoiceLine, line_no: int, saved_at: str) -> dict[str, str]:
     return {
         "draft_id": draft.draft_id,
+        "case_id": draft.case_id,
         "line_no": str(line_no),
         "saved_at": saved_at,
         "company_name": draft.company_name,
@@ -177,27 +181,28 @@ def _write_ledger_workbook(path: Path, rows: list[dict[str, str]]) -> None:
     for row in rows:
         sheet.append([row.get(header, "") for header in LEDGER_HEADERS])
     sheet.freeze_panes = "A2"
-    sheet.auto_filter.ref = f"A1:S{max(sheet.max_row, 1)}"
+    sheet.auto_filter.ref = f"A1:T{max(sheet.max_row, 1)}"
     widths = {
         "A": 14,
-        "B": 8,
-        "C": 22,
-        "D": 24,
+        "B": 14,
+        "C": 8,
+        "D": 22,
         "E": 24,
-        "F": 22,
-        "G": 28,
-        "H": 16,
-        "I": 22,
-        "J": 16,
+        "F": 24,
+        "G": 22,
+        "H": 28,
+        "I": 16,
+        "J": 22,
         "K": 16,
-        "L": 10,
+        "L": 16,
         "M": 10,
         "N": 10,
-        "O": 12,
-        "P": 10,
-        "Q": 30,
-        "R": 18,
-        "S": 30,
+        "O": 10,
+        "P": 12,
+        "Q": 10,
+        "R": 30,
+        "S": 18,
+        "T": 30,
     }
     for column, width in widths.items():
         sheet.column_dimensions[column].width = width

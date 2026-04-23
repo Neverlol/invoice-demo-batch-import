@@ -23,6 +23,7 @@ from tax_invoice_batch_demo.lean_workbench import (
     record_success_to_ledger,
     save_lean_draft_from_form,
 )
+from tax_invoice_demo.case_events import record_case_event
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -101,7 +102,7 @@ def save_draft(draft_id: str):
 def upload_failure(draft_id: str):
     draft = save_lean_draft_from_form(draft_id, request.form, [])
     failure_file = request.files.get("failure_file")
-    failure_report = parse_failure_file(failure_file) if failure_file and failure_file.filename else None
+    failure_report = parse_failure_file(failure_file, draft=draft) if failure_file and failure_file.filename else None
     export = export_draft_template(draft)
     return render_template(
         "lean_draft.html",
@@ -158,6 +159,16 @@ def execute_draft(draft_id: str):
             run_blocked=True,
         ), 400
     run_id = _queue_batch_run(export["output_path"], request.form.get("cdp_endpoint", "http://127.0.0.1:9222"))
+    record_case_event(
+        case_id=draft.case_id,
+        draft_id=draft.draft_id,
+        event_type="batch_run_queued",
+        payload={
+            "run_id": run_id,
+            "template_path": str(export["output_path"]),
+            "cdp_endpoint": request.form.get("cdp_endpoint", "http://127.0.0.1:9222"),
+        },
+    )
     return redirect(url_for("run_detail", run_id=run_id))
 
 

@@ -12,11 +12,12 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from werkzeug.datastructures import FileStorage
 
+from .case_events import batch_snapshot, diff_drafts, draft_snapshot, record_case_event
 from .coding_library import enrich_invoice_lines, load_formal_coding_library
+from .extraction_pipeline import compose_parse_source, extract_invoice_structured_data
 from .ledger import sync_draft_to_ledger
 from .models import BuyerInfo, DraftAttachment, DraftBatch, DraftBatchItem, InvoiceDraft, InvoiceLine
 from .ocr import run_optional_ocr
-from .parsing import extract_buyer_info_from_text, extract_invoice_lines_from_text
 from .source_documents import extract_supported_documents, serialize_document_results
 
 WORKBENCH_ROOT = Path(__file__).resolve().parent.parent / "output" / "workbench" / "tax_invoice_demo"
@@ -32,15 +33,22 @@ def default_workbench_form() -> dict[str, str]:
 
 def create_draft_from_workbench(company_name: str, raw_text: str, note: str, uploaded_files: list[FileStorage]) -> InvoiceDraft | DraftBatch:
     draft_id = uuid4().hex[:10]
+    case_id = draft_id
     draft_dir = draft_directory(draft_id)
     draft_dir.mkdir(parents=True, exist_ok=True)
     attachments = _save_uploads(draft_dir, uploaded_files)
     document_result = _run_document_extraction(draft_dir, attachments)
     ocr_result = _run_draft_ocr(draft_dir, attachments)
-    parse_source = _compose_parse_source(raw_text, document_result.combined_text, ocr_result.combined_text)
-    buyer = extract_buyer_info_from_text(parse_source)
+    extraction = extract_invoice_structured_data(
+        raw_text=raw_text,
+        note=note,
+        document_text=document_result.combined_text,
+        ocr_text=ocr_result.combined_text,
+    )
+    parse_source = extraction.parse_source
+    buyer = extraction.buyer
     buyer = _enrich_buyer_from_sheet_context(company_name, buyer, parse_source)
-    lines = extract_invoice_lines_from_text(parse_source)
+    lines = extraction.lines
     invoice_profile = _infer_invoice_profile(parse_source, note=note)
     split_lines = _build_amount_split_lines(
         company_name=company_name,
@@ -52,6 +60,7 @@ def create_draft_from_workbench(company_name: str, raw_text: str, note: str, upl
     if split_lines:
         batch = _create_split_draft_batch(
             batch_id=draft_id,
+            case_id=case_id,
             draft_dir=draft_dir,
             company_name=company_name,
             raw_text=raw_text,
@@ -62,6 +71,9 @@ def create_draft_from_workbench(company_name: str, raw_text: str, note: str, upl
             ocr_result=ocr_result,
             invoice_profile=invoice_profile,
             split_lines=split_lines,
+            extract_strategy=extraction.strategy,
+            llm_provider=extraction.llm_provider,
+            extract_warnings=extraction.warnings,
         )
         return batch
 
@@ -82,6 +94,7 @@ def create_draft_from_workbench(company_name: str, raw_text: str, note: str, upl
 
     draft = InvoiceDraft(
         draft_id=draft_id,
+        case_id=case_id,
         company_name=company_name.strip(),
         buyer=buyer,
         lines=lines,
@@ -101,8 +114,22 @@ def create_draft_from_workbench(company_name: str, raw_text: str, note: str, upl
         source_doc_status=document_result.status,
         source_doc_text=document_result.combined_text,
         source_doc_note=document_result.note,
+        extract_strategy=extraction.strategy,
+        llm_provider=extraction.llm_provider,
+        extract_warnings=extraction.warnings,
     )
     save_draft(draft)
+    record_case_event(
+        case_id=draft.case_id,
+        draft_id=draft.draft_id,
+        event_type="draft_created",
+        payload={
+            **draft_snapshot(draft),
+            "attachment_count": len(attachments),
+            "source_doc_status": document_result.status,
+            "ocr_status": ocr_result.status,
+        },
+    )
     return draft
 
 
@@ -126,10 +153,16 @@ def update_draft_from_form(
     attachments = [*existing.source_images, *_save_uploads(draft_directory(draft_id), uploaded_files)]
     document_result = _run_document_extraction(draft_directory(draft_id), attachments)
     ocr_result = _run_draft_ocr(draft_directory(draft_id), attachments)
-    parse_source = _compose_parse_source(raw_text, document_result.combined_text, ocr_result.combined_text)
-    inferred_buyer = extract_buyer_info_from_text(parse_source)
+    extraction = extract_invoice_structured_data(
+        raw_text=raw_text,
+        note=note,
+        document_text=document_result.combined_text,
+        ocr_text=ocr_result.combined_text,
+    )
+    parse_source = extraction.parse_source
+    inferred_buyer = extraction.buyer
     inferred_buyer = _enrich_buyer_from_sheet_context(company_name, inferred_buyer, parse_source)
-    inferred_lines = extract_invoice_lines_from_text(parse_source)
+    inferred_lines = extraction.lines
     inferred_profile = _infer_invoice_profile(parse_source, note=note)
     resolved_buyer = BuyerInfo(
         name=buyer.name or inferred_buyer.name,
@@ -163,6 +196,7 @@ def update_draft_from_form(
 
     draft = InvoiceDraft(
         draft_id=draft_id,
+        case_id=existing.case_id or draft_id,
         company_name=company_name.strip(),
         buyer=resolved_buyer,
         lines=resolved_lines,
@@ -182,8 +216,28 @@ def update_draft_from_form(
         source_doc_status=document_result.status,
         source_doc_text=document_result.combined_text,
         source_doc_note=document_result.note,
+        extract_strategy=extraction.strategy,
+        llm_provider=extraction.llm_provider,
+        extract_warnings=extraction.warnings,
     )
     save_draft(draft)
+    edit_diffs = diff_drafts(existing, draft)
+    record_case_event(
+        case_id=draft.case_id,
+        draft_id=draft.draft_id,
+        event_type="draft_updated",
+        payload={
+            **draft_snapshot(draft),
+            "diff_count": len(edit_diffs),
+        },
+    )
+    if edit_diffs:
+        record_case_event(
+            case_id=draft.case_id,
+            draft_id=draft.draft_id,
+            event_type="manual_edits_recorded",
+            payload={"diffs": edit_diffs},
+        )
     return draft
 
 
@@ -224,6 +278,7 @@ def save_draft(draft: InvoiceDraft) -> None:
     draft_dir.mkdir(parents=True, exist_ok=True)
     payload = {
         "draft_id": draft.draft_id,
+        "case_id": draft.case_id,
         "company_name": draft.company_name,
         "buyer": asdict(draft.buyer),
         "lines": [asdict(line) for line in draft.lines],
@@ -243,6 +298,9 @@ def save_draft(draft: InvoiceDraft) -> None:
         "source_doc_status": draft.source_doc_status,
         "source_doc_text": draft.source_doc_text,
         "source_doc_note": draft.source_doc_note,
+        "extract_strategy": draft.extract_strategy,
+        "llm_provider": draft.llm_provider,
+        "extract_warnings": draft.extract_warnings,
     }
     (draft_dir / "draft.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     (draft_dir / "raw_text.txt").write_text(draft.raw_text, encoding="utf-8")
@@ -270,6 +328,7 @@ def save_draft_batch(batch: DraftBatch) -> None:
     batch_dir.mkdir(parents=True, exist_ok=True)
     payload = {
         "batch_id": batch.batch_id,
+        "case_id": batch.case_id,
         "company_name": batch.company_name,
         "created_at": batch.created_at,
         "items": [asdict(item) for item in batch.items],
@@ -292,6 +351,7 @@ def load_draft_batch(batch_id: str) -> DraftBatch | None:
     payload = json.loads(batch_path.read_text(encoding="utf-8"))
     return DraftBatch(
         batch_id=payload["batch_id"],
+        case_id=payload.get("case_id", payload["batch_id"]),
         company_name=payload.get("company_name", ""),
         created_at=payload.get("created_at", ""),
         items=[DraftBatchItem(**item) for item in payload.get("items", [])],
@@ -312,6 +372,7 @@ def load_draft(draft_id: str) -> InvoiceDraft | None:
     payload = json.loads(draft_path.read_text(encoding="utf-8"))
     return InvoiceDraft(
         draft_id=payload["draft_id"],
+        case_id=payload.get("case_id", payload["draft_id"]),
         company_name=payload.get("company_name", ""),
         buyer=BuyerInfo(**payload.get("buyer", {})),
         lines=[InvoiceLine(**line) for line in payload.get("lines", [])],
@@ -331,6 +392,9 @@ def load_draft(draft_id: str) -> InvoiceDraft | None:
         source_doc_status=payload.get("source_doc_status", "not_requested"),
         source_doc_text=payload.get("source_doc_text", ""),
         source_doc_note=payload.get("source_doc_note", ""),
+        extract_strategy=payload.get("extract_strategy", "rules_only"),
+        llm_provider=payload.get("llm_provider", ""),
+        extract_warnings=payload.get("extract_warnings", []),
     )
 
 
@@ -341,6 +405,7 @@ def draft_directory(draft_id: str) -> Path:
 def _create_split_draft_batch(
     *,
     batch_id: str,
+    case_id: str,
     draft_dir: Path,
     company_name: str,
     raw_text: str,
@@ -351,6 +416,9 @@ def _create_split_draft_batch(
     ocr_result,
     invoice_profile: dict[str, str],
     split_lines: list[InvoiceLine],
+    extract_strategy: str,
+    llm_provider: str,
+    extract_warnings: list[str],
 ) -> DraftBatch:
     batch_issues = [
         "当前材料命中了“一份输入 -> 多张草稿”规则；系统已按金额自动拆成多张待复核草稿。",
@@ -383,6 +451,7 @@ def _create_split_draft_batch(
         child_issues.insert(0, "本草稿由金额拆票规则自动生成；请复核项目名称、税率和是否确实需要分两张票开具。")
         child_draft = InvoiceDraft(
             draft_id=child_draft_id,
+            case_id=case_id,
             company_name=company_name.strip(),
             buyer=buyer,
             lines=enriched_lines,
@@ -402,8 +471,18 @@ def _create_split_draft_batch(
             source_doc_status=document_result.status,
             source_doc_text=document_result.combined_text,
             source_doc_note=document_result.note,
+            extract_strategy=extract_strategy,
+            llm_provider=llm_provider,
+            extract_warnings=list(extract_warnings),
         )
         save_draft(child_draft)
+        record_case_event(
+            case_id=case_id,
+            draft_id=child_draft_id,
+            batch_id=batch_id,
+            event_type="split_child_draft_created",
+            payload=draft_snapshot(child_draft),
+        )
         items.append(
             DraftBatchItem(
                 draft_id=child_draft_id,
@@ -418,6 +497,7 @@ def _create_split_draft_batch(
 
     batch = DraftBatch(
         batch_id=batch_id,
+        case_id=case_id,
         company_name=company_name.strip(),
         created_at=datetime.now().isoformat(timespec="seconds"),
         items=items,
@@ -430,6 +510,12 @@ def _create_split_draft_batch(
         special_business=invoice_profile["special_business"],
     )
     save_draft_batch(batch)
+    record_case_event(
+        case_id=case_id,
+        batch_id=batch_id,
+        event_type="draft_batch_created",
+        payload=batch_snapshot(batch),
+    )
     return batch
 
 
@@ -537,39 +623,45 @@ def _write_workbook(path: Path, draft: InvoiceDraft) -> None:
         sheet.column_dimensions[column].width = width
 
     meta = workbook.create_sheet("来源")
-    meta["A1"] = "草稿ID"
-    meta["B1"] = draft.draft_id
-    meta["A2"] = "纳税主体"
-    meta["B2"] = draft.company_name
-    meta["A3"] = "购买方名称"
-    meta["B3"] = draft.buyer.name
-    meta["A4"] = "购买方税号"
-    meta["B4"] = draft.buyer.tax_id
-    meta["A5"] = "生成时间"
-    meta["B5"] = draft.created_at
-    meta["A6"] = "票种配置"
-    meta["B6"] = f"{draft.invoice_medium} / {draft.invoice_kind}" + (f" / {draft.special_business}" if draft.special_business else "")
-    meta["A7"] = "原始输入"
-    meta["B7"] = draft.raw_text
-    meta["A8"] = "备注"
-    meta["B8"] = draft.note
-    meta["A9"] = "附件"
-    meta["B9"] = "\n".join(item.original_name for item in draft.source_images)
-    meta["A10"] = "文档解析状态"
-    meta["B10"] = draft.source_doc_status
-    meta["A11"] = "文档解析备注"
-    meta["B11"] = draft.source_doc_note
-    meta["A12"] = "识别提醒"
-    meta["B12"] = "\n".join(draft.issues)
-    meta["A13"] = "OCR 状态"
-    meta["B13"] = draft.ocr_status
-    meta["A14"] = "OCR 引擎"
-    meta["B14"] = draft.ocr_engine
-    meta["A15"] = "OCR 备注"
-    meta["B15"] = draft.ocr_note
+    meta["A1"] = "Case ID"
+    meta["B1"] = draft.case_id
+    meta["A2"] = "草稿ID"
+    meta["B2"] = draft.draft_id
+    meta["A3"] = "纳税主体"
+    meta["B3"] = draft.company_name
+    meta["A4"] = "购买方名称"
+    meta["B4"] = draft.buyer.name
+    meta["A5"] = "购买方税号"
+    meta["B5"] = draft.buyer.tax_id
+    meta["A6"] = "生成时间"
+    meta["B6"] = draft.created_at
+    meta["A7"] = "票种配置"
+    meta["B7"] = f"{draft.invoice_medium} / {draft.invoice_kind}" + (f" / {draft.special_business}" if draft.special_business else "")
+    meta["A8"] = "抽取策略"
+    meta["B8"] = draft.extract_strategy
+    meta["A9"] = "LLM Provider"
+    meta["B9"] = draft.llm_provider
+    meta["A10"] = "原始输入"
+    meta["B10"] = draft.raw_text
+    meta["A11"] = "备注"
+    meta["B11"] = draft.note
+    meta["A12"] = "附件"
+    meta["B12"] = "\n".join(item.original_name for item in draft.source_images)
+    meta["A13"] = "文档解析状态"
+    meta["B13"] = draft.source_doc_status
+    meta["A14"] = "文档解析备注"
+    meta["B14"] = draft.source_doc_note
+    meta["A15"] = "识别提醒"
+    meta["B15"] = "\n".join(draft.issues + draft.extract_warnings)
+    meta["A16"] = "OCR 状态"
+    meta["B16"] = draft.ocr_status
+    meta["A17"] = "OCR 引擎"
+    meta["B17"] = draft.ocr_engine
+    meta["A18"] = "OCR 备注"
+    meta["B18"] = draft.ocr_note
     meta.column_dimensions["A"].width = 14
     meta.column_dimensions["B"].width = 90
-    for row in range(1, 16):
+    for row in range(1, 19):
         meta[f"B{row}"].alignment = Alignment(wrap_text=True, vertical="top")
 
     workbook.save(path)

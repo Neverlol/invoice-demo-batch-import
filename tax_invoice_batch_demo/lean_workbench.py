@@ -28,6 +28,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PACKAGE_ROOT))
 
 from tax_invoice_demo.models import BuyerInfo, DraftBatch, InvoiceDraft, InvoiceLine  # noqa: E402
+from tax_invoice_demo.case_events import batch_snapshot, draft_snapshot, record_case_event  # noqa: E402
 from tax_invoice_demo.workbench import (  # noqa: E402
     create_draft_from_workbench,
     draft_directory,
@@ -43,6 +44,7 @@ SUCCESS_LEDGER_XLSX = BATCH_OUTPUT_ROOT / "批量导入成功明细.xlsx"
 
 SUCCESS_LEDGER_HEADERS = [
     "recorded_at",
+    "case_id",
     "draft_id",
     "company_name",
     "invoice_kind",
@@ -107,12 +109,24 @@ def export_draft_template(draft: InvoiceDraft) -> dict[str, Any]:
     invoice = invoice_from_workbench_draft(draft, serial_no=draft.draft_id)
     export_template_invoices([invoice], output_path)
     issues = validate_batch_workbook(output_path)
-    return {
+    result = {
         "output_path": output_path,
         "validation_issues": [asdict(issue) for issue in issues],
         "error_count": sum(1 for issue in issues if issue.level == "error"),
         "warning_count": sum(1 for issue in issues if issue.level == "warning"),
     }
+    record_case_event(
+        case_id=draft.case_id,
+        draft_id=draft.draft_id,
+        event_type="template_exported",
+        payload={
+            **draft_snapshot(draft),
+            "output_path": str(output_path),
+            "error_count": result["error_count"],
+            "warning_count": result["warning_count"],
+        },
+    )
+    return result
 
 
 def export_batch_template(batch_id: str) -> dict[str, Any]:
@@ -121,20 +135,46 @@ def export_batch_template(batch_id: str) -> dict[str, Any]:
     output_path = BATCH_OUTPUT_ROOT / f"{batch_id}_batch_import.xlsx"
     export_saved_workbench_items([batch_id], output_path)
     issues = validate_batch_workbook(output_path)
-    return {
+    result = {
         "output_path": output_path,
         "validation_issues": [asdict(issue) for issue in issues],
         "error_count": sum(1 for issue in issues if issue.level == "error"),
         "warning_count": sum(1 for issue in issues if issue.level == "warning"),
     }
+    batch = load_draft_batch(batch_id)
+    if batch is not None:
+        record_case_event(
+            case_id=batch.case_id,
+            batch_id=batch.batch_id,
+            event_type="batch_template_exported",
+            payload={
+                **batch_snapshot(batch),
+                "output_path": str(output_path),
+                "error_count": result["error_count"],
+                "warning_count": result["warning_count"],
+            },
+        )
+    return result
 
 
-def parse_failure_file(file: FileStorage) -> dict[str, Any]:
+def parse_failure_file(file: FileStorage, *, draft: InvoiceDraft | None = None) -> dict[str, Any]:
     BATCH_OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     safe_name = Path(file.filename or "failure.xlsx").name
     target = BATCH_OUTPUT_ROOT / f"failure_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_name}"
     file.save(target)
-    return build_failure_report(target)
+    report = build_failure_report(target)
+    if draft is not None:
+        record_case_event(
+            case_id=draft.case_id,
+            draft_id=draft.draft_id,
+            event_type="failure_report_uploaded",
+            payload={
+                "file_name": safe_name,
+                "stored_path": str(target),
+                "report": report,
+            },
+        )
+    return report
 
 
 def record_success_to_ledger(draft: InvoiceDraft) -> Path:
@@ -146,6 +186,7 @@ def record_success_to_ledger(draft: InvoiceDraft) -> Path:
         rows.append(
             {
                 "recorded_at": recorded_at,
+                "case_id": draft.case_id,
                 "draft_id": draft.draft_id,
                 "company_name": draft.company_name,
                 "invoice_kind": draft.invoice_kind,
@@ -166,6 +207,15 @@ def record_success_to_ledger(draft: InvoiceDraft) -> Path:
             }
         )
     _write_success_rows(rows)
+    record_case_event(
+        case_id=draft.case_id,
+        draft_id=draft.draft_id,
+        event_type="success_recorded",
+        payload={
+            **draft_snapshot(draft),
+            "recorded_at": recorded_at,
+        },
+    )
     return SUCCESS_LEDGER_XLSX
 
 

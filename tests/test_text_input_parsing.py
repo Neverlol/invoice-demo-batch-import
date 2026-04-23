@@ -1,8 +1,10 @@
 import tempfile
 import unittest
 from pathlib import Path
+import os
 
 from tax_invoice_demo.parsing import extract_buyer_info_from_text, extract_invoice_lines_from_text
+import tax_invoice_demo.case_events as case_events_module
 import tax_invoice_demo.coding_library as coding_library_module
 import tax_invoice_demo.ledger as ledger_module
 import tax_invoice_demo.workbench as workbench_module
@@ -57,6 +59,9 @@ class TextInputParsingTest(unittest.TestCase):
             lean_workbench_module.SUCCESS_LEDGER_CSV,
             lean_workbench_module.SUCCESS_LEDGER_XLSX,
         )
+        self.old_event_root = case_events_module.EVENT_ROOT
+        self.old_sync_endpoint = os.environ.get("TAX_INVOICE_SYNC_ENDPOINT")
+        self.old_sync_token = os.environ.get("TAX_INVOICE_SYNC_TOKEN")
 
         workbench_module.WORKBENCH_ROOT = self.temp_path / "workbench"
         ledger_module.LEDGER_ROOT = self.temp_path / "ledger"
@@ -66,6 +71,9 @@ class TextInputParsingTest(unittest.TestCase):
         lean_workbench_module.BATCH_OUTPUT_ROOT = self.temp_path / "batch_import_preview"
         lean_workbench_module.SUCCESS_LEDGER_CSV = lean_workbench_module.BATCH_OUTPUT_ROOT / "批量导入成功明细.csv"
         lean_workbench_module.SUCCESS_LEDGER_XLSX = lean_workbench_module.BATCH_OUTPUT_ROOT / "批量导入成功明细.xlsx"
+        case_events_module.EVENT_ROOT = self.temp_path / "events"
+        os.environ.pop("TAX_INVOICE_SYNC_ENDPOINT", None)
+        os.environ.pop("TAX_INVOICE_SYNC_TOKEN", None)
 
     def tearDown(self):
         workbench_module.WORKBENCH_ROOT = self.old_workbench_root
@@ -80,6 +88,15 @@ class TextInputParsingTest(unittest.TestCase):
             lean_workbench_module.SUCCESS_LEDGER_CSV,
             lean_workbench_module.SUCCESS_LEDGER_XLSX,
         ) = self.old_success_paths
+        case_events_module.EVENT_ROOT = self.old_event_root
+        if self.old_sync_endpoint is None:
+            os.environ.pop("TAX_INVOICE_SYNC_ENDPOINT", None)
+        else:
+            os.environ["TAX_INVOICE_SYNC_ENDPOINT"] = self.old_sync_endpoint
+        if self.old_sync_token is None:
+            os.environ.pop("TAX_INVOICE_SYNC_TOKEN", None)
+        else:
+            os.environ["TAX_INVOICE_SYNC_TOKEN"] = self.old_sync_token
         self.tempdir.cleanup()
         coding_library_module.load_formal_coding_library.cache_clear()
 
@@ -104,6 +121,7 @@ class TextInputParsingTest(unittest.TestCase):
     def test_simple_text_input_is_enriched_by_backend_coding_library(self):
         draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", SIMPLE_TEXT_INPUT, "", [])
 
+        self.assertEqual(draft.case_id, draft.draft_id)
         self.assertEqual(len(draft.lines), 3)
         self.assertEqual([line.tax_category for line in draft.lines], ["冷冻饮品", "冷冻饮品", "冷冻饮品"])
         self.assertEqual(

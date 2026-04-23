@@ -102,6 +102,66 @@
 
 这样能避免单次误改、不同纳税人税率差异、客户特殊口径直接污染自动命中规则。
 
+## Case 数据回流
+
+新线已经补上本地 `case` 事件队列，默认写入：
+
+- `output/workbench/tax_invoice_demo/_events/pending_events.jsonl`
+- `output/workbench/tax_invoice_demo/_events/cases/<case_id>.jsonl`
+- `output/workbench/tax_invoice_demo/_events/last_sync_state.json`
+
+如果暂时没有配置中心服务，这些事件只会留在本地，不影响工作台使用。
+
+如果要开始把种子客户试用数据回收到中心端，配置以下环境变量即可：
+
+- `TAX_INVOICE_SYNC_ENDPOINT`
+- `TAX_INVOICE_SYNC_TOKEN`
+- `TAX_INVOICE_SYNC_TENANT`（可选）
+- `TAX_INVOICE_SYNC_TIMEOUT`（可选，默认 8 秒）
+
+手动补发命令：
+
+```bash
+python3 tools/flush_case_events.py
+```
+
+## 最小中心接收端
+
+当前仓库已内置一个最小中心接收端，用于一期接住种子客户的 `case` 事件数据。
+
+启动方式：
+
+```bash
+python3 start_sync_center.py
+```
+
+默认地址：
+
+```text
+http://127.0.0.1:5021
+```
+
+主要接口：
+
+- `GET /api/invoice/events/health`
+- `POST /api/invoice/events`
+- `GET /api/invoice/tenants/<tenant>/events`
+- `GET /api/invoice/tenants/<tenant>/cases/<case_id>`
+
+如果需要开启 token 鉴权，可设置：
+
+- `TAX_INVOICE_CENTER_TOKEN`
+- `TAX_INVOICE_CENTER_HOST`
+- `TAX_INVOICE_CENTER_PORT`
+- `TAX_INVOICE_CENTER_DB`
+
+接收端当前使用：
+
+- `Flask`
+- `SQLite`
+
+它是第一阶段的最小中心数据平面，不是最终大平台。当前目的只有一个：**先把种子客户真实业务数据接住并可追溯。**
+
 ## 当前可直接使用的命令
 
 ### 0. Windows 首次部署

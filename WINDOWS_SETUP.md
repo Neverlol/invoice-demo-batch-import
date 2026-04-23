@@ -62,10 +62,35 @@ C:\invoice-demo-batch-import
 - 草稿与上传原始材料：`output\workbench\tax_invoice_demo\<draft_id>`
 - 草稿累计明细：`output\workbench\tax_invoice_demo\累计发票明细表.xlsx`
 - 赋码反馈候选池：`output\workbench\tax_invoice_demo\赋码反馈候选池.csv`
+- Case 事件队列：`output\workbench\tax_invoice_demo\_events`
 - 批量导入模板和失败明细：`output\batch_import_preview`
 - 批量导入成功明细：`output\batch_import_preview\批量导入成功明细.xlsx`
 
 第一阶段试用时，建议每天或每周备份整个 `output` 文件夹。不要只备份生成的模板，因为赋码反馈候选池和累计明细都在 `output` 里面。
+
+## 可选：把试用数据回传到中心端
+
+如果你已经把中心接收端跑起来，例如在 Mac 上执行：
+
+```bash
+python3 start_sync_center.py
+```
+
+那么可以在 Windows 的终端里先设置：
+
+```bat
+set TAX_INVOICE_SYNC_ENDPOINT=http://你的Mac或服务器地址:5021/api/invoice/events
+set TAX_INVOICE_SYNC_TOKEN=你的token
+set TAX_INVOICE_SYNC_TENANT=shenyang-seed
+```
+
+之后工作台写入事件时会自动尝试补发。
+
+也可以手动执行：
+
+```bat
+python tools\\flush_case_events.py
+```
 
 ## 常见问题
 
