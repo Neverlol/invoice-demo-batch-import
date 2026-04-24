@@ -1,0 +1,10 @@
+{
+  "enabled": false,
+  "provider": "minimax_openai",
+  "region": "global",
+  "endpoint": "https://api.minimax.io/v1/chat/completions",
+  "model": "MiniMax-M2.7",
+  "api_key_env": "TAX_INVOICE_MINIMAX_API_KEY",
+  "timeout_seconds": 45,
+  "max_retries": 2
+}

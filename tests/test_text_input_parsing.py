@@ -7,6 +7,7 @@ from tax_invoice_demo.parsing import extract_buyer_info_from_text, extract_invoi
 import tax_invoice_demo.case_events as case_events_module
 import tax_invoice_demo.coding_library as coding_library_module
 import tax_invoice_demo.ledger as ledger_module
+import tax_invoice_demo.tax_rule_engine as tax_rule_engine_module
 import tax_invoice_demo.workbench as workbench_module
 import tax_invoice_batch_demo.lean_workbench as lean_workbench_module
 from openpyxl import load_workbook
@@ -41,6 +42,12 @@ MINIMAL_TEXT_INPUT_WITH_TAX_CATEGORY = """辽宁恒润电力科技有限公司
 纳税申报代办*代理记账和税务申报
 """
 
+MINIMAL_INLINE_TEXT_INPUT = "辽宁恒润电力科技有限公司 91210102MABWM3X12T 开普票 代理记账和税务申报 500元"
+
+MINIMAL_LABELED_INLINE_TEXT_INPUT = "给辽宁恒润电力科技有限公司开普通发票，税号91210102MABWM3X12T，项目：代理记账和税务申报，金额500"
+
+MINIMAL_INLINE_TEXT_INPUT_WITH_RATE = "辽宁恒润电力科技有限公司 91210102MABWM3X12T 开普票 代理记账和税务申报 500元 6%"
+
 
 class TextInputParsingTest(unittest.TestCase):
     def setUp(self):
@@ -60,6 +67,8 @@ class TextInputParsingTest(unittest.TestCase):
             lean_workbench_module.SUCCESS_LEDGER_XLSX,
         )
         self.old_event_root = case_events_module.EVENT_ROOT
+        self.old_learned_rules_path = tax_rule_engine_module.LEARNED_RULES_PATH
+        self.old_tenant_rules_path = tax_rule_engine_module.TENANT_RULES_PATH
         self.old_sync_endpoint = os.environ.get("TAX_INVOICE_SYNC_ENDPOINT")
         self.old_sync_token = os.environ.get("TAX_INVOICE_SYNC_TOKEN")
 
@@ -72,6 +81,10 @@ class TextInputParsingTest(unittest.TestCase):
         lean_workbench_module.SUCCESS_LEDGER_CSV = lean_workbench_module.BATCH_OUTPUT_ROOT / "批量导入成功明细.csv"
         lean_workbench_module.SUCCESS_LEDGER_XLSX = lean_workbench_module.BATCH_OUTPUT_ROOT / "批量导入成功明细.xlsx"
         case_events_module.EVENT_ROOT = self.temp_path / "events"
+        tax_rule_engine_module.LEARNED_RULES_PATH = self.temp_path / "ledger" / "本地即时学习赋码规则.csv"
+        tax_rule_engine_module.TENANT_RULES_PATH = self.temp_path / "ledger" / "客户同步赋码规则.csv"
+        tax_rule_engine_module.load_tenant_coding_library.cache_clear()
+        tax_rule_engine_module.load_learned_coding_library.cache_clear()
         os.environ.pop("TAX_INVOICE_SYNC_ENDPOINT", None)
         os.environ.pop("TAX_INVOICE_SYNC_TOKEN", None)
 
@@ -89,6 +102,10 @@ class TextInputParsingTest(unittest.TestCase):
             lean_workbench_module.SUCCESS_LEDGER_XLSX,
         ) = self.old_success_paths
         case_events_module.EVENT_ROOT = self.old_event_root
+        tax_rule_engine_module.LEARNED_RULES_PATH = self.old_learned_rules_path
+        tax_rule_engine_module.TENANT_RULES_PATH = self.old_tenant_rules_path
+        tax_rule_engine_module.load_tenant_coding_library.cache_clear()
+        tax_rule_engine_module.load_learned_coding_library.cache_clear()
         if self.old_sync_endpoint is None:
             os.environ.pop("TAX_INVOICE_SYNC_ENDPOINT", None)
         else:
@@ -206,6 +223,42 @@ class TextInputParsingTest(unittest.TestCase):
         self.assertEqual(draft.lines[0].tax_code, "")
         self.assertEqual(draft.lines[0].normalized_tax_rate(), "3%")
 
+    def test_minimal_inline_text_input_extracts_buyer_and_detail_line(self):
+        buyer = extract_buyer_info_from_text(MINIMAL_INLINE_TEXT_INPUT)
+        lines = extract_invoice_lines_from_text(MINIMAL_INLINE_TEXT_INPUT)
+
+        self.assertEqual(buyer.name, "辽宁恒润电力科技有限公司")
+        self.assertEqual(buyer.tax_id, "91210102MABWM3X12T")
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0].project_name, "代理记账和税务申报")
+        self.assertEqual(lines[0].amount_with_tax, "500")
+        self.assertEqual(lines[0].normalized_tax_rate(), "3%")
+
+        draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", MINIMAL_INLINE_TEXT_INPUT, "", [])
+        self.assertEqual(draft.invoice_kind, "普通发票")
+        self.assertEqual(draft.buyer.name, "辽宁恒润电力科技有限公司")
+        self.assertEqual(draft.buyer.tax_id, "91210102MABWM3X12T")
+        self.assertEqual(len(draft.lines), 1)
+        self.assertEqual(draft.lines[0].project_name, "代理记账和税务申报")
+        self.assertEqual(draft.lines[0].resolved_amount_with_tax(), "500.00")
+
+    def test_minimal_labeled_inline_text_input_extracts_buyer_and_detail_line(self):
+        buyer = extract_buyer_info_from_text(MINIMAL_LABELED_INLINE_TEXT_INPUT)
+        lines = extract_invoice_lines_from_text(MINIMAL_LABELED_INLINE_TEXT_INPUT)
+
+        self.assertEqual(buyer.name, "辽宁恒润电力科技有限公司")
+        self.assertEqual(buyer.tax_id, "91210102MABWM3X12T")
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0].project_name, "代理记账和税务申报")
+        self.assertEqual(lines[0].amount_with_tax, "500")
+
+    def test_minimal_inline_text_input_respects_explicit_tax_rate(self):
+        lines = extract_invoice_lines_from_text(MINIMAL_INLINE_TEXT_INPUT_WITH_RATE)
+
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0].project_name, "代理记账和税务申报")
+        self.assertEqual(lines[0].normalized_tax_rate(), "6%")
+
     def test_minimal_text_with_invoice_face_category_keeps_category_pending_code(self):
         draft = workbench_module.create_draft_from_workbench(
             "吉林省风生水起商贸有限公司",
@@ -241,6 +294,92 @@ class TextInputParsingTest(unittest.TestCase):
             self.assertEqual(detail_values["税率"], "0.03")
         finally:
             workbook.close()
+
+    def test_manual_coding_fix_is_learned_immediately_for_next_draft(self):
+        draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", MINIMAL_TEXT_INPUT, "", [])
+        self.assertEqual(draft.lines[0].tax_category, "")
+        self.assertEqual(draft.lines[0].tax_code, "")
+
+        form = _form_from_draft(
+            draft,
+            tax_category="纳税申报代办",
+            tax_code="3040802050000000000",
+            tax_rate="3%",
+        )
+        saved = lean_workbench_module.save_lean_draft_from_form(draft.draft_id, form, [])
+        self.assertEqual(saved.lines[0].tax_category, "纳税申报代办")
+        self.assertEqual(saved.lines[0].tax_code, "3040802050000000000")
+        self.assertTrue(tax_rule_engine_module.LEARNED_RULES_PATH.exists())
+
+        next_draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", MINIMAL_TEXT_INPUT, "", [])
+        self.assertEqual(next_draft.lines[0].tax_category, "纳税申报代办")
+        self.assertEqual(next_draft.lines[0].tax_code, "3040802050000000000")
+        self.assertEqual(next_draft.lines[0].normalized_tax_rate(), "3%")
+        self.assertIn("命中", next_draft.lines[0].coding_reference)
+
+    def test_synced_tenant_rules_override_local_learned_rules(self):
+        draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", MINIMAL_TEXT_INPUT, "", [])
+        saved = lean_workbench_module.save_lean_draft_from_form(
+            draft.draft_id,
+            _form_from_draft(
+                draft,
+                tax_category="本地错误分类",
+                tax_code="1000000000000000000",
+                tax_rate="3%",
+            ),
+            [],
+        )
+        self.assertEqual(saved.lines[0].tax_category, "本地错误分类")
+
+        tax_rule_engine_module.write_tenant_rule_package(
+            [
+                {
+                    "raw_alias": "代理记账和税务申报",
+                    "normalized_invoice_name": "代理记账和税务申报",
+                    "tax_category": "云端审核分类",
+                    "tax_code": "3040802050000000000",
+                    "tax_treatment_or_rate": "0.03",
+                }
+            ],
+            package_id="rules-test",
+            version="2026-04-24-a",
+            tenant="seed",
+        )
+
+        next_draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", MINIMAL_TEXT_INPUT, "", [])
+        self.assertEqual(next_draft.lines[0].tax_category, "云端审核分类")
+        self.assertEqual(next_draft.lines[0].tax_code, "3040802050000000000")
+
+def _form_from_draft(draft, *, tax_category: str, tax_code: str, tax_rate: str):
+    from werkzeug.datastructures import MultiDict
+
+    form = MultiDict(
+        [
+            ("company_name", draft.company_name),
+            ("raw_text", draft.raw_text),
+            ("note", draft.note),
+            ("invoice_kind", draft.invoice_kind),
+            ("special_business", draft.special_business),
+            ("buyer_name", draft.buyer.name),
+            ("buyer_tax_id", draft.buyer.tax_id),
+            ("buyer_address", draft.buyer.address),
+            ("buyer_phone", draft.buyer.phone),
+            ("buyer_bank_name", draft.buyer.bank_name),
+            ("buyer_bank_account", draft.buyer.bank_account),
+        ]
+    )
+    for line in draft.lines:
+        form.add("line_project_name", line.project_name)
+        form.add("line_tax_category", tax_category)
+        form.add("line_tax_code", tax_code)
+        form.add("line_specification", line.specification)
+        form.add("line_unit", line.unit)
+        form.add("line_quantity", line.quantity)
+        form.add("line_unit_price", line.unit_price)
+        form.add("line_amount_with_tax", line.resolved_amount_with_tax())
+        form.add("line_tax_rate", tax_rate)
+        form.add("line_coding_reference", line.coding_reference)
+    return form
 
 
 if __name__ == "__main__":

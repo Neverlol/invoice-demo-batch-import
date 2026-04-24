@@ -104,6 +104,9 @@ class InvoiceTask:
     invoice_kind: str = "普通发票"
     invoice_medium: str = "电子发票"
     special_business: str = ""
+    extract_strategy: str = "rules_only"
+    llm_provider: str = ""
+    extract_warnings: list[str] = field(default_factory=list)
     execution_backend: str = field(default_factory=default_execution_backend)
     session_start_mode: str = "manual_prelogged"
     browser_session_mode: str = "operator_persistent"

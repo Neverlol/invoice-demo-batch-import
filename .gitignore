@@ -21,6 +21,7 @@ output/
 *.sqlite3
 *.db
 sync_client.local.json
+llm_client.local.json
 pending_events.jsonl
 pending_uploads/
 last_sync_state.json

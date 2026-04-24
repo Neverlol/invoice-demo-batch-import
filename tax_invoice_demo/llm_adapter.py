@@ -3,13 +3,18 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+from typing import Any, Optional
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-DEFAULT_MINIMAX_ENDPOINT = "https://api.minimax.io/v1/chat/completions"
+DEFAULT_MINIMAX_GLOBAL_ENDPOINT = "https://api.minimax.io/v1/chat/completions"
+DEFAULT_MINIMAX_CHINA_ENDPOINT = "https://api.minimaxi.com/v1/chat/completions"
+DEFAULT_MINIMAX_ENDPOINT = DEFAULT_MINIMAX_GLOBAL_ENDPOINT
 DEFAULT_MINIMAX_MODEL = "MiniMax-M2.7"
+SUPPORTED_MINIMAX_PROVIDERS = {"minimax", "minimax_openai", "minimax_m27"}
+AGENT_ORCHESTRATOR_PROVIDERS = {"openclaw", "hermes", "openclaw_minimax", "hermes_minimax"}
 
 EXTRACT_INVOICE_INFO_SCHEMA = {
     "type": "object",
@@ -26,12 +31,42 @@ class LLMResponse:
     parsed_json: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class LLMConfig:
+    enabled: bool
+    provider: str
+    region: str
+    endpoint: str
+    model: str
+    api_key: str
+    timeout_seconds: int
+    max_retries: int
+    config_path: str = ""
+
+
+@dataclass(frozen=True)
+class LLMConfigDiagnostic:
+    enabled: bool
+    provider: str
+    region: str
+    endpoint: str
+    model: str
+    api_key_configured: bool
+    api_key_preview: str
+    timeout_seconds: int
+    max_retries: int
+    config_path: str
+    ready: bool
+    issues: list[str]
+
+
 class LLMAdapterError(RuntimeError):
     pass
 
 
 class BaseLLMAdapter:
     provider_name = "disabled"
+    max_retries = 2
 
     @property
     def is_enabled(self) -> bool:
@@ -51,14 +86,12 @@ class NullLLMAdapter(BaseLLMAdapter):
 class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
     provider_name = "minimax_openai"
 
-    def __init__(self) -> None:
-        self.api_key = (
-            os.getenv("TAX_INVOICE_LLM_API_KEY")
-            or os.getenv("TAX_INVOICE_MINIMAX_API_KEY")
-            or os.getenv("OPENAI_API_KEY")
-        )
-        self.endpoint = os.getenv("TAX_INVOICE_LLM_ENDPOINT") or DEFAULT_MINIMAX_ENDPOINT
-        self.model = os.getenv("TAX_INVOICE_LLM_MODEL") or DEFAULT_MINIMAX_MODEL
+    def __init__(self, config: LLMConfig) -> None:
+        self.api_key = config.api_key
+        self.endpoint = config.endpoint or DEFAULT_MINIMAX_ENDPOINT
+        self.model = config.model or DEFAULT_MINIMAX_MODEL
+        self.timeout_seconds = config.timeout_seconds
+        self.max_retries = config.max_retries
 
     @property
     def is_enabled(self) -> bool:
@@ -110,7 +143,7 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
             method="POST",
         )
         try:
-            with urlopen(request, timeout=45) as response:
+            with urlopen(request, timeout=self.timeout_seconds) as response:
                 raw_payload = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
             body = exc.read().decode("utf-8", errors="ignore")
@@ -121,10 +154,7 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
             raise LLMAdapterError("MiniMax request timed out.") from exc
 
         content = _extract_openai_content(raw_payload)
-        try:
-            parsed_json = json.loads(content)
-        except json.JSONDecodeError as exc:
-            raise LLMAdapterError(f"MiniMax returned non-JSON content: {content[:200]}") from exc
+        parsed_json = _parse_json_content(content)
         return LLMResponse(
             provider=self.provider_name,
             model=self.model,
@@ -134,16 +164,55 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
 
 
 def get_llm_adapter() -> BaseLLMAdapter:
-    provider = (os.getenv("TAX_INVOICE_LLM_PROVIDER") or "").strip().lower()
-    if provider in {"", "off", "disabled", "none"}:
+    config = load_llm_config()
+    provider = config.provider.strip().lower()
+    if not config.enabled or provider in {"", "off", "disabled", "none"}:
         return NullLLMAdapter()
-    if provider in {"minimax", "minimax_openai", "minimax-coding-plan"}:
-        return MiniMaxOpenAICompatibleAdapter()
+    if provider in SUPPORTED_MINIMAX_PROVIDERS:
+        return MiniMaxOpenAICompatibleAdapter(config)
     return NullLLMAdapter()
+
+
+def diagnose_llm_config() -> LLMConfigDiagnostic:
+    config = load_llm_config()
+    issues: list[str] = []
+    provider = config.provider.strip()
+    enabled = bool(config.enabled and provider.lower() not in {"", "off", "disabled", "none"})
+    if not enabled:
+        issues.append("LLM is disabled.")
+    if enabled and provider.lower() in AGENT_ORCHESTRATOR_PROVIDERS:
+        issues.append(
+            "OpenClaw/Hermes is a later orchestration layer, not the phase-1 LLM provider. "
+            "Use provider=minimax_openai or minimax_m27 for direct MiniMax M2.7 API access."
+        )
+    elif enabled and provider.lower() not in SUPPORTED_MINIMAX_PROVIDERS:
+        issues.append(f"Unsupported provider: {provider}")
+    if enabled and not config.api_key:
+        issues.append("API key is missing.")
+    if enabled and not config.endpoint:
+        issues.append("Endpoint is missing.")
+    if enabled and not config.model:
+        issues.append("Model is missing.")
+    return LLMConfigDiagnostic(
+        enabled=enabled,
+        provider=provider,
+        region=config.region,
+        endpoint=config.endpoint,
+        model=config.model,
+        api_key_configured=bool(config.api_key),
+        api_key_preview=_redact_key(config.api_key),
+        timeout_seconds=config.timeout_seconds,
+        max_retries=config.max_retries,
+        config_path=config.config_path,
+        ready=enabled and not issues,
+        issues=issues,
+    )
 
 
 def validate_extract_invoice_payload(payload: dict[str, Any]) -> list[str]:
     errors: list[str] = []
+    if not isinstance(payload, dict):
+        return ["LLM 返回值必须是 JSON 对象。"]
     for field in EXTRACT_INVOICE_INFO_SCHEMA["required"]:
         if field not in payload:
             errors.append(f"缺少字段: {field}")
@@ -158,7 +227,138 @@ def validate_extract_invoice_payload(payload: dict[str, Any]) -> list[str]:
         for field in EXTRACT_INVOICE_INFO_SCHEMA["line_required"]:
             if field not in line:
                 errors.append(f"项目列表第 {index} 项缺少字段: {field}")
+        amount = str(line.get("金额", "") or "").strip()
+        if amount and not _is_amount_like(amount):
+            errors.append(f"项目列表第 {index} 项金额不是可识别数字: {amount}")
+        tax_rate = str(line.get("税率", "") or "").strip()
+        if tax_rate and not _is_tax_rate_like(tax_rate):
+            errors.append(f"项目列表第 {index} 项税率格式不可识别: {tax_rate}")
     return errors
+
+
+def load_llm_config() -> LLMConfig:
+    file_config = _load_llm_config_file()
+    env_provider = (os.getenv("TAX_INVOICE_LLM_PROVIDER") or "").strip()
+    provider = env_provider or str(file_config.get("provider") or "").strip()
+    enabled = _coerce_enabled(
+        env_value=os.getenv("TAX_INVOICE_LLM_ENABLED"),
+        file_value=file_config.get("enabled"),
+        provider=provider,
+        provider_from_env=bool(env_provider),
+    )
+    api_key_env_name = (os.getenv("TAX_INVOICE_LLM_API_KEY_ENV") or str(file_config.get("api_key_env") or "")).strip()
+    api_key_from_named_env = os.getenv(api_key_env_name) if api_key_env_name else ""
+    api_key = (
+        os.getenv("TAX_INVOICE_LLM_API_KEY")
+        or api_key_from_named_env
+        or os.getenv("TAX_INVOICE_MINIMAX_API_KEY")
+        or os.getenv("OPENAI_API_KEY")
+        or str(file_config.get("api_key") or "")
+    ).strip()
+    region = (os.getenv("TAX_INVOICE_LLM_REGION") or str(file_config.get("region") or "")).strip().lower()
+    explicit_endpoint = (
+        os.getenv("TAX_INVOICE_LLM_ENDPOINT")
+        or str(file_config.get("endpoint") or "")
+    ).strip()
+    endpoint = explicit_endpoint or _default_minimax_endpoint_for_region(region)
+    model = (
+        os.getenv("TAX_INVOICE_LLM_MODEL")
+        or str(file_config.get("model") or "")
+        or DEFAULT_MINIMAX_MODEL
+    ).strip()
+    return LLMConfig(
+        enabled=enabled,
+        provider=provider,
+        region=region,
+        endpoint=endpoint,
+        model=model,
+        api_key=api_key,
+        timeout_seconds=_safe_int(os.getenv("TAX_INVOICE_LLM_TIMEOUT") or file_config.get("timeout_seconds"), default=45, minimum=3),
+        max_retries=_safe_int(os.getenv("TAX_INVOICE_LLM_MAX_RETRIES") or file_config.get("max_retries"), default=2, minimum=1),
+        config_path=str(file_config.get("_config_path") or ""),
+    )
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def _candidate_config_paths() -> list[Path]:
+    explicit = (os.getenv("TAX_INVOICE_LLM_CONFIG") or "").strip()
+    repo_root = _repo_root()
+    candidates: list[Path] = []
+    if explicit:
+        candidates.append(Path(explicit).expanduser())
+    candidates.extend(
+        [
+            repo_root / "llm_client.local.json",
+            repo_root / "llm_client.json",
+        ]
+    )
+    return candidates
+
+
+def _default_minimax_endpoint_for_region(region: str) -> str:
+    if region.strip().lower() in {"cn", "china", "mainland", "zh-cn", "domestic", "国内", "中国"}:
+        return DEFAULT_MINIMAX_CHINA_ENDPOINT
+    return DEFAULT_MINIMAX_GLOBAL_ENDPOINT
+
+
+def _load_llm_config_file() -> dict[str, Any]:
+    for path in _candidate_config_paths():
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        payload["_config_path"] = str(path)
+        return payload
+    return {}
+
+
+def _coerce_enabled(*, env_value: Optional[str], file_value: Any, provider: str, provider_from_env: bool) -> bool:
+    if env_value is not None and env_value.strip():
+        return env_value.strip().lower() not in {"0", "false", "off", "no"}
+    if provider_from_env:
+        return provider.strip().lower() not in {"", "off", "disabled", "none"}
+    if isinstance(file_value, bool):
+        return file_value
+    if isinstance(file_value, str) and file_value.strip():
+        return file_value.strip().lower() not in {"0", "false", "off", "no"}
+    return False
+
+
+def _safe_int(value: Any, *, default: int, minimum: int) -> int:
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, parsed)
+
+
+def _is_amount_like(value: str) -> bool:
+    text = value.strip().replace(",", "").replace("，", "").replace("￥", "").replace("¥", "").replace("元", "")
+    try:
+        float(text)
+        return True
+    except ValueError:
+        return False
+
+
+def _is_tax_rate_like(value: str) -> bool:
+    text = value.strip().replace("％", "%")
+    if text in {"免税", "不征税", "免征增值税"}:
+        return True
+    if text.endswith("%"):
+        text = text[:-1]
+    try:
+        float(text)
+        return True
+    except ValueError:
+        return False
 
 
 def _extract_openai_content(payload: dict[str, Any]) -> str:
@@ -166,3 +366,36 @@ def _extract_openai_content(payload: dict[str, Any]) -> str:
         return str(payload["choices"][0]["message"]["content"]).strip()
     except (KeyError, IndexError, TypeError) as exc:
         raise LLMAdapterError(f"Unexpected MiniMax response shape: {payload}") from exc
+
+
+def _parse_json_content(content: str) -> dict[str, Any]:
+    text = content.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end <= start:
+            raise LLMAdapterError(f"MiniMax returned non-JSON content: {content[:200]}")
+        try:
+            parsed = json.loads(text[start : end + 1])
+        except json.JSONDecodeError as exc:
+            raise LLMAdapterError(f"MiniMax returned non-JSON content: {content[:200]}") from exc
+    if not isinstance(parsed, dict):
+        raise LLMAdapterError("MiniMax returned JSON but it is not an object.")
+    return parsed
+
+
+def _redact_key(value: str) -> str:
+    if not value:
+        return ""
+    if len(value) <= 8:
+        return "*" * len(value)
+    return f"{value[:4]}...{value[-4:]}"

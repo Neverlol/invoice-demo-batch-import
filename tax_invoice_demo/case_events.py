@@ -54,6 +54,7 @@ def draft_snapshot(draft: InvoiceDraft) -> dict:
         "note": draft.note,
         "extract_strategy": draft.extract_strategy,
         "llm_provider": draft.llm_provider,
+        "extract_warnings": list(draft.extract_warnings),
         "issues": list(draft.issues),
         "lines": [asdict(line) for line in draft.lines],
     }
@@ -67,6 +68,9 @@ def batch_snapshot(batch: DraftBatch) -> dict:
         "invoice_kind": batch.invoice_kind,
         "invoice_medium": batch.invoice_medium,
         "special_business": batch.special_business,
+        "extract_strategy": batch.extract_strategy,
+        "llm_provider": batch.llm_provider,
+        "extract_warnings": list(batch.extract_warnings),
         "issue_count": len(batch.issues),
         "item_count": len(batch.items),
         "items": [asdict(item) for item in batch.items],
@@ -165,6 +169,10 @@ def pending_events_path() -> Path:
 
 def last_sync_state_path() -> Path:
     return EVENT_ROOT / "last_sync_state.json"
+
+
+def last_rule_sync_state_path() -> Path:
+    return EVENT_ROOT / "last_rule_sync_state.json"
 
 
 def append_jsonl(path: Path, payload: dict) -> None:

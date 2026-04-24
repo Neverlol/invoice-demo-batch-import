@@ -1,14 +1,36 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
 from .models import InvoiceLine
 from .taxonomy_master import TaxonomyEntry, load_taxonomy_master, suggest_taxonomy
+
+LEARNED_RULES_PATH = Path(__file__).resolve().parent.parent / "output" / "workbench" / "tax_invoice_demo" / "本地即时学习赋码规则.csv"
+TENANT_RULES_PATH = Path(__file__).resolve().parent.parent / "output" / "workbench" / "tax_invoice_demo" / "客户同步赋码规则.csv"
+
+LEARNED_RULE_HEADERS = [
+    "rule_id",
+    "status",
+    "raw_alias",
+    "normalized_invoice_name",
+    "tax_category",
+    "tax_code",
+    "tax_treatment_or_rate",
+    "decision_basis",
+    "confidence",
+    "source_case_ids",
+    "company_name",
+    "created_at",
+    "updated_at",
+    "hit_count",
+]
 
 
 @dataclass(frozen=True)
@@ -17,6 +39,7 @@ class CodingLibraryEntry:
     raw_alias: str
     normalized_invoice_name: str
     tax_category: str
+    tax_code: str
     tax_treatment_or_rate: str
     decision_basis: str
     confidence: str
@@ -71,6 +94,8 @@ class TaxRuleEngine:
                 line.project_name = suggestion.entry.normalized_invoice_name
             if not line.tax_category:
                 line.tax_category = suggestion.entry.tax_category
+            if not line.tax_code and suggestion.entry.tax_code:
+                line.tax_code = suggestion.entry.tax_code
             if _should_replace_tax_rate(
                 line.tax_rate,
                 suggestion.entry.tax_treatment_or_rate,
@@ -94,7 +119,7 @@ class TaxRuleEngine:
             return None
 
         best: tuple[int, CodingLibraryEntry, str, str] | None = None
-        for entry in load_formal_coding_library():
+        for entry in (*load_tenant_coding_library(), *load_learned_coding_library(), *load_formal_coding_library()):
             for alias in entry.aliases:
                 score, matched_on = _match_alias(alias, project_text, context_text)
                 if score <= 0:
@@ -132,6 +157,146 @@ def suggest_line(line: InvoiceLine, *, context_text: str = "") -> CodingSuggesti
     return _TAX_RULE_ENGINE.suggest_line(line, context_text=context_text)
 
 
+def write_learned_rules_from_manual_update(
+    *,
+    before_lines: list[InvoiceLine],
+    after_lines: list[InvoiceLine],
+    case_id: str,
+    draft_id: str,
+    company_name: str,
+) -> list[dict[str, str]]:
+    """Persist user-confirmed coding fixes for immediate reuse on this client."""
+    learned_rows = _read_learned_rule_rows()
+    changed_rows: list[dict[str, str]] = []
+    existing_keys = {_learned_row_key(row): row for row in learned_rows}
+    now = datetime.now().isoformat(timespec="seconds")
+
+    for index, after in enumerate(after_lines):
+        before = before_lines[index] if index < len(before_lines) else InvoiceLine(project_name="", amount_with_tax="")
+        if not _is_learning_candidate(before, after):
+            continue
+        aliases = _learned_aliases(before, after)
+        if not aliases:
+            continue
+        primary_alias = aliases[0]
+        row = {
+            "rule_id": _learned_rule_id(primary_alias, after),
+            "status": "ready",
+            "raw_alias": "、".join(aliases),
+            "normalized_invoice_name": after.project_name.strip(),
+            "tax_category": after.tax_category.strip(),
+            "tax_code": after.tax_code.strip(),
+            "tax_treatment_or_rate": after.normalized_tax_rate(),
+            "decision_basis": "本地即时学习: 草稿复核人工修正后保存",
+            "confidence": "local_confirmed",
+            "source_case_ids": f"learned:{case_id}:{draft_id}:{index + 1}",
+            "company_name": company_name.strip(),
+            "created_at": now,
+            "updated_at": now,
+            "hit_count": "0",
+        }
+        key = _learned_row_key(row)
+        existing = existing_keys.get(key)
+        if existing:
+            existing["raw_alias"] = _merge_alias_text(existing.get("raw_alias", ""), row["raw_alias"])
+            existing["normalized_invoice_name"] = row["normalized_invoice_name"] or existing.get("normalized_invoice_name", "")
+            existing["tax_category"] = row["tax_category"] or existing.get("tax_category", "")
+            existing["tax_code"] = row["tax_code"] or existing.get("tax_code", "")
+            existing["tax_treatment_or_rate"] = row["tax_treatment_or_rate"] or existing.get("tax_treatment_or_rate", "")
+            existing["decision_basis"] = row["decision_basis"]
+            existing["confidence"] = row["confidence"]
+            existing["source_case_ids"] = _append_source_case(existing.get("source_case_ids", ""), row["source_case_ids"])
+            existing["company_name"] = row["company_name"] or existing.get("company_name", "")
+            existing["updated_at"] = now
+            changed_rows.append(existing.copy())
+        else:
+            learned_rows.append(row)
+            existing_keys[key] = row
+            changed_rows.append(row.copy())
+
+    if changed_rows:
+        _write_learned_rule_rows(learned_rows)
+        load_learned_coding_library.cache_clear()
+    return changed_rows
+
+
+def write_tenant_rule_package(rules: list[dict], *, package_id: str = "", version: str = "", tenant: str = "") -> int:
+    """Replace the client-side reviewed rule package downloaded from sync center."""
+    now = datetime.now().isoformat(timespec="seconds")
+    rows: list[dict[str, str]] = []
+    for index, rule in enumerate(rules, start=1):
+        raw_alias = str(rule.get("raw_alias") or rule.get("关键词") or "").strip()
+        tax_category = str(rule.get("tax_category") or rule.get("标准分类") or "").strip()
+        if not raw_alias or not tax_category:
+            continue
+        tax_code = str(rule.get("tax_code") or rule.get("税收编码") or "").strip()
+        tax_rate = str(rule.get("tax_treatment_or_rate") or rule.get("税率") or "").strip()
+        normalized_name = str(
+            rule.get("normalized_invoice_name")
+            or rule.get("开票名称")
+            or rule.get("项目名称")
+            or raw_alias.split("、")[0]
+        ).strip()
+        rows.append(
+            {
+                "rule_id": str(rule.get("rule_id") or rule.get("entry_id") or f"tenant-{index:04d}"),
+                "status": str(rule.get("status") or "ready").strip() or "ready",
+                "raw_alias": raw_alias,
+                "normalized_invoice_name": normalized_name,
+                "tax_category": tax_category,
+                "tax_code": tax_code,
+                "tax_treatment_or_rate": tax_rate,
+                "decision_basis": str(rule.get("decision_basis") or f"云端审核规则包 {version or package_id}").strip(),
+                "confidence": str(rule.get("confidence") or "tenant_reviewed").strip(),
+                "source_case_ids": str(rule.get("source_case_ids") or f"rule_package:{tenant}:{version}:{package_id}").strip(),
+                "company_name": str(rule.get("company_name") or tenant).strip(),
+                "created_at": str(rule.get("created_at") or now).strip(),
+                "updated_at": now,
+                "hit_count": str(rule.get("hit_count") or "0").strip(),
+            }
+        )
+    _write_rule_rows(TENANT_RULES_PATH, rows)
+    load_tenant_coding_library.cache_clear()
+    return len(rows)
+
+
+@lru_cache(maxsize=1)
+def load_tenant_coding_library() -> tuple[CodingLibraryEntry, ...]:
+    return _rows_to_coding_entries(_read_rule_rows(TENANT_RULES_PATH), fallback_prefix="tenant")
+
+
+@lru_cache(maxsize=1)
+def load_learned_coding_library() -> tuple[CodingLibraryEntry, ...]:
+    return _rows_to_coding_entries(_read_learned_rule_rows(), fallback_prefix="learned")
+
+
+def _rows_to_coding_entries(rows: list[dict[str, str]], *, fallback_prefix: str) -> tuple[CodingLibraryEntry, ...]:
+    entries: list[CodingLibraryEntry] = []
+    for row in rows:
+        if (row.get("status") or "").strip() != "ready":
+            continue
+        raw_alias = (row.get("raw_alias") or "").strip()
+        tax_category = (row.get("tax_category") or "").strip()
+        tax_code = (row.get("tax_code") or "").strip()
+        tax_rate = (row.get("tax_treatment_or_rate") or "").strip()
+        if not raw_alias or not tax_category:
+            continue
+        entries.append(
+            CodingLibraryEntry(
+                entry_id=(row.get("rule_id") or "").strip(),
+                raw_alias=raw_alias,
+                normalized_invoice_name=(row.get("normalized_invoice_name") or "").strip(),
+                tax_category=tax_category,
+                tax_code=tax_code,
+                tax_treatment_or_rate=tax_rate,
+                decision_basis=(row.get("decision_basis") or "").strip(),
+                confidence=(row.get("confidence") or "").strip(),
+                source_case_ids=(row.get("source_case_ids") or "").strip() or f"{fallback_prefix}:{tax_code}",
+            )
+        )
+    return tuple(entries)
+
+
 @lru_cache(maxsize=1)
 def load_formal_coding_library() -> tuple[CodingLibraryEntry, ...]:
     library_path = locate_library_file("coding_library_formal_v0.1.csv")
@@ -149,6 +314,7 @@ def load_formal_coding_library() -> tuple[CodingLibraryEntry, ...]:
                     raw_alias=(row.get("raw_alias") or "").strip(),
                     normalized_invoice_name=(row.get("normalized_invoice_name") or "").strip(),
                     tax_category=(row.get("tax_category") or "").strip(),
+                    tax_code="",
                     tax_treatment_or_rate=(row.get("tax_treatment_or_rate") or "").strip(),
                     decision_basis=(row.get("decision_basis") or "").strip(),
                     confidence=(row.get("confidence") or "").strip(),
@@ -211,6 +377,101 @@ def _should_replace_project_name(current_name: str, suggestion: CodingSuggestion
     if suggestion.matched_on == "context_contains" and _looks_like_low_confidence_project_name(current_name):
         return True
     return current_norm == alias_norm or alias_norm in current_norm or current_norm in alias_norm
+
+
+def _is_learning_candidate(before: InvoiceLine, after: InvoiceLine) -> bool:
+    if not after.project_name.strip():
+        return False
+    if not after.tax_category.strip():
+        return False
+    changed_fields = (
+        before.tax_category.strip() != after.tax_category.strip(),
+        before.tax_code.strip() != after.tax_code.strip(),
+        before.normalized_tax_rate() != after.normalized_tax_rate(),
+        before.project_name.strip() != after.project_name.strip(),
+    )
+    if not any(changed_fields):
+        return False
+    if not after.tax_code.strip() and after.tax_category.strip() == before.tax_category.strip():
+        return False
+    return True
+
+
+def _learned_aliases(before: InvoiceLine, after: InvoiceLine) -> list[str]:
+    aliases: list[str] = []
+    for value in (before.project_name, after.project_name):
+        stripped = value.strip()
+        if not stripped:
+            continue
+        if _normalize(stripped) in {_normalize(alias) for alias in aliases}:
+            continue
+        aliases.append(stripped)
+    return aliases
+
+
+def _learned_rule_id(alias: str, line: InvoiceLine) -> str:
+    basis = "|".join(
+        [
+            _normalize(alias),
+            _normalize(line.tax_category),
+            _normalize(line.tax_code),
+            _normalize_rate_for_compare(line.normalized_tax_rate()),
+        ]
+    )
+    digest = hashlib.sha1(basis.encode("utf-8")).hexdigest()[:12]
+    return f"learned-{digest}"
+
+
+def _learned_row_key(row: dict[str, str]) -> tuple[str, str, str, str]:
+    return (
+        _normalize(row.get("raw_alias", "").split("、")[0]),
+        _normalize(row.get("tax_category", "")),
+        _normalize(row.get("tax_code", "")),
+        _normalize_rate_for_compare(row.get("tax_treatment_or_rate", "")),
+    )
+
+
+def _read_learned_rule_rows() -> list[dict[str, str]]:
+    return _read_rule_rows(LEARNED_RULES_PATH)
+
+
+def _read_rule_rows(path: Path) -> list[dict[str, str]]:
+    if not path.exists():
+        return []
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def _write_learned_rule_rows(rows: list[dict[str, str]]) -> None:
+    _write_rule_rows(LEARNED_RULES_PATH, rows)
+
+
+def _write_rule_rows(path: Path, rows: list[dict[str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=LEARNED_RULE_HEADERS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({header: row.get(header, "") for header in LEARNED_RULE_HEADERS})
+
+
+def _merge_alias_text(existing: str, new_value: str) -> str:
+    aliases: list[str] = []
+    for value in re.split(r"[、,，/\\]+", f"{existing}、{new_value}"):
+        stripped = value.strip()
+        if not stripped:
+            continue
+        if _normalize(stripped) in {_normalize(alias) for alias in aliases}:
+            continue
+        aliases.append(stripped)
+    return "、".join(aliases)
+
+
+def _append_source_case(existing: str, new_value: str) -> str:
+    parts = [part.strip() for part in existing.split(";") if part.strip()]
+    if new_value and new_value not in parts:
+        parts.append(new_value)
+    return ";".join(parts)
 
 
 def _should_replace_tax_rate(

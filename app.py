@@ -24,6 +24,7 @@ from tax_invoice_batch_demo.lean_workbench import (
     save_lean_draft_from_form,
 )
 from tax_invoice_demo.case_events import record_case_event
+from tax_invoice_demo.sync_service import schedule_background_rule_pull
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -39,6 +40,7 @@ RUN_LOCK = Lock()
 
 @app.get("/")
 def index():
+    schedule_background_rule_pull()
     return render_template("lean_index.html", form=default_form(), errors=[])
 
 

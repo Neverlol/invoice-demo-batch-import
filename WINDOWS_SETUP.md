@@ -61,12 +61,14 @@ C:\invoice-demo-batch-import
 
 - 草稿与上传原始材料：`output\workbench\tax_invoice_demo\<draft_id>`
 - 草稿累计明细：`output\workbench\tax_invoice_demo\累计发票明细表.xlsx`
+- 客户同步赋码规则：`output\workbench\tax_invoice_demo\客户同步赋码规则.csv`
+- 本地即时学习赋码规则：`output\workbench\tax_invoice_demo\本地即时学习赋码规则.csv`
 - 赋码反馈候选池：`output\workbench\tax_invoice_demo\赋码反馈候选池.csv`
 - Case 事件队列：`output\workbench\tax_invoice_demo\_events`
 - 批量导入模板和失败明细：`output\batch_import_preview`
 - 批量导入成功明细：`output\batch_import_preview\批量导入成功明细.xlsx`
 
-第一阶段试用时，建议每天或每周备份整个 `output` 文件夹。不要只备份生成的模板，因为赋码反馈候选池和累计明细都在 `output` 里面。
+第一阶段试用时，建议每天或每周备份整个 `output` 文件夹。不要只备份生成的模板，因为本地即时学习规则、赋码反馈候选池和累计明细都在 `output` 里面。
 
 ## 可选：把试用数据回传到中心端
 
@@ -94,6 +96,7 @@ invoice-demo-batch-import\sync_client.example.json
 {
   "enabled": true,
   "endpoint": "http://你的Mac或服务器地址:5021/api/invoice/events",
+  "rules_endpoint": "",
   "token": "你的token",
   "tenant": "shenyang-seed-a",
   "timeout_seconds": 8
@@ -117,6 +120,78 @@ set TAX_INVOICE_SYNC_TENANT=shenyang-seed
 ```bat
 python tools\\flush_case_events.py
 ```
+
+如果你已经在中心端审核并发布了新的赋码规则包，可以在 Windows 上手动拉取：
+
+```bat
+python tools\\pull_rule_package.py
+```
+
+不填 `rules_endpoint` 时，程序会根据 `endpoint + tenant` 自动访问：
+
+```text
+http://服务器:5021/api/invoice/tenants/<tenant>/rules/latest
+```
+
+拉取成功后会写入 `output\workbench\tax_invoice_demo\客户同步赋码规则.csv`。下一次生成草稿时，该规则会优先于本地即时学习规则生效。
+
+工作台首页打开时会自动在后台尝试拉取一次最新规则包。网络失败不会影响使用；如果需要确认是否拉到最新规则，再手动执行上面的命令。
+
+## 可选：启用 LLM 抽取
+
+LLM 不是必装项。默认关闭；关闭时工作台继续使用本地规则和文件解析。
+
+一期 LLM 模块当前准备接的是 MiniMax M2.7 的 API 直连，配置里的 `provider` 应使用：
+
+```text
+minimax_openai
+```
+
+或：
+
+```text
+minimax_m27
+```
+
+不要在一期 Windows 包里把 provider 配成 `openclaw` 或 `hermes`。OpenClaw/Hermes 是后续入口/编排层，不是当前工作台的模型 provider。
+
+如果要在测试机上启用 LLM：
+
+1. 复制 `llm_client.example.json`
+2. 重命名为 `llm_client.local.json`
+3. 把其中 `"enabled": false` 改为 `"enabled": true`
+4. 确认 `provider / region / endpoint / model / api_key_env` 正确
+5. 在 Windows 环境变量里配置 API Key，例如：
+
+```bat
+setx TAX_INVOICE_MINIMAX_API_KEY 你的apikey
+```
+
+重新打开 CMD 或重新双击工作台启动脚本后生效。
+
+MiniMax endpoint 建议：
+
+- 默认国际域名：`https://api.minimax.io/v1/chat/completions`
+- 国内网络可把 `region` 改成 `cn`，程序会默认使用：`https://api.minimaxi.com/v1/chat/completions`
+- 如果你在 `llm_client.local.json` 里手动填写了 `endpoint`，则优先使用手动 endpoint。
+
+不建议把 API Key 直接写进 `llm_client.local.json`。如果必须临时写入，也不要把这个文件发到公开仓库或群里。
+
+LLM 只在本地规则解析不完整时兜底调用；如果 LLM 返回格式不合法或网络失败，系统会自动回退到规则解析，不影响正常开票流程。
+
+联调 LLM 配置：
+
+```bat
+python tools\llm_smoke_test.py --config-only
+```
+
+配置通过后，做一次真实抽取测试：
+
+```bat
+python tools\llm_smoke_test.py --text "辽宁恒润电力科技有限公司 91210102MABWM3X12T 500 普票 代理记账和税务申报"
+```
+
+输出会显示 provider / endpoint / model、API Key 是否已配置、模型调用结果和 JSON 校验结果。API Key 会脱敏显示，不会明文打印。
 
 ## 常见问题
 

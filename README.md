@@ -87,6 +87,13 @@
 - 正式赋码库：`tax_invoice_demo/data/coding_library_formal_v0.1.csv`
   - 只放已经审核过、可自动命中的映射。
   - 工作台生成草稿时会读取它，但不会在普通保存时直接改写它。
+- 本地即时学习规则库：`output/workbench/tax_invoice_demo/本地即时学习赋码规则.csv`
+  - 助理在草稿复核页修改赋码大类、税收编码、税率或项目名称并保存后，会立即写入这里。
+  - 下一次同一台电脑遇到相同或相似项目，会优先命中本地学习规则，不需要等待云端审核或重新打包。
+  - 这不是正式基础库，后续应通过云端候选池审核后再晋升为客户规则或系统规则。
+- 客户同步赋码规则：`output/workbench/tax_invoice_demo/客户同步赋码规则.csv`
+  - 由中心端审核后下发，优先级高于本地即时学习规则和正式基础库。
+  - 用于把“第一天修正过的错误”尽快同步回客户工具，而不是等下一次发新版包。
 - 草稿累计明细：`output/workbench/tax_invoice_demo/累计发票明细表.csv` 和 `.xlsx`
   - 每次生成或保存草稿都会按 `draft_id` 覆盖写入最新明细。
   - 用于回看所有工作台生成过的发票明细。
@@ -98,7 +105,7 @@
 
 第一阶段不建议把人工修正自动提升为正式赋码库。推荐流程是：
 
-`人工修正 -> 反馈候选池 -> 每日/每周人工审核 -> 合格样本再进入正式赋码库`
+`人工修正 -> 本地即时学习 -> 反馈候选池/Case 事件回传 -> 每日/每周人工审核 -> 合格样本再进入客户规则或正式赋码库`
 
 这样能避免单次误改、不同纳税人税率差异、客户特殊口径直接污染自动命中规则。
 
@@ -140,9 +147,45 @@
 
 也就是说，给种子客户交付时，你只要把已经填好的 `sync_client.local.json` 一起放进目录里，就能开箱自动回传。
 
+中心端审核后的赋码规则可以通过同一套配置下发。默认会从 `endpoint` 自动推导：
+
+```text
+http://服务器:5021/api/invoice/events
+-> http://服务器:5021/api/invoice/tenants/<tenant>/rules/latest
+```
+
+如果需要单独指定，也可以在 `sync_client.local.json` 增加：
+
+```json
+{
+  "rules_endpoint": "http://服务器:5021/api/invoice/tenants/shenyang-seed-a/rules/latest"
+}
+```
+
+手动拉取审核规则包：
+
+```bash
+python3 tools/pull_rule_package.py
+```
+
+工作台首页打开时也会在后台自动尝试拉取一次最新规则包。失败不会阻断开票，仍可用上面的命令手动补拉。
+
+中心端可从客户回传事件里导出赋码候选：
+
+```bash
+python3 tools/export_rule_candidates.py --tenant shenyang-seed-a
+```
+
+人工审核 CSV 后，把 `status` 改成 `approved`，再发布规则包：
+
+```bash
+python3 tools/publish_rule_package_from_csv.py --tenant shenyang-seed-a --csv 候选文件.csv --token 你的token
+```
+
 如果你临时联调，也可以继续用环境变量：
 
 - `TAX_INVOICE_SYNC_ENDPOINT`
+- `TAX_INVOICE_RULES_ENDPOINT`（可选，不填时按 tenant 自动推导）
 - `TAX_INVOICE_SYNC_TOKEN`
 - `TAX_INVOICE_SYNC_TENANT`（可选）
 - `TAX_INVOICE_SYNC_TIMEOUT`（可选，默认 8 秒）
@@ -154,6 +197,86 @@
 ```bash
 python3 tools/flush_case_events.py
 ```
+
+## 可选：LLM 结构化抽取
+
+LLM 在一期只作为“结构化抽取兜底能力”，不是流程主控。默认关闭。
+
+当前模块准备接的是 **MiniMax M2.7 的 OpenAI-compatible API 直连**，不是 OpenClaw/Hermes。
+
+- 推荐 provider：`minimax_openai` 或 `minimax_m27`
+- 不建议在一期把 provider 配成 `openclaw` 或 `hermes`
+- OpenClaw/Hermes 后续可以作为飞书/企微入口或编排层，但它应调用本地 `LLMAdapter`/规则引擎，不应替代一期主流程
+
+启用方式推荐使用本地配置文件：
+
+- 从 `llm_client.example.json` 复制一份为 `llm_client.local.json`
+- `llm_client.local.json` 已被 `.gitignore` 排除，不会提交到仓库
+- API Key 推荐放在环境变量里，不要直接写进配置文件
+
+示例：
+
+```json
+{
+  "enabled": true,
+  "provider": "minimax_openai",
+  "region": "global",
+  "endpoint": "https://api.minimax.io/v1/chat/completions",
+  "model": "MiniMax-M2.7",
+  "api_key_env": "TAX_INVOICE_MINIMAX_API_KEY",
+  "timeout_seconds": 45,
+  "max_retries": 2
+}
+```
+
+`region` 可选：
+
+- `global`：默认使用 `https://api.minimax.io/v1/chat/completions`
+- `cn`：国内网络优先使用 `https://api.minimaxi.com/v1/chat/completions`
+
+如果你手动填写了 `endpoint`，则以 `endpoint` 为准；没有填写时才根据 `region` 自动选择。
+
+运行时读取顺序：
+
+1. 环境变量（优先级最高）
+2. `llm_client.local.json`
+3. `llm_client.json`
+
+支持的环境变量：
+
+- `TAX_INVOICE_LLM_ENABLED`
+- `TAX_INVOICE_LLM_PROVIDER`
+- `TAX_INVOICE_LLM_REGION`
+- `TAX_INVOICE_LLM_ENDPOINT`
+- `TAX_INVOICE_LLM_MODEL`
+- `TAX_INVOICE_LLM_API_KEY`
+- `TAX_INVOICE_LLM_API_KEY_ENV`
+- `TAX_INVOICE_LLM_TIMEOUT`
+- `TAX_INVOICE_LLM_MAX_RETRIES`
+- `TAX_INVOICE_LLM_CONFIG`
+
+当前触发策略：
+
+- 规则解析已经能提取买方和明细时，不调用 LLM。
+- 买方、税号、明细或金额缺失时，才尝试调用 LLM。
+- LLM 返回结果必须通过 JSON Schema 校验；失败会自动重试。
+- 重试后仍失败时，回退到规则解析结果，不阻断工作台。
+
+联调 LLM 配置：
+
+```bash
+python3 tools/llm_smoke_test.py --config-only
+```
+
+配置通过后，做一次真实抽取测试：
+
+```bash
+python3 tools/llm_smoke_test.py --text "辽宁恒润电力科技有限公司 91210102MABWM3X12T 500 普票 代理记账和税务申报"
+```
+
+输出里会包含当前读取到的 provider / endpoint / model、API Key 是否配置、模型调用是否成功、返回 JSON 是否通过字段校验。API Key 只显示脱敏预览，不会明文打印。
+
+模型如果偶尔返回 Markdown 代码块包裹的 JSON，当前 Adapter 会自动剥离代码块后再解析。
 
 ## 最小中心接收端
 
@@ -174,6 +297,10 @@ http://127.0.0.1:5021
 主要接口：
 
 - `GET /api/invoice/events/health`
+
+云服务器部署步骤见：
+
+- `CLOUD_SYNC_CENTER_DEPLOY.md`
 - `POST /api/invoice/events`
 - `GET /api/invoice/tenants/<tenant>/events`
 - `GET /api/invoice/tenants/<tenant>/cases/<case_id>`

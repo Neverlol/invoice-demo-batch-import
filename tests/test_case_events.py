@@ -118,6 +118,10 @@ class CaseEventsTest(unittest.TestCase):
         self.assertIn("template_exported", event_types)
         self.assertIn("success_recorded", event_types)
         self.assertTrue(all(event["case_id"] == draft.case_id for event in events))
+        created_payload = next(event["payload"] for event in events if event["event_type"] == "draft_created")
+        self.assertIn("extract_strategy", created_payload)
+        self.assertIn("llm_provider", created_payload)
+        self.assertIn("extract_warnings", created_payload)
 
 
 if __name__ == "__main__":

@@ -77,6 +77,98 @@ class SyncCenterAPITest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 401)
 
+    def test_publish_and_fetch_latest_rule_package(self):
+        headers = {"Authorization": "Bearer center-secret"}
+        rules = [
+            {
+                "raw_alias": "代理记账和税务申报",
+                "normalized_invoice_name": "代理记账和税务申报",
+                "tax_category": "纳税申报代理",
+                "tax_code": "3040802050000000000",
+                "tax_treatment_or_rate": "0.03",
+            }
+        ]
+
+        response = self.client.post(
+            "/api/invoice/tenants/shenyang-seed/rules",
+            json={"version": "2026-04-24-a", "rules": rules, "note": "reviewed"},
+            headers=headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertEqual(body["rule_count"], 1)
+        self.assertEqual(body["version"], "2026-04-24-a")
+
+        latest = self.client.get("/api/invoice/tenants/shenyang-seed/rules/latest", headers=headers)
+        self.assertEqual(latest.status_code, 200)
+        latest_body = latest.get_json()
+        self.assertEqual(latest_body["package_id"], body["package_id"])
+        self.assertEqual(latest_body["rules"][0]["tax_code"], "3040802050000000000")
+
+    def test_rule_candidates_are_extracted_from_learned_rule_events(self):
+        headers = {"Authorization": "Bearer center-secret"}
+        payload = {
+            "tenant": "shenyang-seed",
+            "source": "invoice-demo-batch-import",
+            "events": [
+                {
+                    "event_id": "learned-001",
+                    "case_id": "case-001",
+                    "draft_id": "draft-001",
+                    "batch_id": "",
+                    "event_type": "local_learned_rules_saved",
+                    "created_at": "2026-04-24T10:00:00",
+                    "payload": {
+                        "rule_count": 1,
+                        "rules": [
+                            {
+                                "raw_alias": "代理记账和税务申报",
+                                "normalized_invoice_name": "代理记账和税务申报",
+                                "tax_category": "纳税申报代理",
+                                "tax_code": "3040802050000000000",
+                                "tax_treatment_or_rate": "0.03",
+                                "company_name": "吉林省风生水起商贸有限公司",
+                            }
+                        ],
+                    },
+                },
+                {
+                    "event_id": "learned-002",
+                    "case_id": "case-002",
+                    "draft_id": "draft-002",
+                    "batch_id": "",
+                    "event_type": "local_learned_rules_saved",
+                    "created_at": "2026-04-24T10:05:00",
+                    "payload": {
+                        "rule_count": 1,
+                        "rules": [
+                            {
+                                "raw_alias": "代理记账和税务申报",
+                                "normalized_invoice_name": "代理记账和税务申报",
+                                "tax_category": "纳税申报代理",
+                                "tax_code": "3040802050000000000",
+                                "tax_treatment_or_rate": "0.03",
+                                "company_name": "吉林省风生水起商贸有限公司",
+                            }
+                        ],
+                    },
+                },
+            ],
+        }
+
+        ingest = self.client.post("/api/invoice/events", json=payload, headers=headers)
+        self.assertEqual(ingest.status_code, 200)
+
+        response = self.client.get("/api/invoice/tenants/shenyang-seed/rule-candidates", headers=headers)
+        self.assertEqual(response.status_code, 200)
+        candidates = response.get_json()["candidates"]
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["raw_alias"], "代理记账和税务申报")
+        self.assertEqual(candidates[0]["tax_code"], "3040802050000000000")
+        self.assertEqual(candidates[0]["evidence_count"], 2)
+        self.assertIn("case-001", candidates[0]["case_ids"])
+
 
 if __name__ == "__main__":
     unittest.main()

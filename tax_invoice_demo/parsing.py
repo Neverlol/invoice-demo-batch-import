@@ -312,6 +312,12 @@ def extract_buyer_info_from_text(raw_text: str) -> BuyerInfo:
             buyer.name = minimal_buyer.name
         if minimal_buyer.tax_id and not buyer.tax_id:
             buyer.tax_id = minimal_buyer.tax_id
+    if not buyer.name or not buyer.tax_id:
+        inline_buyer = _extract_buyer_info_from_inline_text(raw_text)
+        if inline_buyer.name and not buyer.name:
+            buyer.name = inline_buyer.name
+        if inline_buyer.tax_id and not buyer.tax_id:
+            buyer.tax_id = inline_buyer.tax_id
     return buyer
 
 
@@ -343,6 +349,10 @@ def extract_invoice_lines_from_text(raw_text: str) -> list[InvoiceLine]:
     minimal_request_lines = _extract_minimal_request_invoice_lines(raw_text)
     if minimal_request_lines:
         return minimal_request_lines
+
+    inline_minimal_request_lines = _extract_inline_minimal_request_invoice_lines(raw_text)
+    if inline_minimal_request_lines:
+        return inline_minimal_request_lines
 
     return _extract_freeform_invoice_lines(raw_text)
 
@@ -468,7 +478,7 @@ def _extract_default_tax_rate(raw_text: str) -> str:
             cleaned = _cleanup_labeled_detail_value(value)
             if cleaned:
                 return cleaned
-    return "3%"
+    return _extract_inline_tax_rate(raw_text) or "3%"
 
 
 def _extract_key_value_invoice_lines(raw_text: str) -> list[InvoiceLine]:
@@ -626,6 +636,33 @@ def _extract_minimal_request_invoice_lines(raw_text: str) -> list[InvoiceLine]:
             project_name=project_name,
             amount_with_tax=amount,
             tax_rate=_extract_default_tax_rate(raw_text) or "3%",
+            unit="项",
+            quantity="1",
+            unit_price=amount,
+        )
+    ]
+
+
+def _extract_inline_minimal_request_invoice_lines(raw_text: str) -> list[InvoiceLine]:
+    """Parse one-sentence invoice requests pasted directly from chat."""
+
+    text = _normalize_inline_request_text(raw_text)
+    if not text:
+        return []
+
+    amount = _extract_inline_amount(text)
+    if not amount:
+        return []
+
+    project_name = _extract_inline_project_name(text, amount)
+    if not project_name:
+        return []
+
+    return [
+        InvoiceLine(
+            project_name=project_name,
+            amount_with_tax=amount,
+            tax_rate=_extract_inline_tax_rate(text) or _extract_default_tax_rate(raw_text) or "3%",
             unit="项",
             quantity="1",
             unit_price=amount,
@@ -830,6 +867,117 @@ def _extract_buyer_info_from_minimal_lines(lines: list[str]) -> BuyerInfo:
                 buyer.name = cleaned
                 break
     return buyer
+
+
+def _extract_buyer_info_from_inline_text(raw_text: str) -> BuyerInfo:
+    buyer = BuyerInfo(name="", tax_id="")
+    text = _normalize_inline_request_text(raw_text)
+    if not text:
+        return buyer
+
+    tax_id_match = re.search(r"([0-9A-Z]{15,20})", text.upper().replace(" ", ""))
+    if tax_id_match:
+        buyer.tax_id = _normalize_tax_id_ocr_noise(tax_id_match.group(1))
+
+    company_matches = list(
+        re.finditer(
+            r"([\u4e00-\u9fffA-Za-z0-9()（）·]{2,}(?:公司|中心|商店|经销店|配送中心|修理部|商行|门市部|超市|合作社))",
+            text,
+        )
+    )
+    if not company_matches:
+        return buyer
+
+    if tax_id_match:
+        before_tax_id = [match for match in company_matches if match.end() <= tax_id_match.start()]
+        chosen = (before_tax_id or company_matches)[-1]
+    else:
+        chosen = company_matches[0]
+    buyer.name = _cleanup_inline_company_name(chosen.group(1))
+    return buyer
+
+
+def _normalize_inline_request_text(raw_text: str) -> str:
+    return re.sub(r"\s+", " ", raw_text.replace("\u3000", " ")).strip()
+
+
+def _cleanup_inline_company_name(value: str) -> str:
+    cleaned = value.strip(" ，,。；;：:")
+    cleaned = re.sub(r"^(?:请|麻烦|帮忙|帮我|给|开给|需要给|客户是|客户|购买方|购方)", "", cleaned)
+    cleaned = re.sub(r"(?:开|申请|要|需要|来一张|出一张).*$", "", cleaned)
+    return cleaned.strip(" ，,。；;：:")
+
+
+def _extract_inline_amount(text: str) -> str:
+    labeled_match = re.search(
+        r"(?:价税合计|含税金额|开票金额|金额|合计)[：:]?\s*[¥￥]?\s*(\d+(?:,\d{3})*(?:\.\d{1,2})?)\s*元?",
+        text,
+    )
+    if labeled_match:
+        return _normalize_minimal_amount_line(labeled_match.group(1))
+
+    scrubbed = re.sub(r"[0-9A-Z]{15,20}", " ", text.upper())
+    scrubbed = re.sub(r"\d+(?:\.\d+)?\s*%", " ", scrubbed)
+    amount_matches = list(re.finditer(r"[¥￥]?\s*(\d+(?:,\d{3})*(?:\.\d{1,2})?)\s*元?", scrubbed))
+    candidates = []
+    for matched in amount_matches:
+        amount = _normalize_minimal_amount_line(matched.group(1))
+        if _looks_like_minimal_amount_line(amount):
+            candidates.append(amount)
+    return candidates[-1] if candidates else ""
+
+
+def _extract_inline_tax_rate(text: str) -> str:
+    matched = re.search(r"(\d+(?:\.\d+)?)\s*%", text)
+    if matched:
+        return f"{matched.group(1)}%"
+    matched = re.search(r"([一二三四五六七八九十0-9]+)个点", text)
+    if matched:
+        return f"{_normalize_chinese_number(matched.group(1))}%"
+    return ""
+
+
+def _extract_inline_project_name(text: str, amount: str) -> str:
+    labeled_match = re.search(
+        r"(?:项目名称|开票项目|项目|服务名称|开票内容|品名)[：:]?\s*(.+?)(?:[，,；;。]|价税合计|含税金额|开票金额|金额|合计|税率|$)",
+        text,
+    )
+    if labeled_match:
+        candidate = _cleanup_inline_project_name(labeled_match.group(1))
+        if candidate:
+            return candidate
+
+    scrubbed = text
+    scrubbed = re.sub(r"[0-9A-Z]{15,20}", " ", scrubbed.upper())
+    scrubbed = re.sub(rf"[¥￥]?\s*{re.escape(amount)}\s*元?", " ", scrubbed)
+    scrubbed = re.sub(
+        r"[\d.]+%|[一二三四五六七八九十0-9]+个点|增值税专用发票|增值税普通发票|普通发票|专用发票|普票|专票|电子发票|发票",
+        " ",
+        scrubbed,
+    )
+    for match in re.finditer(
+        r"[\u4e00-\u9fffA-Za-z0-9()（）·]{2,}(?:公司|中心|商店|经销店|配送中心|修理部|商行|门市部|超市|合作社)",
+        scrubbed,
+    ):
+        scrubbed = scrubbed.replace(match.group(0), " ")
+    scrubbed = re.sub(r"(?:税号|统一社会信用代码|纳税人识别号|客户名称|购买方名称|给|请|麻烦|帮忙|帮我|开|开具|需要|客户)", " ", scrubbed)
+    candidates = [
+        _cleanup_inline_project_name(part)
+        for part in re.split(r"[，,；;。\s]+", scrubbed)
+        if _cleanup_inline_project_name(part)
+    ]
+    return candidates[-1] if candidates else ""
+
+
+def _cleanup_inline_project_name(value: str) -> str:
+    cleaned = value.strip(" -*，,。；;：:")
+    cleaned = re.sub(r"^(?:开|开具|需要|项目|服务|品名|为|是)", "", cleaned)
+    cleaned = re.sub(r"(?:金额|价税合计|含税金额|税率).*$", "", cleaned)
+    if not cleaned or _looks_like_non_detail_label(cleaned) or _looks_like_company_name(cleaned):
+        return ""
+    if not re.search(r"[\u4e00-\u9fff]", cleaned):
+        return ""
+    return cleaned.strip(" -*，,。；;：:")
 
 
 def _split_contextual_pair(value: str) -> tuple[str, str]:

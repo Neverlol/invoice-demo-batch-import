@@ -7,6 +7,8 @@ from unittest.mock import patch
 
 import tax_invoice_demo.case_events as case_events_module
 import tax_invoice_demo.sync_service as sync_service_module
+import tax_invoice_demo.tax_rule_engine as tax_rule_engine_module
+from tax_invoice_demo.models import InvoiceLine
 
 
 class _FakeHTTPResponse:
@@ -35,14 +37,22 @@ class SyncServiceTest(unittest.TestCase):
         self.old_enabled = os.environ.get("TAX_INVOICE_SYNC_ENABLED")
         self.old_config = os.environ.get("TAX_INVOICE_SYNC_CONFIG")
         self.old_timeout = os.environ.get("TAX_INVOICE_SYNC_TIMEOUT")
+        self.old_rules_endpoint = os.environ.get("TAX_INVOICE_RULES_ENDPOINT")
+        self.old_tenant_rules_path = tax_rule_engine_module.TENANT_RULES_PATH
+        self.old_learned_rules_path = tax_rule_engine_module.LEARNED_RULES_PATH
         case_events_module.EVENT_ROOT = self.temp_path / "events"
         sync_service_module._repo_root = lambda: self.temp_path
+        tax_rule_engine_module.TENANT_RULES_PATH = self.temp_path / "客户同步赋码规则.csv"
+        tax_rule_engine_module.LEARNED_RULES_PATH = self.temp_path / "本地即时学习赋码规则.csv"
+        tax_rule_engine_module.load_tenant_coding_library.cache_clear()
+        tax_rule_engine_module.load_learned_coding_library.cache_clear()
         os.environ["TAX_INVOICE_SYNC_ENDPOINT"] = "https://example.com/api/invoice/events"
         os.environ["TAX_INVOICE_SYNC_TOKEN"] = "demo-token"
         os.environ.pop("TAX_INVOICE_SYNC_TENANT", None)
         os.environ.pop("TAX_INVOICE_SYNC_ENABLED", None)
         os.environ.pop("TAX_INVOICE_SYNC_CONFIG", None)
         os.environ.pop("TAX_INVOICE_SYNC_TIMEOUT", None)
+        os.environ.pop("TAX_INVOICE_RULES_ENDPOINT", None)
 
     def tearDown(self):
         case_events_module.EVENT_ROOT = self.old_event_root
@@ -71,6 +81,14 @@ class SyncServiceTest(unittest.TestCase):
             os.environ.pop("TAX_INVOICE_SYNC_TIMEOUT", None)
         else:
             os.environ["TAX_INVOICE_SYNC_TIMEOUT"] = self.old_timeout
+        if self.old_rules_endpoint is None:
+            os.environ.pop("TAX_INVOICE_RULES_ENDPOINT", None)
+        else:
+            os.environ["TAX_INVOICE_RULES_ENDPOINT"] = self.old_rules_endpoint
+        tax_rule_engine_module.TENANT_RULES_PATH = self.old_tenant_rules_path
+        tax_rule_engine_module.LEARNED_RULES_PATH = self.old_learned_rules_path
+        tax_rule_engine_module.load_tenant_coding_library.cache_clear()
+        tax_rule_engine_module.load_learned_coding_library.cache_clear()
         self.tempdir.cleanup()
 
     def test_flush_pending_events_posts_and_clears_queue(self):
@@ -147,6 +165,38 @@ class SyncServiceTest(unittest.TestCase):
         self.assertEqual(config["token"], "env-token")
         self.assertEqual(config["tenant"], "env-tenant")
         self.assertEqual(config["timeout_seconds"], "5")
+
+    def test_pull_latest_rule_package_writes_tenant_rules(self):
+        os.environ["TAX_INVOICE_SYNC_TENANT"] = "seed-tenant"
+        payload = {
+            "package_id": "rules-001",
+            "tenant": "seed-tenant",
+            "version": "2026-04-24-a",
+            "rules": [
+                {
+                    "raw_alias": "代理记账和税务申报",
+                    "normalized_invoice_name": "代理记账和税务申报",
+                    "tax_category": "纳税申报代理",
+                    "tax_code": "3040802050000000000",
+                    "tax_treatment_or_rate": "0.03",
+                }
+            ],
+        }
+
+        with patch.object(sync_service_module, "urlopen", return_value=_FakeHTTPResponse(payload)) as mocked:
+            result = sync_service_module.pull_latest_rule_package()
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.rule_count, 1)
+        self.assertIn("/api/invoice/tenants/seed-tenant/rules/latest", result.endpoint)
+        self.assertTrue(mocked.called)
+        suggestion = tax_rule_engine_module.suggest_line(InvoiceLine(project_name="代理记账和税务申报", amount_with_tax="500"))
+        self.assertIsNotNone(suggestion)
+        self.assertEqual(suggestion.entry.tax_category, "纳税申报代理")
+        self.assertEqual(suggestion.entry.tax_code, "3040802050000000000")
+        state = json.loads(case_events_module.last_rule_sync_state_path().read_text(encoding="utf-8"))
+        self.assertEqual(state["status"], "success")
+        self.assertEqual(state["package_id"], "rules-001")
 
 
 if __name__ == "__main__":

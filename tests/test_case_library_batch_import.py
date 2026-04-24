@@ -7,6 +7,7 @@ from openpyxl import load_workbook
 from werkzeug.datastructures import FileStorage, MultiDict
 
 import tax_invoice_demo.ledger as ledger_module
+import tax_invoice_demo.tax_rule_engine as tax_rule_engine_module
 import tax_invoice_demo.workbench as workbench_module
 import tax_invoice_batch_demo.lean_workbench as lean_workbench_module
 
@@ -31,6 +32,7 @@ class CaseLibraryBatchImportTest(unittest.TestCase):
             lean_workbench_module.SUCCESS_LEDGER_CSV,
             lean_workbench_module.SUCCESS_LEDGER_XLSX,
         )
+        self.old_learned_rules_path = tax_rule_engine_module.LEARNED_RULES_PATH
 
         workbench_module.WORKBENCH_ROOT = self.temp_path / "workbench"
         ledger_module.LEDGER_ROOT = self.temp_path / "ledger"
@@ -40,6 +42,8 @@ class CaseLibraryBatchImportTest(unittest.TestCase):
         lean_workbench_module.BATCH_OUTPUT_ROOT = self.temp_path / "batch_import_preview"
         lean_workbench_module.SUCCESS_LEDGER_CSV = lean_workbench_module.BATCH_OUTPUT_ROOT / "批量导入成功明细.csv"
         lean_workbench_module.SUCCESS_LEDGER_XLSX = lean_workbench_module.BATCH_OUTPUT_ROOT / "批量导入成功明细.xlsx"
+        tax_rule_engine_module.LEARNED_RULES_PATH = self.temp_path / "ledger" / "本地即时学习赋码规则.csv"
+        tax_rule_engine_module.load_learned_coding_library.cache_clear()
 
     def tearDown(self):
         workbench_module.WORKBENCH_ROOT = self.old_workbench_root
@@ -54,6 +58,8 @@ class CaseLibraryBatchImportTest(unittest.TestCase):
             lean_workbench_module.SUCCESS_LEDGER_CSV,
             lean_workbench_module.SUCCESS_LEDGER_XLSX,
         ) = self.old_success_paths
+        tax_rule_engine_module.LEARNED_RULES_PATH = self.old_learned_rules_path
+        tax_rule_engine_module.load_learned_coding_library.cache_clear()
         self.tempdir.cleanup()
 
     @unittest.skipUnless((CASE_ROOT / "5/source/开票.xlsx").exists(), "本地未发现案例库原始材料")

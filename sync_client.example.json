@@ -1,6 +1,7 @@
 {
   "enabled": true,
   "endpoint": "http://127.0.0.1:5021/api/invoice/events",
+  "rules_endpoint": "",
   "token": "replace-with-your-sync-token",
   "tenant": "replace-with-your-tenant",
   "timeout_seconds": 8

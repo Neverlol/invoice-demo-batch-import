@@ -46,7 +46,7 @@ def extract_invoice_structured_data(
         return outcome
 
     llm_errors: list[str] = []
-    for attempt in range(1, 3):
+    for attempt in range(1, adapter.max_retries + 1):
         try:
             response = adapter.extract_invoice_info(f"{parse_source}\n\n备注：{note}".strip())
             validation_errors = validate_extract_invoice_payload(response.parsed_json)

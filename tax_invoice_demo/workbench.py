@@ -19,6 +19,7 @@ from .ledger import sync_draft_to_ledger
 from .models import BuyerInfo, DraftAttachment, DraftBatch, DraftBatchItem, InvoiceDraft, InvoiceLine
 from .ocr import run_optional_ocr
 from .source_documents import extract_supported_documents, serialize_document_results
+from .tax_rule_engine import write_learned_rules_from_manual_update
 
 WORKBENCH_ROOT = Path(__file__).resolve().parent.parent / "output" / "workbench" / "tax_invoice_demo"
 
@@ -173,14 +174,24 @@ def update_draft_from_form(
         bank_account=buyer.bank_account or inferred_buyer.bank_account,
     )
     resolved_lines = lines or inferred_lines
-    if lines:
+    manual_input_lines = bool(lines)
+    if manual_input_lines:
         _mark_manual_coding_changes(resolved_lines, existing.lines)
     resolved_lines = enrich_invoice_lines(
         resolved_lines,
         raw_text=parse_source,
         note=note,
-        preserve_existing_tax_rate=bool(lines),
+        preserve_existing_tax_rate=manual_input_lines,
     )
+    learned_rule_rows = []
+    if manual_input_lines:
+        learned_rule_rows = write_learned_rules_from_manual_update(
+            before_lines=existing.lines,
+            after_lines=resolved_lines,
+            case_id=existing.case_id or draft_id,
+            draft_id=draft_id,
+            company_name=company_name,
+        )
     issues = _build_draft_issues(
         company_name=company_name,
         raw_text=raw_text,
@@ -237,6 +248,16 @@ def update_draft_from_form(
             draft_id=draft.draft_id,
             event_type="manual_edits_recorded",
             payload={"diffs": edit_diffs},
+        )
+    if learned_rule_rows:
+        record_case_event(
+            case_id=draft.case_id,
+            draft_id=draft.draft_id,
+            event_type="local_learned_rules_saved",
+            payload={
+                "rule_count": len(learned_rule_rows),
+                "rules": learned_rule_rows,
+            },
         )
     return draft
 
@@ -339,6 +360,9 @@ def save_draft_batch(batch: DraftBatch) -> None:
         "invoice_kind": batch.invoice_kind,
         "invoice_medium": batch.invoice_medium,
         "special_business": batch.special_business,
+        "extract_strategy": batch.extract_strategy,
+        "llm_provider": batch.llm_provider,
+        "extract_warnings": batch.extract_warnings,
     }
     (batch_dir / "batch.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     (batch_dir / "raw_text.txt").write_text(batch.raw_text, encoding="utf-8")
@@ -362,6 +386,9 @@ def load_draft_batch(batch_id: str) -> DraftBatch | None:
         invoice_kind=payload.get("invoice_kind", "普通发票"),
         invoice_medium=payload.get("invoice_medium", "电子发票"),
         special_business=payload.get("special_business", ""),
+        extract_strategy=payload.get("extract_strategy", "rules_only"),
+        llm_provider=payload.get("llm_provider", ""),
+        extract_warnings=payload.get("extract_warnings", []),
     )
 
 
@@ -508,6 +535,9 @@ def _create_split_draft_batch(
         invoice_kind=invoice_profile["invoice_kind"],
         invoice_medium=invoice_profile["invoice_medium"],
         special_business=invoice_profile["special_business"],
+        extract_strategy=extract_strategy,
+        llm_provider=llm_provider,
+        extract_warnings=list(extract_warnings),
     )
     save_draft_batch(batch)
     record_case_event(
