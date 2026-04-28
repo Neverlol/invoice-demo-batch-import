@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import asdict, dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,8 @@ class FailureRecord:
     field_name: str
     failure_type: str
     suggested_action: str
+    allowed_values: list[str]
+    suggested_value: str
 
 
 HEADER_ALIASES = {
@@ -74,6 +77,7 @@ def parse_failure_workbook(path: str | Path) -> list[FailureRecord]:
                 continue
             field_name = _infer_field_name(reason)
             failure_type = _infer_failure_type(reason)
+            allowed_values = _extract_allowed_values(reason, failure_type)
             records.append(
                 FailureRecord(
                     row_number=row_number,
@@ -87,6 +91,8 @@ def parse_failure_workbook(path: str | Path) -> list[FailureRecord]:
                     field_name=field_name,
                     failure_type=failure_type,
                     suggested_action=_suggested_action(failure_type),
+                    allowed_values=allowed_values,
+                    suggested_value=allowed_values[0] if allowed_values else "",
                 )
             )
     return records
@@ -216,6 +222,46 @@ def _suggested_action(failure_type: str) -> str:
     if failure_type == "missing_required_field":
         return "模板存在必填字段缺失。请回到草稿补齐对应字段后重建模板。"
     return "税局返回业务校验失败。请按失败原因人工复核草稿字段和当前开票主体限制。"
+
+
+def _extract_allowed_values(reason: str, failure_type: str) -> list[str]:
+    if failure_type != "seller_tax_rate_restriction":
+        return []
+    segment = reason
+    if "请使用如下税率" in reason:
+        segment = reason.split("请使用如下税率", 1)[1]
+    values: list[str] = []
+    for raw in re.findall(r"\d+(?:\.\d+)?\s*%?|\d+(?:\.\d+)?\s*％", segment):
+        normalized = _normalize_tax_rate_value(raw)
+        if normalized and normalized not in values:
+            values.append(normalized)
+    return values
+
+
+def _normalize_tax_rate_value(raw: str) -> str:
+    value = raw.strip().replace("％", "%").replace(" ", "")
+    if not value:
+        return ""
+    if value.endswith("%"):
+        number = value[:-1]
+        try:
+            decimal_value = Decimal(number)
+        except InvalidOperation:
+            return value
+        return _format_percent(decimal_value)
+    try:
+        decimal_value = Decimal(value)
+    except InvalidOperation:
+        return ""
+    if decimal_value <= Decimal("1"):
+        decimal_value *= Decimal("100")
+    return _format_percent(decimal_value)
+
+
+def _format_percent(value: Decimal) -> str:
+    quantized = value.quantize(Decimal("0.01"))
+    text = format(quantized, "f").rstrip("0").rstrip(".")
+    return f"{text or '0'}%"
 
 
 def _count_by(records: list[FailureRecord], field: str) -> dict[str, int]:

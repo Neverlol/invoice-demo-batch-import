@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>开票草稿 {{ draft.draft_id }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260423-v15') }}">
-    <script defer src="{{ url_for('static', filename='lean.js', v='20260423-v15') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260426-v19') }}">
+    <script defer src="{{ url_for('static', filename='lean.js', v='20260426-v19') }}"></script>
   </head>
   <body class="operator-body">
     <main class="dashboard-shell">
@@ -44,7 +44,7 @@
           <header class="stage-head">
             <div>
               <p class="eyebrow">Draft {{ draft.draft_id }}</p>
-              <h1>新建发票</h1>
+              <h1>发票草稿</h1>
             </div>
             <div class="head-actions">
               <a class="ghost-button" href="{{ url_for('download_template', draft_id=draft.draft_id) }}">导出模板</a>
@@ -53,6 +53,11 @@
 
           {% if saved %}<section class="banner ok"><p>草稿已保存，官方模板已重新生成。</p></section>{% endif %}
           {% if success_recorded %}<section class="banner ok"><p>已累计写入批量导入成功明细表。</p></section>{% endif %}
+          {% if applied_failure_repairs and applied_failure_repairs.applied_count %}
+            <section class="banner ok">
+              <p>已应用 {{ applied_failure_repairs.applied_count }} 条税局建议，并重新生成模板。</p>
+            </section>
+          {% endif %}
           {% if run_blocked %}<section class="banner alert"><p>当前模板预校验存在错误，已阻止启动。</p></section>{% endif %}
 
           {% if export.error_count %}
@@ -68,11 +73,20 @@
 
           {% if failure_report %}
             <section class="banner alert">
-              <strong>税局失败明细回流</strong>
+              <div class="banner-head">
+                <strong>税局失败明细回流</strong>
+                {% if failure_report.actionable_count %}
+                  <button
+                    class="secondary compact-action"
+                    formaction="{{ url_for('apply_failure_repairs', draft_id=draft.draft_id) }}"
+                    type="submit"
+                  >应用 {{ failure_report.actionable_count }} 条建议并重建模板</button>
+                {% endif %}
+              </div>
               {% for item in failure_report.records %}
-                <p>流水号 {{ item.serial_no }}：{{ item.field_name or '未识别字段' }} - {{ item.reason }}</p>
+                <p>{{ item.target_label or ('流水号 ' ~ item.serial_no) }}：{{ item.field_name or '未识别字段' }} - {{ item.reason }}</p>
                 {% if item.failure_type or item.suggested_action %}
-                  <p>类型：{{ item.failure_type or '未识别' }}；建议：{{ item.suggested_action }}</p>
+                  <p>修复焦点：{{ item.repair_focus or item.suggested_action }}；类型：{{ item.failure_type or '未识别' }}</p>
                 {% endif %}
               {% endfor %}
             </section>
@@ -212,6 +226,7 @@
                         <th>项目名称</th>
                         <th>赋码大类</th>
                         <th>税收编码</th>
+                        <th>命中来源</th>
                         <th>规格型号</th>
                         <th>单位</th>
                         <th>数量</th>
@@ -223,9 +238,39 @@
                     <tbody data-lines>
                       {% for line in line_rows %}
                         <tr>
-                          <td><input name="line_project_name" value="{{ line.project_name }}" readonly data-lockable></td>
+                          <td>
+                            <input name="line_project_name" value="{{ line.project_name }}" readonly data-lockable>
+                            {% if line.failure_alerts %}
+                              <div class="line-failure-list">
+                                {% for failure in line.failure_alerts %}
+                                  <div class="line-failure">
+                                    <span>税局退回</span>
+                                    <strong>{{ failure.field_name or '明细字段' }}</strong>
+                                    <small>{{ failure.repair_focus or failure.suggested_action }}</small>
+                                    {% if failure.repair_status == 'applied' %}
+                                      <em class="repair-applied">已应用：{{ failure.applied_value or failure.repair_value }}</em>
+                                    {% elif failure.repair_field and failure.repair_value %}
+                                      <button
+                                        type="button"
+                                        class="inline-repair"
+                                        data-apply-line-repair
+                                        data-repair-field="{{ failure.repair_field }}"
+                                        data-repair-value="{{ failure.repair_value }}"
+                                      >应用建议：{{ failure.repair_value }}</button>
+                                    {% endif %}
+                                  </div>
+                                {% endfor %}
+                              </div>
+                            {% endif %}
+                          </td>
                           <td><input name="line_tax_category" value="{{ line.tax_category }}" readonly data-lockable></td>
                           <td><input name="line_tax_code" value="{{ line.tax_code }}" readonly data-lockable></td>
+                          {% set coding_reference = line.coding_reference or '' %}
+                          <td>
+                            <span class="coding-note" data-coding-note title="{{ coding_reference }}">
+                              {{ coding_reference.split(':', 1)[0] if coding_reference else '待人工复核' }}
+                            </span>
+                          </td>
                           <td><input name="line_specification" value="{{ line.specification }}" readonly data-lockable></td>
                           <td><input name="line_unit" value="{{ line.unit }}" readonly data-lockable></td>
                           <td><input name="line_quantity" value="{{ line.quantity }}" readonly data-lockable></td>
@@ -331,22 +376,34 @@
             </div>
           </section>
 
-          <section class="status-card">
-            <label class="field">
-              <span>CDP 端口</span>
-              <input name="cdp_endpoint" value="http://127.0.0.1:9222">
-            </label>
-            <label class="field">
-              <span>上传税局失败明细回流</span>
+          <section class="status-card operation-card">
+            <div class="operation-head">
+              <h3>下一步操作</h3>
+              <span>{% if export.error_count %}待修正{% else %}可导入{% endif %}</span>
+            </div>
+
+            <label class="failure-upload">
+              <span>税局失败明细</span>
+              <strong>上传失败明细 Excel</strong>
+              <small>导入被退回时，用这里回流错误原因并定位明细行。</small>
+              <em>选择 Excel 文件</em>
               <input type="file" name="failure_file" accept=".xlsx">
             </label>
 
             <div class="status-actions">
+              <button class="primary" formaction="{{ url_for('execute_draft', draft_id=draft.draft_id) }}" type="submit">启动批量导入</button>
               <button class="secondary" type="submit">保存并重建模板</button>
               <button class="secondary" formaction="{{ url_for('upload_failure', draft_id=draft.draft_id) }}" type="submit">解析失败明细</button>
-              <button class="primary" formaction="{{ url_for('execute_draft', draft_id=draft.draft_id) }}" type="submit">启动批量导入</button>
-              <button class="secondary" formaction="{{ url_for('mark_success', draft_id=draft.draft_id) }}" type="submit">标记成功并累计</button>
+              <button class="secondary quiet-action" formaction="{{ url_for('mark_success', draft_id=draft.draft_id) }}" type="submit">标记成功并累计</button>
             </div>
+
+            <details class="advanced-settings">
+              <summary>浏览器连接设置</summary>
+              <label class="field">
+                <span>本机浏览器地址</span>
+                <input name="cdp_endpoint" value="http://127.0.0.1:9222">
+              </label>
+            </details>
           </section>
         </aside>
       </form>

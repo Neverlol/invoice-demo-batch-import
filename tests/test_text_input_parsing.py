@@ -1,3 +1,4 @@
+import csv
 import tempfile
 import unittest
 from pathlib import Path
@@ -71,6 +72,7 @@ class TextInputParsingTest(unittest.TestCase):
         self.old_tenant_rules_path = tax_rule_engine_module.TENANT_RULES_PATH
         self.old_sync_endpoint = os.environ.get("TAX_INVOICE_SYNC_ENDPOINT")
         self.old_sync_token = os.environ.get("TAX_INVOICE_SYNC_TOKEN")
+        self.old_operator = os.environ.get("TAX_INVOICE_OPERATOR")
 
         workbench_module.WORKBENCH_ROOT = self.temp_path / "workbench"
         ledger_module.LEDGER_ROOT = self.temp_path / "ledger"
@@ -87,6 +89,7 @@ class TextInputParsingTest(unittest.TestCase):
         tax_rule_engine_module.load_learned_coding_library.cache_clear()
         os.environ.pop("TAX_INVOICE_SYNC_ENDPOINT", None)
         os.environ.pop("TAX_INVOICE_SYNC_TOKEN", None)
+        os.environ["TAX_INVOICE_OPERATOR"] = "seed-assistant"
 
     def tearDown(self):
         workbench_module.WORKBENCH_ROOT = self.old_workbench_root
@@ -114,6 +117,10 @@ class TextInputParsingTest(unittest.TestCase):
             os.environ.pop("TAX_INVOICE_SYNC_TOKEN", None)
         else:
             os.environ["TAX_INVOICE_SYNC_TOKEN"] = self.old_sync_token
+        if self.old_operator is None:
+            os.environ.pop("TAX_INVOICE_OPERATOR", None)
+        else:
+            os.environ["TAX_INVOICE_OPERATOR"] = self.old_operator
         self.tempdir.cleanup()
         coding_library_module.load_formal_coding_library.cache_clear()
 
@@ -315,7 +322,49 @@ class TextInputParsingTest(unittest.TestCase):
         self.assertEqual(next_draft.lines[0].tax_category, "纳税申报代办")
         self.assertEqual(next_draft.lines[0].tax_code, "3040802050000000000")
         self.assertEqual(next_draft.lines[0].normalized_tax_rate(), "3%")
-        self.assertIn("命中", next_draft.lines[0].coding_reference)
+        self.assertIn("命中 本地即时规则", next_draft.lines[0].coding_reference)
+
+        rows = _read_csv_rows(tax_rule_engine_module.LEARNED_RULES_PATH)
+        self.assertEqual(rows[0]["status"], "ready")
+        self.assertEqual(rows[0]["source_operator"], "seed-assistant")
+        self.assertEqual(rows[0]["original_project_name"], "代理记账和税务申报")
+        self.assertEqual(rows[0]["final_project_name"], "代理记账和税务申报")
+
+    def test_conflicting_manual_coding_fix_is_marked_pending_review(self):
+        draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", MINIMAL_TEXT_INPUT, "", [])
+        lean_workbench_module.save_lean_draft_from_form(
+            draft.draft_id,
+            _form_from_draft(
+                draft,
+                tax_category="纳税申报代办",
+                tax_code="3040802050000000000",
+                tax_rate="3%",
+            ),
+            [],
+        )
+
+        conflicting_draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", MINIMAL_TEXT_INPUT, "", [])
+        lean_workbench_module.save_lean_draft_from_form(
+            conflicting_draft.draft_id,
+            _form_from_draft(
+                conflicting_draft,
+                tax_category="错误分类待审核",
+                tax_code="1000000000000000000",
+                tax_rate="13%",
+            ),
+            [],
+        )
+
+        rows = _read_csv_rows(tax_rule_engine_module.LEARNED_RULES_PATH)
+        self.assertEqual([row["status"] for row in rows], ["ready", "pending_review"])
+        self.assertEqual(rows[1]["raw_alias"], "代理记账和税务申报")
+        self.assertEqual(rows[1]["conflict_with_rule_id"], rows[0]["rule_id"])
+        self.assertIn("冲突待审核", rows[1]["decision_basis"])
+
+        next_draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", MINIMAL_TEXT_INPUT, "", [])
+        self.assertEqual(next_draft.lines[0].tax_category, "纳税申报代办")
+        self.assertEqual(next_draft.lines[0].tax_code, "3040802050000000000")
+        self.assertIn("命中 本地即时规则", next_draft.lines[0].coding_reference)
 
     def test_synced_tenant_rules_override_local_learned_rules(self):
         draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", MINIMAL_TEXT_INPUT, "", [])
@@ -349,6 +398,12 @@ class TextInputParsingTest(unittest.TestCase):
         next_draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", MINIMAL_TEXT_INPUT, "", [])
         self.assertEqual(next_draft.lines[0].tax_category, "云端审核分类")
         self.assertEqual(next_draft.lines[0].tax_code, "3040802050000000000")
+        self.assertIn("命中 客户规则", next_draft.lines[0].coding_reference)
+
+
+def _read_csv_rows(path: Path) -> list[dict[str, str]]:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        return list(csv.DictReader(handle))
 
 def _form_from_draft(draft, *, tax_category: str, tax_code: str, tax_rate: str):
     from werkzeug.datastructures import MultiDict

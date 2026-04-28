@@ -11,12 +11,14 @@ from tax_invoice_batch_demo.batch_runner import BatchImportRunner
 from tax_invoice_batch_demo.lean_workbench import (
     BATCH_OUTPUT_ROOT,
     SUCCESS_LEDGER_XLSX,
+    apply_failure_repairs_to_draft,
     create_lean_draft,
     default_form,
     draft_preview,
     export_batch_template,
     export_draft_template,
     line_form_rows,
+    load_failure_report_for_draft,
     load_draft,
     load_draft_batch,
     parse_failure_file,
@@ -72,15 +74,17 @@ def draft_detail(draft_id: str):
     if draft is None:
         abort(404)
     export = export_draft_template(draft)
+    failure_report = load_failure_report_for_draft(draft_id, draft=draft)
     return render_template(
         "lean_draft.html",
         draft=draft,
         preview=draft_preview(draft),
-        line_rows=line_form_rows(draft),
+        line_rows=line_form_rows(draft, failure_report=failure_report),
         export=export,
-        failure_report=None,
+        failure_report=failure_report,
         saved=False,
         success_recorded=False,
+        applied_failure_repairs=None,
     )
 
 
@@ -88,15 +92,17 @@ def draft_detail(draft_id: str):
 def save_draft(draft_id: str):
     draft = save_lean_draft_from_form(draft_id, request.form, request.files.getlist("source_files"))
     export = export_draft_template(draft)
+    failure_report = load_failure_report_for_draft(draft_id, draft=draft)
     return render_template(
         "lean_draft.html",
         draft=draft,
         preview=draft_preview(draft),
-        line_rows=line_form_rows(draft),
+        line_rows=line_form_rows(draft, failure_report=failure_report),
         export=export,
-        failure_report=None,
+        failure_report=failure_report,
         saved=True,
         success_recorded=False,
+        applied_failure_repairs=None,
     )
 
 
@@ -110,11 +116,32 @@ def upload_failure(draft_id: str):
         "lean_draft.html",
         draft=draft,
         preview=draft_preview(draft),
-        line_rows=line_form_rows(draft),
+        line_rows=line_form_rows(draft, failure_report=failure_report),
         export=export,
         failure_report=failure_report,
         saved=True,
         success_recorded=False,
+        applied_failure_repairs=None,
+    )
+
+
+@app.post("/drafts/<draft_id>/apply-failure-repairs")
+def apply_failure_repairs(draft_id: str):
+    draft = save_lean_draft_from_form(draft_id, request.form, [])
+    result = apply_failure_repairs_to_draft(draft)
+    draft = result["draft"]
+    failure_report = result["failure_report"] or load_failure_report_for_draft(draft_id, draft=draft)
+    export = export_draft_template(draft)
+    return render_template(
+        "lean_draft.html",
+        draft=draft,
+        preview=draft_preview(draft),
+        line_rows=line_form_rows(draft, failure_report=failure_report),
+        export=export,
+        failure_report=failure_report,
+        saved=True,
+        success_recorded=False,
+        applied_failure_repairs=result,
     )
 
 
@@ -123,15 +150,17 @@ def mark_success(draft_id: str):
     draft = save_lean_draft_from_form(draft_id, request.form, [])
     record_success_to_ledger(draft)
     export = export_draft_template(draft)
+    failure_report = load_failure_report_for_draft(draft_id, draft=draft)
     return render_template(
         "lean_draft.html",
         draft=draft,
         preview=draft_preview(draft),
-        line_rows=line_form_rows(draft),
+        line_rows=line_form_rows(draft, failure_report=failure_report),
         export=export,
-        failure_report=None,
+        failure_report=failure_report,
         saved=True,
         success_recorded=True,
+        applied_failure_repairs=None,
     )
 
 
@@ -149,16 +178,18 @@ def execute_draft(draft_id: str):
     draft = save_lean_draft_from_form(draft_id, request.form, [])
     export = export_draft_template(draft)
     if export["error_count"]:
+        failure_report = load_failure_report_for_draft(draft_id, draft=draft)
         return render_template(
             "lean_draft.html",
             draft=draft,
             preview=draft_preview(draft),
-            line_rows=line_form_rows(draft),
+            line_rows=line_form_rows(draft, failure_report=failure_report),
             export=export,
-            failure_report=None,
+            failure_report=failure_report,
             saved=True,
             success_recorded=False,
             run_blocked=True,
+            applied_failure_repairs=None,
         ), 400
     run_id = _queue_batch_run(export["output_path"], request.form.get("cdp_endpoint", "http://127.0.0.1:9222"))
     record_case_event(

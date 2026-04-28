@@ -15,8 +15,22 @@ if (addButton && tbody) {
         input.removeAttribute("readonly");
       }
     });
+    row.querySelectorAll("[data-coding-note]").forEach((note) => {
+      note.textContent = "待人工复核";
+      note.classList.remove("pending-change");
+    });
     tbody.appendChild(row);
   });
+}
+
+function markCodingPending(input) {
+  const row = input.closest("tr");
+  const note = row ? row.querySelector("[data-coding-note]") : null;
+  if (!note) {
+    return;
+  }
+  note.textContent = "保存后记录人工修正";
+  note.classList.add("pending-change");
 }
 
 function applyBulkField(fieldName) {
@@ -31,6 +45,7 @@ function applyBulkField(fieldName) {
   tbody.querySelectorAll(`input[name="${fieldName}"]`).forEach((input) => {
     input.value = value;
     input.dispatchEvent(new Event("input", { bubbles: true }));
+    markCodingPending(input);
   });
   return true;
 }
@@ -47,6 +62,25 @@ if (applyAllButton) {
     ["line_tax_category", "line_tax_code", "line_tax_rate"].forEach(applyBulkField);
   });
 }
+
+document.querySelectorAll("[data-apply-line-repair]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const row = button.closest("tr");
+    const fieldName = button.dataset.repairField;
+    const value = button.dataset.repairValue || "";
+    const input = row && fieldName ? row.querySelector(`input[name="${fieldName}"]`) : null;
+    if (!input || !value) {
+      return;
+    }
+    input.value = value;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    if (input.dataset.lockable !== undefined) {
+      input.removeAttribute("readonly");
+    }
+    markCodingPending(input);
+    button.textContent = `已应用：${value}`;
+  });
+});
 
 document.querySelectorAll("[data-edit-field]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -118,3 +152,15 @@ document.querySelectorAll(".field-choice select").forEach((select) => {
     }
   });
 });
+
+if (tbody) {
+  tbody.addEventListener("input", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) {
+      return;
+    }
+    if (["line_tax_category", "line_tax_code", "line_tax_rate"].includes(target.name)) {
+      markCodingPending(target);
+    }
+  });
+}

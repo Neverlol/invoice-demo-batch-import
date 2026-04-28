@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -27,6 +28,10 @@ LEARNED_RULE_HEADERS = [
     "confidence",
     "source_case_ids",
     "company_name",
+    "source_operator",
+    "original_project_name",
+    "final_project_name",
+    "conflict_with_rule_id",
     "created_at",
     "updated_at",
     "hit_count",
@@ -44,6 +49,7 @@ class CodingLibraryEntry:
     decision_basis: str
     confidence: str
     source_case_ids: str
+    source_label: str
 
     @property
     def aliases(self) -> tuple[str, ...]:
@@ -106,7 +112,7 @@ class TaxRuleEngine:
             if not line.coding_reference:
                 rate_hint = f" / {suggestion.entry.tax_treatment_or_rate}" if suggestion.entry.tax_treatment_or_rate else ""
                 line.coding_reference = (
-                    f"命中 {suggestion.matched_alias} -> {suggestion.entry.tax_category}"
+                    f"命中 {suggestion.entry.source_label}: {suggestion.matched_alias} -> {suggestion.entry.tax_category}"
                     f"{rate_hint}"
                 )
             _apply_taxonomy_code(line)
@@ -191,6 +197,10 @@ def write_learned_rules_from_manual_update(
             "confidence": "local_confirmed",
             "source_case_ids": f"learned:{case_id}:{draft_id}:{index + 1}",
             "company_name": company_name.strip(),
+            "source_operator": _current_operator(),
+            "original_project_name": before.project_name.strip(),
+            "final_project_name": after.project_name.strip(),
+            "conflict_with_rule_id": "",
             "created_at": now,
             "updated_at": now,
             "hit_count": "0",
@@ -207,9 +217,29 @@ def write_learned_rules_from_manual_update(
             existing["confidence"] = row["confidence"]
             existing["source_case_ids"] = _append_source_case(existing.get("source_case_ids", ""), row["source_case_ids"])
             existing["company_name"] = row["company_name"] or existing.get("company_name", "")
+            existing["source_operator"] = row["source_operator"] or existing.get("source_operator", "")
+            existing["original_project_name"] = _merge_alias_text(
+                existing.get("original_project_name", ""),
+                row["original_project_name"],
+            )
+            existing["final_project_name"] = row["final_project_name"] or existing.get("final_project_name", "")
             existing["updated_at"] = now
             changed_rows.append(existing.copy())
         else:
+            conflict = _find_conflicting_learned_row(learned_rows, row)
+            if conflict is not None:
+                row["status"] = "pending_review"
+                row["rule_id"] = f"conflict-{row['rule_id'].removeprefix('learned-')}"
+                row["conflict_with_rule_id"] = conflict.get("rule_id", "")
+                row["decision_basis"] = (
+                    "本地即时学习冲突待审核: "
+                    f"已有规则 {conflict.get('rule_id', '')} -> "
+                    f"{conflict.get('tax_category', '')}/{conflict.get('tax_code', '')}/{conflict.get('tax_treatment_or_rate', '')}; "
+                    f"本次修正 -> {row['tax_category']}/{row['tax_code']}/{row['tax_treatment_or_rate']}"
+                )
+                learned_rows.append(row)
+                changed_rows.append(row.copy())
+                continue
             learned_rows.append(row)
             existing_keys[key] = row
             changed_rows.append(row.copy())
@@ -272,6 +302,11 @@ def load_learned_coding_library() -> tuple[CodingLibraryEntry, ...]:
 
 def _rows_to_coding_entries(rows: list[dict[str, str]], *, fallback_prefix: str) -> tuple[CodingLibraryEntry, ...]:
     entries: list[CodingLibraryEntry] = []
+    source_label = {
+        "tenant": "客户规则",
+        "learned": "本地即时规则",
+        "formal": "内置基础规则",
+    }.get(fallback_prefix, fallback_prefix)
     for row in rows:
         if (row.get("status") or "").strip() != "ready":
             continue
@@ -292,6 +327,7 @@ def _rows_to_coding_entries(rows: list[dict[str, str]], *, fallback_prefix: str)
                 decision_basis=(row.get("decision_basis") or "").strip(),
                 confidence=(row.get("confidence") or "").strip(),
                 source_case_ids=(row.get("source_case_ids") or "").strip() or f"{fallback_prefix}:{tax_code}",
+                source_label=source_label,
             )
         )
     return tuple(entries)
@@ -319,6 +355,7 @@ def load_formal_coding_library() -> tuple[CodingLibraryEntry, ...]:
                     decision_basis=(row.get("decision_basis") or "").strip(),
                     confidence=(row.get("confidence") or "").strip(),
                     source_case_ids=(row.get("source_case_ids") or "").strip(),
+                    source_label="内置基础规则",
                 )
             )
     return tuple(entries)
@@ -431,6 +468,30 @@ def _learned_row_key(row: dict[str, str]) -> tuple[str, str, str, str]:
     )
 
 
+def _find_conflicting_learned_row(rows: list[dict[str, str]], candidate: dict[str, str]) -> dict[str, str] | None:
+    candidate_aliases = {_normalize(alias) for alias in re.split(r"[、,，/\\]+", candidate.get("raw_alias", "")) if alias.strip()}
+    if not candidate_aliases:
+        return None
+    candidate_target = _learned_target_key(candidate)
+    for row in rows:
+        if (row.get("status") or "").strip() == "pending_review":
+            continue
+        row_aliases = {_normalize(alias) for alias in re.split(r"[、,，/\\]+", row.get("raw_alias", "")) if alias.strip()}
+        if not candidate_aliases.intersection(row_aliases):
+            continue
+        if _learned_target_key(row) != candidate_target:
+            return row
+    return None
+
+
+def _learned_target_key(row: dict[str, str]) -> tuple[str, str, str]:
+    return (
+        _normalize(row.get("tax_category", "")),
+        _normalize(row.get("tax_code", "")),
+        _normalize_rate_for_compare(row.get("tax_treatment_or_rate", "")),
+    )
+
+
 def _read_learned_rule_rows() -> list[dict[str, str]]:
     return _read_rule_rows(LEARNED_RULES_PATH)
 
@@ -472,6 +533,15 @@ def _append_source_case(existing: str, new_value: str) -> str:
     if new_value and new_value not in parts:
         parts.append(new_value)
     return ";".join(parts)
+
+
+def _current_operator() -> str:
+    return (
+        os.environ.get("TAX_INVOICE_OPERATOR")
+        or os.environ.get("USERNAME")
+        or os.environ.get("USER")
+        or ""
+    ).strip()
 
 
 def _should_replace_tax_rate(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import sys
+from copy import deepcopy
 from dataclasses import asdict
 from datetime import datetime
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -34,6 +35,7 @@ from tax_invoice_demo.workbench import (  # noqa: E402
     draft_directory,
     load_draft,
     load_draft_batch,
+    save_draft,
     update_draft_from_form,
 )
 
@@ -63,6 +65,16 @@ SUCCESS_LEDGER_HEADERS = [
     "coding_reference",
     "note",
 ]
+
+REPAIR_FIELD_TO_LINE_ATTR = {
+    "line_tax_rate": "tax_rate",
+    "line_tax_code": "tax_code",
+    "line_project_name": "project_name",
+    "line_unit": "unit",
+    "line_quantity": "quantity",
+    "line_unit_price": "unit_price",
+    "line_amount_with_tax": "amount_with_tax",
+}
 
 
 def default_form() -> dict[str, str]:
@@ -164,6 +176,26 @@ def parse_failure_file(file: FileStorage, *, draft: InvoiceDraft | None = None) 
     file.save(target)
     report = build_failure_report(target)
     if draft is not None:
+        report = enrich_failure_report_for_draft(report, draft)
+        failure_summary = [
+            {
+                "field_name": item.get("field_name", ""),
+                "failure_type": item.get("failure_type", ""),
+                "target_label": item.get("target_label", ""),
+                "repair_focus": item.get("repair_focus", ""),
+            }
+            for item in report.get("records", [])
+        ]
+        if failure_summary:
+            draft.issues = [issue for issue in draft.issues if not issue.startswith("税局退回：")]
+            draft.issues.extend(
+                f"税局退回：{item['target_label'] or '整张发票'}，"
+                f"{item['repair_focus'] or item['field_name'] or '请人工复核'}。"
+                for item in failure_summary
+            )
+            save_draft(draft)
+        save_failure_report_for_draft(draft.draft_id, report)
+    if draft is not None:
         record_case_event(
             case_id=draft.case_id,
             draft_id=draft.draft_id,
@@ -175,6 +207,98 @@ def parse_failure_file(file: FileStorage, *, draft: InvoiceDraft | None = None) 
             },
         )
     return report
+
+
+def enrich_failure_report_for_draft(report: dict[str, Any], draft: InvoiceDraft) -> dict[str, Any]:
+    enriched = deepcopy(report)
+    for record in enriched.get("records", []):
+        _attach_failure_target(record, draft)
+    _refresh_failure_report_summary(enriched)
+    return enriched
+
+
+def load_failure_report_for_draft(draft_id: str, draft: InvoiceDraft | None = None) -> dict[str, Any] | None:
+    path = _failure_report_path(draft_id)
+    if not path.exists():
+        return None
+    report = json.loads(path.read_text(encoding="utf-8"))
+    return enrich_failure_report_for_draft(report, draft) if draft is not None else report
+
+
+def save_failure_report_for_draft(draft_id: str, report: dict[str, Any]) -> Path:
+    path = _failure_report_path(draft_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def _failure_report_path(draft_id: str) -> Path:
+    return draft_directory(draft_id) / "failure_report.json"
+
+
+def apply_failure_repairs_to_draft(draft: InvoiceDraft) -> dict[str, Any]:
+    report = load_failure_report_for_draft(draft.draft_id)
+    if not report:
+        return {
+            "draft": draft,
+            "failure_report": None,
+            "applied_count": 0,
+            "applied_records": [],
+        }
+    report = enrich_failure_report_for_draft(report, draft)
+    applied_records: list[dict[str, str]] = []
+    applied_at = datetime.now().isoformat(timespec="seconds")
+    for record in report.get("records", []):
+        line = _repair_target_line(record, draft)
+        attr = REPAIR_FIELD_TO_LINE_ATTR.get(str(record.get("repair_field") or ""))
+        value = str(record.get("repair_value") or "").strip()
+        if line is None or not attr or not value:
+            continue
+        before = getattr(line, attr)
+        setattr(line, attr, value)
+        record["repair_status"] = "applied"
+        record["applied_at"] = applied_at
+        record["applied_value"] = value
+        record["previous_value"] = before
+        applied_records.append(
+            {
+                "target_label": str(record.get("target_label") or ""),
+                "field_name": str(record.get("field_name") or ""),
+                "repair_field": str(record.get("repair_field") or ""),
+                "previous_value": before,
+                "applied_value": value,
+            }
+        )
+    _refresh_failure_report_summary(report)
+    if applied_records:
+        draft.issues = [
+            issue
+            for issue in draft.issues
+            if not issue.startswith("税局退回：") and not issue.startswith("已应用税局建议：")
+        ]
+        draft.issues.extend(
+            f"已应用税局建议：{item['target_label'] or '明细行'}，"
+            f"{item['field_name'] or '字段'}改为 {item['applied_value']}。"
+            for item in applied_records
+        )
+        save_draft(draft)
+        record_case_event(
+            case_id=draft.case_id,
+            draft_id=draft.draft_id,
+            event_type="failure_repairs_applied",
+            payload={
+                "applied_at": applied_at,
+                "applied_count": len(applied_records),
+                "applied_records": applied_records,
+            },
+        )
+    save_failure_report_for_draft(draft.draft_id, report)
+    return {
+        "draft": draft,
+        "failure_report": report,
+        "applied_count": len(applied_records),
+        "applied_records": applied_records,
+    }
 
 
 def record_success_to_ledger(draft: InvoiceDraft) -> Path:
@@ -256,8 +380,8 @@ def draft_preview(draft: InvoiceDraft) -> dict[str, Any]:
     }
 
 
-def line_form_rows(draft: InvoiceDraft) -> list[dict[str, str]]:
-    return draft_preview(draft)["line_rows"] or [
+def line_form_rows(draft: InvoiceDraft, failure_report: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    rows = draft_preview(draft)["line_rows"] or [
         {
             "project_name": "",
             "tax_category": "",
@@ -271,6 +395,153 @@ def line_form_rows(draft: InvoiceDraft) -> list[dict[str, str]]:
             "coding_reference": "",
         }
     ]
+    failures_by_line = _failures_by_line(failure_report)
+    for index, row in enumerate(rows, start=1):
+        row["failure_alerts"] = failures_by_line.get(index, [])
+    return rows
+
+
+def _attach_failure_target(record: dict[str, Any], draft: InvoiceDraft) -> None:
+    field_name = str(record.get("field_name") or "")
+    source_sheet = str(record.get("source_sheet") or "")
+    reason = str(record.get("reason") or "")
+    target_line_no = _infer_target_line_no(record, draft)
+    record["target_line_no"] = str(target_line_no) if target_line_no else ""
+    if target_line_no:
+        project_name = draft.lines[target_line_no - 1].project_name if target_line_no <= len(draft.lines) else ""
+        record["target_scope"] = "line"
+        record["target_label"] = f"第 {target_line_no} 行{('：' + project_name) if project_name else ''}"
+    elif source_sheet == "1-发票基本信息" or field_name in {"购买方名称", "购买方纳税人识别号", "购买方税号", "发票类型", "特定业务类型"}:
+        record["target_scope"] = "draft"
+        record["target_label"] = "发票抬头 / 基本信息"
+    else:
+        record["target_scope"] = "invoice"
+        record["target_label"] = "整张发票"
+    record["repair_focus"] = _repair_focus(field_name, reason)
+    record["repair_field"] = _repair_field(field_name)
+    record["repair_value"] = _repair_value(record)
+    if record.get("repair_status") != "applied" and record["repair_field"] and record["repair_value"] and target_line_no:
+        record["repair_status"] = "ready"
+
+
+def _infer_target_line_no(record: dict[str, Any], draft: InvoiceDraft) -> int:
+    field_name = str(record.get("field_name") or "")
+    source_sheet = str(record.get("source_sheet") or "")
+    reason = str(record.get("reason") or "")
+    if source_sheet != "2-发票明细信息" and field_name not in {
+        "商品和服务税收编码",
+        "税率",
+        "金额",
+        "项目名称",
+        "单位",
+        "数量",
+        "单价",
+    }:
+        return 0
+    row_number = _extract_row_number(reason)
+    if row_number >= 4:
+        candidate = row_number - 3
+        if 1 <= candidate <= len(draft.lines):
+            return candidate
+    if len(draft.lines) == 1:
+        return 1
+    return 0
+
+
+def _extract_row_number(reason: str) -> int:
+    import re
+
+    match = re.search(r"第\s*(\d+)\s*行", reason)
+    if not match:
+        return 0
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return 0
+
+
+def _repair_focus(field_name: str, reason: str) -> str:
+    if field_name in {"商品和服务税收编码", "商品和服务分类简称"}:
+        return "检查税收编码，必要时改成税局允许的下级具体编码"
+    if field_name == "税率":
+        return "按税局允许税率调整这一行后重建模板"
+    if field_name in {"购买方纳税人识别号", "购买方税号"}:
+        return "核对购买方税号格式和专票必填要求"
+    if field_name == "购买方名称":
+        return "核对购买方名称是否为空、过长或与税号不匹配"
+    if field_name in {"单位", "数量", "单价", "金额", "项目名称"}:
+        return f"补齐或修正明细里的{field_name}"
+    if "不属于涉税专业服务机构" in reason:
+        return "这是销售方资质限制，先确认开票主体或替代税目口径"
+    return "按税局失败原因复核草稿字段"
+
+
+def _repair_field(field_name: str) -> str:
+    if field_name == "税率":
+        return "line_tax_rate"
+    if field_name in {"商品和服务税收编码", "商品和服务分类简称"}:
+        return "line_tax_code"
+    if field_name == "项目名称":
+        return "line_project_name"
+    if field_name == "单位":
+        return "line_unit"
+    if field_name == "数量":
+        return "line_quantity"
+    if field_name == "单价":
+        return "line_unit_price"
+    if field_name == "金额":
+        return "line_amount_with_tax"
+    return ""
+
+
+def _repair_value(record: dict[str, Any]) -> str:
+    field_name = str(record.get("field_name") or "")
+    if field_name == "税率":
+        return str(record.get("suggested_value") or "")
+    return ""
+
+
+def _repair_target_line(record: dict[str, Any], draft: InvoiceDraft) -> InvoiceLine | None:
+    try:
+        line_no = int(record.get("target_line_no") or 0)
+    except (TypeError, ValueError):
+        return None
+    if line_no < 1 or line_no > len(draft.lines):
+        return None
+    return draft.lines[line_no - 1]
+
+
+def _refresh_failure_report_summary(report: dict[str, Any]) -> None:
+    records = report.get("records", [])
+    actionable_count = 0
+    applied_count = 0
+    for record in records:
+        if record.get("repair_status") == "applied":
+            applied_count += 1
+        if (
+            record.get("target_line_no")
+            and record.get("repair_field")
+            and record.get("repair_value")
+            and record.get("repair_status") != "applied"
+        ):
+            actionable_count += 1
+    report["actionable_count"] = actionable_count
+    report["applied_count"] = applied_count
+
+
+def _failures_by_line(failure_report: dict[str, Any] | None) -> dict[int, list[dict[str, str]]]:
+    if not failure_report:
+        return {}
+    result: dict[int, list[dict[str, str]]] = {}
+    for record in failure_report.get("records", []):
+        try:
+            line_no = int(record.get("target_line_no") or 0)
+        except (TypeError, ValueError):
+            line_no = 0
+        if line_no <= 0:
+            continue
+        result.setdefault(line_no, []).append(record)
+    return result
 
 
 def _lines_from_form(form: dict[str, Any]) -> list[InvoiceLine]:
