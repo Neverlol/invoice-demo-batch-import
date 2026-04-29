@@ -5,7 +5,7 @@ from pathlib import Path
 from threading import Lock, Thread
 from uuid import uuid4
 
-from flask import Flask, abort, redirect, render_template, request, send_file, url_for
+from flask import Flask, abort, jsonify, redirect, render_template, request, send_file, url_for
 
 from tax_invoice_batch_demo.batch_runner import BatchImportRunner
 from tax_invoice_batch_demo.lean_workbench import (
@@ -29,6 +29,7 @@ from tax_invoice_batch_demo.lean_workbench import (
 )
 from tax_invoice_demo.case_events import record_case_event
 from tax_invoice_demo.sync_service import schedule_background_rule_pull
+from tax_invoice_demo.taxonomy_search import search_taxonomy
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -153,6 +154,12 @@ def apply_failure_repairs(draft_id: str):
         applied_failure_repairs=result,
         needs_rebuild=bool(result.get("applied_count")),
     )
+
+
+@app.get("/api/taxonomy/search")
+def taxonomy_search_api():
+    query = (request.args.get("q") or "").strip()
+    return jsonify({"results": [item.to_dict() for item in search_taxonomy(query)]})
 
 
 @app.post("/drafts/<draft_id>/mark-success")

@@ -128,9 +128,21 @@ class LeanUIRenderingTest(unittest.TestCase):
         self.assertIn("税局失败明细", html)
         self.assertIn("浏览器连接设置", html)
         self.assertIn("下载税局文件", html)
+        self.assertIn("搜索官方编码", html)
+        self.assertIn("data-taxonomy-query", html)
         self.assertNotIn("草稿摘要", html)
         self.assertNotIn("识别提醒", html)
         self.assertNotIn("CDP 端口", html)
+
+    def test_taxonomy_search_api_returns_official_code_options(self):
+        response = app.test_client().get("/api/taxonomy/search?q=医疗")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        labels = "\n".join(item["label"] for item in payload["results"])
+        self.assertIn("医疗", labels)
+        self.assertTrue(any(item["official_code"] for item in payload["results"]))
+        self.assertTrue(any(item["category_short_name"] for item in payload["results"]))
 
     def test_failure_repair_button_applies_suggestion_and_rebuilds_template(self):
         draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", MINIMAL_TEXT_INPUT, "", [])

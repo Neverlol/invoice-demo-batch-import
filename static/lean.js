@@ -114,6 +114,90 @@ if (applyAllButton) {
   });
 }
 
+const taxonomyPicker = document.querySelector("[data-taxonomy-picker]");
+if (taxonomyPicker) {
+  const queryInput = taxonomyPicker.querySelector("[data-taxonomy-query]");
+  const resultsBox = taxonomyPicker.querySelector("[data-taxonomy-results]");
+  let taxonomyTimer = null;
+
+  function hideTaxonomyResults() {
+    if (resultsBox) {
+      resultsBox.hidden = true;
+      resultsBox.innerHTML = "";
+    }
+  }
+
+  function renderTaxonomyResults(items) {
+    if (!resultsBox) {
+      return;
+    }
+    resultsBox.innerHTML = "";
+    if (!items.length) {
+      resultsBox.innerHTML = '<div class="taxonomy-option"><small>没有匹配结果，换个关键词试试</small></div>';
+      resultsBox.hidden = false;
+      return;
+    }
+    items.forEach((item) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "taxonomy-option";
+      button.innerHTML = `
+        <strong>${item.official_name || item.category_short_name}</strong>
+        <small>${item.category_short_name || ""}｜${item.official_code || ""}${item.is_summary ? "｜<em>汇总类，建议继续选更具体项</em>" : ""}</small>
+      `;
+      button.addEventListener("click", () => {
+        const categoryInput = document.querySelector('[data-bulk-source="line_tax_category"]');
+        const codeInput = document.querySelector('[data-bulk-source="line_tax_code"]');
+        if (categoryInput) {
+          categoryInput.value = item.category_short_name || item.official_name || "";
+          categoryInput.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        if (codeInput) {
+          codeInput.value = item.official_code || "";
+          codeInput.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        if (queryInput) {
+          queryInput.value = item.official_name || item.category_short_name || "";
+        }
+        hideTaxonomyResults();
+      });
+      resultsBox.appendChild(button);
+    });
+    resultsBox.hidden = false;
+  }
+
+  async function searchTaxonomy(query) {
+    const keyword = query.trim();
+    if (keyword.length < 2) {
+      hideTaxonomyResults();
+      return;
+    }
+    try {
+      const response = await fetch(`/api/taxonomy/search?q=${encodeURIComponent(keyword)}`);
+      if (!response.ok) {
+        hideTaxonomyResults();
+        return;
+      }
+      const payload = await response.json();
+      renderTaxonomyResults(payload.results || []);
+    } catch (error) {
+      hideTaxonomyResults();
+    }
+  }
+
+  if (queryInput) {
+    queryInput.addEventListener("input", () => {
+      clearTimeout(taxonomyTimer);
+      taxonomyTimer = setTimeout(() => searchTaxonomy(queryInput.value), 220);
+    });
+  }
+  document.addEventListener("click", (event) => {
+    if (!taxonomyPicker.contains(event.target)) {
+      hideTaxonomyResults();
+    }
+  });
+}
+
 document.querySelectorAll("[data-apply-line-repair]").forEach((button) => {
   button.addEventListener("click", () => {
     const row = button.closest("tr");

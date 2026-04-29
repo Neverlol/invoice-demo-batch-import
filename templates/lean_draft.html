@@ -248,10 +248,14 @@
                   <h3>一键修改</h3>
                   <small>面对多行明细时，用这里统一改赋码和税率。</small>
                 </div>
+                <div class="taxonomy-picker" data-taxonomy-picker>
+                  <label>搜索官方编码<input data-taxonomy-query placeholder="输入关键词，如：医疗、注射、器械"></label>
+                  <div class="taxonomy-results" data-taxonomy-results hidden></div>
+                </div>
                 <div class="bulk-fields">
-                  <label>赋码大类<input data-bulk-source="line_tax_category" placeholder="例如：金属制品"></label>
-                  <label>税收编码<input data-bulk-source="line_tax_code" placeholder="例如：1080403990000000000"></label>
-                  <label>税率<input data-bulk-source="line_tax_rate" placeholder="例如：3%"></label>
+                  <label>赋码大类<input data-bulk-source="line_tax_category" placeholder="例如：医疗仪器器械"></label>
+                  <label>税收编码<input data-bulk-source="line_tax_code" placeholder="选择后自动填入"></label>
+                  <label>税率<input data-bulk-source="line_tax_rate" placeholder="例如：13%"></label>
                 </div>
                 <div class="bulk-actions">
                   <button type="button" class="secondary" data-bulk-apply="line_tax_rate">只改税率</button>
