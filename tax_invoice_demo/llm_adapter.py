@@ -84,6 +84,9 @@ class BaseLLMAdapter:
     def extract_text_from_image(self, image_path: Path) -> LLMResponse:
         raise LLMAdapterError("Image OCR adapter is disabled.")
 
+    def ping_json(self) -> LLMResponse:
+        raise LLMAdapterError("LLM adapter is disabled.")
+
 
 class NullLLMAdapter(BaseLLMAdapter):
     pass
@@ -96,8 +99,9 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
         self.api_key = config.api_key
         self.endpoint = config.endpoint or DEFAULT_MINIMAX_ENDPOINT
         self.model = config.model or DEFAULT_MINIMAX_MODEL
-        # P0 现场链路不能被旧 local 配置中的 45s 长等待拖住。
-        self.timeout_seconds = min(config.timeout_seconds, 12)
+        # P0 现场链路不能被旧 local 配置中的 45s 长等待拖住；
+        # 但 MiniMax-M2.7 是 reasoning 模型，12s 对结构化开票 JSON 容易过短。
+        self.timeout_seconds = min(config.timeout_seconds, 25)
         self.max_retries = config.max_retries
 
     @property
@@ -126,7 +130,7 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
             f"项目名称：{item_name}\n"
             f"候选：{json.dumps(candidates, ensure_ascii=False)}"
         )
-        return self._chat_json(prompt, timeout_seconds=min(self.timeout_seconds, 6))
+        return self._chat_json(prompt, timeout_seconds=min(self.timeout_seconds, 8))
 
     def extract_text_from_image(self, image_path: Path) -> LLMResponse:
         mime_type = mimetypes.guess_type(str(image_path))[0] or "image/png"
@@ -147,8 +151,11 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
                     ],
                 },
             ],
-            timeout_seconds=min(self.timeout_seconds, 8),
+            timeout_seconds=min(self.timeout_seconds, 20),
         )
+
+    def ping_json(self) -> LLMResponse:
+        return self._chat_json("只返回 JSON：{\"ok\": true}", timeout_seconds=min(self.timeout_seconds, 15))
 
     def _chat_json(self, prompt: str, *, timeout_seconds: int | None = None) -> LLMResponse:
         return self._chat_json_messages(

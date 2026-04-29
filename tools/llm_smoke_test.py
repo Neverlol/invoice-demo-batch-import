@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from dataclasses import asdict
 from pathlib import Path
 
@@ -32,6 +33,7 @@ def main() -> int:
     parser.add_argument("--text", default="", help="Text to extract. Defaults to a small invoice sample.")
     parser.add_argument("--file", default="", help="Read extraction text from file.")
     parser.add_argument("--image", default="", help="Run LLM image OCR smoke test with this image path.")
+    parser.add_argument("--ping", action="store_true", help="Run the smallest JSON ping call before full invoice extraction.")
     parser.add_argument("--config-only", action="store_true", help="Only print config diagnostic, do not call model.")
     args = parser.parse_args()
 
@@ -44,13 +46,37 @@ def main() -> int:
         return 0 if diagnostic.ready or args.config_only else 1
 
     adapter = get_llm_adapter()
+    if args.ping:
+        started_at = time.perf_counter()
+        try:
+            response = adapter.ping_json()
+        except LLMAdapterError as exc:
+            result["ping_call"] = {
+                "status": "failed",
+                "error": str(exc),
+                "elapsed_seconds": round(time.perf_counter() - started_at, 3),
+            }
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 1
+        result["ping_call"] = {
+            "status": "success" if response.parsed_json.get("ok") is True else "unexpected_payload",
+            "provider": response.provider,
+            "model": response.model,
+            "elapsed_seconds": round(time.perf_counter() - started_at, 3),
+            "parsed_json": response.parsed_json,
+        }
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if response.parsed_json.get("ok") is True else 1
+
     if args.image:
+        started_at = time.perf_counter()
         try:
             response = adapter.extract_text_from_image(Path(args.image).expanduser())
         except (LLMAdapterError, OSError) as exc:
             result["image_call"] = {
                 "status": "failed",
                 "error": str(exc),
+                "elapsed_seconds": round(time.perf_counter() - started_at, 3),
             }
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 1
@@ -61,11 +87,13 @@ def main() -> int:
             "model": response.model,
             "parsed_json": response.parsed_json,
             "text_preview": extracted_text[:800],
+            "elapsed_seconds": round(time.perf_counter() - started_at, 3),
         }
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if extracted_text.strip() else 1
 
     text = _load_text(args.file) if args.file else (args.text.strip() or SAMPLE_TEXT)
+    started_at = time.perf_counter()
     try:
         response = adapter.extract_invoice_info(text)
         validation_errors = validate_extract_invoice_payload(response.parsed_json)
@@ -73,6 +101,7 @@ def main() -> int:
         result["call"] = {
             "status": "failed",
             "error": str(exc),
+            "elapsed_seconds": round(time.perf_counter() - started_at, 3),
         }
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 1
@@ -83,6 +112,7 @@ def main() -> int:
         "model": response.model,
         "validation_errors": validation_errors,
         "parsed_json": response.parsed_json,
+        "elapsed_seconds": round(time.perf_counter() - started_at, 3),
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if not validation_errors else 1

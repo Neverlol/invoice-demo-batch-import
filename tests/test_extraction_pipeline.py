@@ -346,6 +346,15 @@ class ExtractionPipelineTest(unittest.TestCase):
         self.assertEqual(response.parsed_json["客户名称"], "测试有限公司")
         self.assertEqual(response.parsed_json["项目列表"][0]["项目名称"], "医用检查手套")
 
+    def test_minimax_uses_slow_model_compatible_timeout_cap(self):
+        os.environ["TAX_INVOICE_LLM_PROVIDER"] = "minimax"
+        os.environ["TAX_INVOICE_LLM_API_KEY"] = "fake-key"
+        os.environ["TAX_INVOICE_LLM_TIMEOUT"] = "45"
+
+        adapter = llm_adapter_module.get_llm_adapter()
+
+        self.assertEqual(adapter.timeout_seconds, 25)
+
     def test_llm_config_diagnostic_redacts_key(self):
         os.environ["TAX_INVOICE_LLM_PROVIDER"] = "minimax"
         os.environ["TAX_INVOICE_LLM_API_KEY"] = "sk-test-123456"
