@@ -4,6 +4,7 @@ import base64
 import json
 import mimetypes
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -165,7 +166,6 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
             "model": self.model,
             "messages": messages,
             "temperature": 0.1,
-            "response_format": {"type": "json_object"},
         }
         request = Request(
             self.endpoint,
@@ -403,7 +403,7 @@ def _extract_openai_content(payload: dict[str, Any]) -> str:
 
 
 def _parse_json_content(content: str) -> dict[str, Any]:
-    text = content.strip()
+    text = _strip_reasoning_blocks(content).strip()
     if text.startswith("```"):
         lines = text.splitlines()
         if lines and lines[0].strip().startswith("```"):
@@ -425,6 +425,10 @@ def _parse_json_content(content: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise LLMAdapterError("MiniMax returned JSON but it is not an object.")
     return parsed
+
+
+def _strip_reasoning_blocks(content: str) -> str:
+    return re.sub(r"<think>.*?</think>", "", content or "", flags=re.DOTALL | re.IGNORECASE)
 
 
 def _redact_key(value: str) -> str:

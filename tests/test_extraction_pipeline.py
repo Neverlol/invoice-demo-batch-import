@@ -317,6 +317,35 @@ class ExtractionPipelineTest(unittest.TestCase):
         self.assertEqual(outcome.buyer.name, "辽宁恒润电力科技有限公司")
         self.assertEqual(outcome.lines[0].project_name, "代理记账和税务申报")
 
+    def test_minimax_payload_omits_response_format_and_accepts_think_json(self):
+        os.environ["TAX_INVOICE_LLM_PROVIDER"] = "minimax"
+        os.environ["TAX_INVOICE_LLM_API_KEY"] = "fake-key"
+        captured_payload = {}
+        content = """<think>先理解字段，不要把这里当 JSON。</think>
+{
+  "客户名称": "测试有限公司",
+  "纳税人识别号": "91210103MAC7R8K26X",
+  "地址电话": "",
+  "开户行及账号": "",
+  "项目列表": [
+    {"项目名称": "医用检查手套", "规格型号": "", "单位": "盒", "数量": "1", "单价": "100", "金额": "100", "税率": "13%"}
+  ],
+  "价税合计": "100",
+  "备注": ""
+}
+"""
+
+        def fake_urlopen(request, timeout=None):
+            captured_payload.update(json.loads(request.data.decode("utf-8")))
+            return _FakeHTTPResponse({"choices": [{"message": {"content": content}}]})
+
+        with patch.object(llm_adapter_module, "urlopen", side_effect=fake_urlopen):
+            response = llm_adapter_module.get_llm_adapter().extract_invoice_info("测试")
+
+        self.assertNotIn("response_format", captured_payload)
+        self.assertEqual(response.parsed_json["客户名称"], "测试有限公司")
+        self.assertEqual(response.parsed_json["项目列表"][0]["项目名称"], "医用检查手套")
+
     def test_llm_config_diagnostic_redacts_key(self):
         os.environ["TAX_INVOICE_LLM_PROVIDER"] = "minimax"
         os.environ["TAX_INVOICE_LLM_API_KEY"] = "sk-test-123456"
