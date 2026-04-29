@@ -1,6 +1,53 @@
 const addButton = document.querySelector("[data-add-line]");
 const tbody = document.querySelector("[data-lines]");
 
+function setActionMode(mode) {
+  const panel = document.querySelector("[data-action-panel]");
+  if (!panel) {
+    return;
+  }
+  const importButton = panel.querySelector("[data-import-action]");
+  const saveButton = panel.querySelector("[data-save-action]");
+  if (!importButton || !saveButton) {
+    return;
+  }
+  const saveIsPrimary = mode === "save";
+  saveButton.classList.toggle("primary", saveIsPrimary);
+  saveButton.classList.toggle("secondary", !saveIsPrimary);
+  importButton.classList.toggle("primary", !saveIsPrimary);
+  importButton.classList.toggle("secondary", saveIsPrimary);
+  panel.dataset.currentAction = mode;
+}
+
+function markDraftNeedsRebuild() {
+  setActionMode("save");
+}
+
+const draftForm = document.querySelector("[data-draft-form]");
+if (draftForm) {
+  setActionMode(draftForm.dataset.initialAction || "import");
+  draftForm.addEventListener("input", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)) {
+      return;
+    }
+    if (target.name === "failure_file" || target.name === "cdp_endpoint") {
+      return;
+    }
+    markDraftNeedsRebuild();
+  });
+  draftForm.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)) {
+      return;
+    }
+    if (target.name === "failure_file" || target.name === "cdp_endpoint") {
+      return;
+    }
+    markDraftNeedsRebuild();
+  });
+}
+
 if (addButton && tbody) {
   addButton.addEventListener("click", () => {
     const template = tbody.querySelector("tr");
@@ -20,6 +67,7 @@ if (addButton && tbody) {
       note.classList.remove("pending-change");
     });
     tbody.appendChild(row);
+    markDraftNeedsRebuild();
   });
 }
 
@@ -31,6 +79,7 @@ function markCodingPending(input) {
   }
   note.textContent = "保存后记录人工修正";
   note.classList.add("pending-change");
+  markDraftNeedsRebuild();
 }
 
 function applyBulkField(fieldName) {
@@ -53,6 +102,7 @@ function applyBulkField(fieldName) {
 document.querySelectorAll("[data-bulk-apply]").forEach((button) => {
   button.addEventListener("click", () => {
     applyBulkField(button.dataset.bulkApply);
+    markDraftNeedsRebuild();
   });
 });
 
@@ -60,6 +110,7 @@ const applyAllButton = document.querySelector("[data-bulk-apply-all]");
 if (applyAllButton) {
   applyAllButton.addEventListener("click", () => {
     ["line_tax_category", "line_tax_code", "line_tax_rate"].forEach(applyBulkField);
+    markDraftNeedsRebuild();
   });
 }
 
@@ -78,6 +129,7 @@ document.querySelectorAll("[data-apply-line-repair]").forEach((button) => {
       input.removeAttribute("readonly");
     }
     markCodingPending(input);
+    markDraftNeedsRebuild();
     button.textContent = `已应用：${value}`;
   });
 });
@@ -91,6 +143,7 @@ document.querySelectorAll("[data-edit-field]").forEach((button) => {
     }
     input.removeAttribute("readonly");
     wrapper.classList.add("is-editing");
+    markDraftNeedsRebuild();
     input.focus();
     if (input.select) {
       input.select();
@@ -115,6 +168,7 @@ document.querySelectorAll("[data-edit-section]").forEach((button) => {
       }
     });
     if (enable) {
+      markDraftNeedsRebuild();
       const first = scope.querySelector("[data-lockable]");
       if (first) {
         first.focus();
@@ -136,6 +190,7 @@ document.querySelectorAll("[data-toggle-choice]").forEach((button) => {
       return;
     }
     wrapper.classList.toggle("is-editing");
+    markDraftNeedsRebuild();
     const select = wrapper.querySelector("select");
     if (select) {
       select.focus();
@@ -150,6 +205,7 @@ document.querySelectorAll(".field-choice select").forEach((select) => {
     if (display) {
       display.textContent = select.options[select.selectedIndex]?.text || select.value;
     }
+    markDraftNeedsRebuild();
   });
 });
 

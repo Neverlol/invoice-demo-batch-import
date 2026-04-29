@@ -87,6 +87,7 @@ def draft_detail(draft_id: str):
         saved=False,
         success_recorded=False,
         applied_failure_repairs=None,
+        needs_rebuild=bool(failure_report and failure_report.get("needs_confirmation_rebuild")),
     )
 
 
@@ -95,6 +96,10 @@ def save_draft(draft_id: str):
     draft = save_lean_draft_from_form(draft_id, request.form, request.files.getlist("source_files"))
     export = export_draft_template(draft)
     failure_report = load_failure_report_for_draft(draft_id, draft=draft)
+    if failure_report and failure_report.get("needs_confirmation_rebuild"):
+        failure_report["needs_confirmation_rebuild"] = False
+        failure_report["operator_confirmed_after_repair"] = True
+        save_failure_report_for_draft(draft_id, failure_report)
     return render_template(
         "lean_draft.html",
         draft=draft,
@@ -105,6 +110,7 @@ def save_draft(draft_id: str):
         saved=True,
         success_recorded=False,
         applied_failure_repairs=None,
+        needs_rebuild=False,
     )
 
 
@@ -124,6 +130,7 @@ def upload_failure(draft_id: str):
         saved=True,
         success_recorded=False,
         applied_failure_repairs=None,
+        needs_rebuild=False,
     )
 
 
@@ -144,6 +151,7 @@ def apply_failure_repairs(draft_id: str):
         saved=True,
         success_recorded=False,
         applied_failure_repairs=result,
+        needs_rebuild=bool(result.get("applied_count")),
     )
 
 
@@ -163,6 +171,7 @@ def mark_success(draft_id: str):
         saved=True,
         success_recorded=True,
         applied_failure_repairs=None,
+        needs_rebuild=False,
     )
 
 

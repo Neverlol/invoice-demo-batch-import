@@ -1773,9 +1773,19 @@ th {
   font-size: 22px;
 }
 
+.failure-global-list,
 .failure-record-list {
   display: grid;
   gap: 8px;
+}
+
+.failure-global-list {
+  margin-top: 12px;
+}
+
+.global-repair {
+  border-color: #bfdbfe;
+  background: #eff6ff;
 }
 
 .failure-record {

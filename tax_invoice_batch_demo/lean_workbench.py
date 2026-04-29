@@ -290,6 +290,8 @@ def apply_failure_repairs_to_draft(draft: InvoiceDraft) -> dict[str, Any]:
             record["repair_scope_label"] = "已修复定位明细行"
     _refresh_failure_report_summary(report)
     if applied_records:
+        report["needs_confirmation_rebuild"] = True
+        report["operator_confirmed_after_repair"] = False
         draft.issues = [
             issue
             for issue in draft.issues
@@ -439,6 +441,17 @@ def _attach_failure_target(record: dict[str, Any], draft: InvoiceDraft) -> None:
     record["repair_focus"] = _repair_focus(field_name, reason)
     record["repair_field"] = _repair_field(field_name)
     record["repair_value"] = _repair_value(record)
+    if _should_expand_repair_to_matching_lines(record):
+        attr = REPAIR_FIELD_TO_LINE_ATTR.get(str(record.get("repair_field") or ""))
+        repair_value = str(record.get("repair_value") or "").strip()
+        target_lines = _repair_target_lines(record, draft, attr=attr or "", value=repair_value) if attr and repair_value else []
+        if len(target_lines) > 1:
+            record["repair_scope"] = "matching_lines"
+            if record.get("repair_status") == "applied":
+                record["repair_scope_label"] = f"已同步修复 {len(target_lines)} 行同类税率问题"
+            else:
+                record["repair_scope_label"] = f"建议同步修复 {len(target_lines)} 行同类税率问题"
+            record["repair_target_line_count"] = len(target_lines)
     if record.get("repair_status") == "applied" and _has_remaining_matching_repair(record, draft):
         record["repair_status"] = "ready"
         record["repair_completion_hint"] = "检测到还有同类明细未应用该税局建议，可继续一键补齐。"
@@ -588,6 +601,7 @@ def _refresh_failure_report_summary(report: dict[str, Any]) -> None:
     applied_count = 0
     manual_review_count = 0
     non_auto_count = 0
+    human_confirmation_count = 0
     for record in records:
         repair_status = str(record.get("repair_status") or "")
         can_apply_safely = bool(
@@ -598,15 +612,18 @@ def _refresh_failure_report_summary(report: dict[str, Any]) -> None:
         )
         if repair_status == "applied":
             try:
-                applied_count += int(record.get("applied_line_count") or 1)
+                applied_line_count = int(record.get("applied_line_count") or 1)
             except (TypeError, ValueError):
-                applied_count += 1
+                applied_line_count = 1
+            applied_count += applied_line_count
+            human_confirmation_count += applied_line_count
             record["repair_decision"] = "applied"
             record["repair_decision_label"] = "已应用"
-            record["repair_decision_hint"] = "这条税局建议已写回草稿。"
+            record["repair_decision_hint"] = "这条税局建议已写回草稿；再次上传前仍需助理人工确认并保存重建模板。"
             continue
         if can_apply_safely:
             actionable_count += 1
+            human_confirmation_count += 1
             record["repair_decision"] = "safe_auto_repair"
             record["repair_decision_label"] = "可一键修复"
             record["repair_decision_hint"] = "税局给出了明确建议值，可由助理确认后一键写回并重建模板。"
@@ -618,14 +635,26 @@ def _refresh_failure_report_summary(report: dict[str, Any]) -> None:
             record["repair_decision_hint"] = "涉及开票主体、业务实质或税收编码口径，系统不会自动替换。"
             continue
         manual_review_count += 1
+        human_confirmation_count += 1
         record["repair_decision"] = "manual_review"
         record["repair_decision_label"] = "需人工确认"
         record["repair_decision_hint"] = "系统已定位修复焦点，但缺少可安全自动写回的明确值。"
     report["actionable_count"] = actionable_count
     report["safe_actionable_count"] = actionable_count
     report["manual_review_count"] = manual_review_count
+    report["human_confirmation_count"] = human_confirmation_count
     report["non_auto_count"] = non_auto_count
     report["applied_count"] = applied_count
+    report["global_records"] = [record for record in records if _is_global_failure_record(record)]
+
+
+def _is_global_failure_record(record: dict[str, Any]) -> bool:
+    if str(record.get("repair_scope") or "") == "matching_lines":
+        return True
+    try:
+        return int(record.get("applied_line_count") or 0) > 1
+    except (TypeError, ValueError):
+        return False
 
 
 def _is_non_auto_repairable_failure(record: dict[str, Any]) -> bool:
@@ -649,6 +678,8 @@ def _failures_by_line(failure_report: dict[str, Any] | None) -> dict[int, list[d
         return {}
     result: dict[int, list[dict[str, str]]] = {}
     for record in failure_report.get("records", []):
+        if _is_global_failure_record(record):
+            continue
         try:
             line_no = int(record.get("target_line_no") or 0)
         except (TypeError, ValueError):

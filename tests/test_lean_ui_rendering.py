@@ -120,6 +120,8 @@ class LeanUIRenderingTest(unittest.TestCase):
         self.assertIn("Action Panel", html)
         self.assertNotIn("税局操作步骤", html)
         self.assertIn("下一步操作", html)
+        self.assertIn("启动导入", html)
+        self.assertNotIn("启动批量导入", html)
         self.assertIn("税局失败明细", html)
         self.assertIn("浏览器连接设置", html)
         self.assertIn("下载税局模板", html)
@@ -166,8 +168,12 @@ class LeanUIRenderingTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         html = response.get_data(as_text=True)
         self.assertIn("已应用 1 条税局建议", html)
+        self.assertIn('data-initial-action="save"', html)
+        self.assertIn('<button class="secondary" data-import-action', html)
+        self.assertIn('<button class="primary" data-save-action', html)
         self.assertIn('name="line_tax_rate" value="3%"', html)
         self.assertIn("已应用：3%", html)
+        self.assertIn("再次上传前必须人工确认", html)
 
     def test_failed_run_page_links_back_to_existing_draft_and_uses_clear_failure_wording(self):
         draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", MINIMAL_TEXT_INPUT, "", [])

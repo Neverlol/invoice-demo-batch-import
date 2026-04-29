@@ -39,7 +39,7 @@
         </section>
       </aside>
 
-      <form class="dashboard-form" method="post" action="{{ url_for('save_draft', draft_id=draft.draft_id) }}" enctype="multipart/form-data">
+      <form class="dashboard-form" method="post" action="{{ url_for('save_draft', draft_id=draft.draft_id) }}" enctype="multipart/form-data" data-draft-form data-initial-action="{% if needs_rebuild %}save{% else %}import{% endif %}">
         <section class="main-stage">
           <section class="work-card workflow-strip workflow-strip-primary">
             <div class="workflow-head">
@@ -47,7 +47,7 @@
                 <span class="rail-badge">Service Flow</span>
                 <h2>智能开票服务流程</h2>
               </div>
-              <p>{% if export.error_count %}当前停在复核赋码，请先修正阻断问题。{% else %}草稿已可进入税局批量导入，最终开具仍由人工确认。{% endif %}</p>
+              <p>{% if export.error_count %}当前停在复核赋码，请先修正阻断问题。{% else %}草稿已可进入税局导入，最终开具仍由人工确认。{% endif %}</p>
             </div>
             <ol class="workflow-steps">
               <li class="done">
@@ -64,7 +64,7 @@
               </li>
               <li>
                 <span>4</span>
-                <div><strong>批量导入</strong><small>上传税局模板，回流失败明细</small></div>
+                <div><strong>导入税局</strong><small>上传税局模板，回流失败明细</small></div>
               </li>
               <li>
                 <span>5</span>
@@ -110,12 +110,29 @@
               </div>
               <div class="failure-summary-grid">
                 <div><span>可一键修复</span><strong>{{ failure_report.safe_actionable_count or failure_report.actionable_count or 0 }}</strong><small>税局给出明确建议值</small></div>
-                <div><span>需人工确认</span><strong>{{ failure_report.manual_review_count or 0 }}</strong><small>需助理补充/核对字段</small></div>
+                <div><span>需人工确认</span><strong>{{ failure_report.human_confirmation_count or failure_report.manual_review_count or 0 }}</strong><small>再次上传前必须人工确认</small></div>
                 <div><span>不可自动修复</span><strong>{{ failure_report.non_auto_count or 0 }}</strong><small>主体资质/业务口径风险</small></div>
                 <div><span>已应用</span><strong>{{ failure_report.applied_count or 0 }}</strong><small>已写回草稿</small></div>
               </div>
+              {% if failure_report.global_records %}
+                <div class="failure-global-list">
+                  {% for item in failure_report.global_records %}
+                    <article class="failure-record global-repair {{ item.repair_decision or '' }}">
+                      <div class="failure-record-top">
+                        <span class="failure-pill">{{ item.repair_decision_label or '需人工确认' }}</span>
+                        <strong>{{ item.repair_scope_label or '同类明细集中修复' }}</strong>
+                      </div>
+                      <p>{{ item.field_name or '未识别字段' }}：{{ item.reason }}</p>
+                      {% if item.repair_focus or item.suggested_action %}<small>修复焦点：{{ item.repair_focus or item.suggested_action }}</small>{% endif %}
+                      {% if item.applied_line_labels %}<small>涉及明细：{{ item.applied_line_labels|join('、') }}</small>{% endif %}
+                      {% if item.repair_decision_hint %}<small>{{ item.repair_decision_hint }}</small>{% endif %}
+                      {% if item.repair_completion_hint %}<small>{{ item.repair_completion_hint }}</small>{% endif %}
+                    </article>
+                  {% endfor %}
+                </div>
+              {% endif %}
               <div class="failure-record-list">
-                {% for item in failure_report.records %}
+                {% for item in failure_report.records if item.repair_scope != 'matching_lines' and (item.get('applied_line_count', 0)|int) <= 1 %}
                   <article class="failure-record {{ item.repair_decision or '' }}">
                     <div class="failure-record-top">
                       <span class="failure-pill">{{ item.repair_decision_label or '需人工确认' }}</span>
@@ -356,9 +373,9 @@
               <input type="file" name="failure_file" accept=".xlsx">
             </label>
 
-            <div class="status-actions">
-              <button class="primary" formaction="{{ url_for('execute_draft', draft_id=draft.draft_id) }}" type="submit">启动批量导入</button>
-              <button class="secondary" type="submit">保存并重建模板</button>
+            <div class="status-actions" data-action-panel>
+              <button class="{% if needs_rebuild %}secondary{% else %}primary{% endif %}" data-import-action formaction="{{ url_for('execute_draft', draft_id=draft.draft_id) }}" type="submit">启动导入</button>
+              <button class="{% if needs_rebuild %}primary{% else %}secondary{% endif %}" data-save-action type="submit">保存并重建模板</button>
               <a class="secondary action-link" href="{{ url_for('download_template', draft_id=draft.draft_id) }}">下载税局模板</a>
               <button class="secondary" formaction="{{ url_for('upload_failure', draft_id=draft.draft_id) }}" type="submit">解析失败明细</button>
               <button class="secondary quiet-action" formaction="{{ url_for('mark_success', draft_id=draft.draft_id) }}" type="submit">标记成功并累计</button>
