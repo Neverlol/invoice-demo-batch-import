@@ -260,6 +260,99 @@ textarea::placeholder {
   gap: 22px;
 }
 
+.workflow-strip {
+  display: grid;
+  gap: 14px;
+}
+
+.workflow-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.workflow-head h2,
+.workflow-head p {
+  margin: 0;
+}
+
+.workflow-head p {
+  max-width: 520px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.workflow-steps {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workflow-steps li {
+  position: relative;
+  min-height: 96px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 14px;
+  border: 1px solid rgba(148, 181, 255, 0.18);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.workflow-steps li::after {
+  content: "";
+  position: absolute;
+  top: 30px;
+  right: -10px;
+  width: 10px;
+  height: 2px;
+  background: rgba(148, 181, 255, 0.26);
+}
+
+.workflow-steps li:last-child::after {
+  display: none;
+}
+
+.workflow-steps span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.08);
+  font-weight: 900;
+}
+
+.workflow-steps strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text);
+}
+
+.workflow-steps small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.workflow-steps li.active {
+  border-color: rgba(46, 127, 255, 0.5);
+  background: rgba(46, 127, 255, 0.12);
+}
+
+.workflow-steps li.active span,
+.workflow-steps li.done span {
+  color: #fff;
+  background: var(--green);
+}
+
 .composer-card {
   padding: 18px 20px;
 }
@@ -1033,6 +1126,55 @@ th {
   padding: 18px 20px;
 }
 
+.workflow-strip {
+  padding: 16px 18px;
+}
+
+.workflow-head h2 {
+  color: #111827;
+  font-size: 22px;
+}
+
+.workflow-head p {
+  color: #64748b;
+}
+
+.workflow-steps li {
+  min-height: 86px;
+  border-color: #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.workflow-steps li::after {
+  background: #cbd5e1;
+}
+
+.workflow-steps span {
+  color: #475569;
+  background: #e2e8f0;
+}
+
+.workflow-steps strong {
+  color: #111827;
+}
+
+.workflow-steps small {
+  color: #64748b;
+}
+
+.workflow-steps li.active {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  box-shadow: inset 0 0 0 1px #dbeafe;
+}
+
+.workflow-steps li.active span,
+.workflow-steps li.done span {
+  color: #fff;
+  background: #16a34a;
+}
+
 .card-icon {
   border-radius: 8px;
   background: #eaf2ff;
@@ -1745,8 +1887,17 @@ th {
   .bulk-fields,
   .failure-summary-grid,
   .run-overview-grid,
-  .compact-timeline {
+  .compact-timeline,
+  .workflow-steps {
     grid-template-columns: 1fr;
+  }
+
+  .workflow-head {
+    display: grid;
+  }
+
+  .workflow-steps li::after {
+    display: none;
   }
 
   .stage-head,

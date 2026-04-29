@@ -84,6 +84,17 @@ class LeanUIRenderingTest(unittest.TestCase):
             os.environ["TAX_INVOICE_SYNC_ENABLED"] = self.old_sync_enabled
         self.tempdir.cleanup()
 
+    def test_index_page_puts_service_flow_in_main_stage_not_bottom_rail(self):
+        response = app.test_client().get("/")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn("智能开票服务流程", html)
+        self.assertIn("Service Flow", html)
+        self.assertIn("只到预览，不自动最终开具", html)
+        self.assertNotIn("税局操作步骤", html)
+        self.assertNotIn("执行面板", html)
+
     def test_draft_page_shows_coding_reference_source(self):
         draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", MINIMAL_TEXT_INPUT, "", [])
         lean_workbench_module.save_lean_draft_from_form(
@@ -105,6 +116,9 @@ class LeanUIRenderingTest(unittest.TestCase):
         self.assertIn("命中来源", html)
         self.assertIn("命中 本地即时规则", html)
         self.assertIn("data-coding-note", html)
+        self.assertIn("智能开票服务流程", html)
+        self.assertIn("Action Panel", html)
+        self.assertNotIn("税局操作步骤", html)
         self.assertIn("下一步操作", html)
         self.assertIn("税局失败明细", html)
         self.assertIn("浏览器连接设置", html)

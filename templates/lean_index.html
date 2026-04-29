@@ -29,8 +29,8 @@
         </nav>
 
         <section class="sidebar-panel">
-          <h3>使用流程</h3>
-          <p>录入材料，生成草稿，确认后上传税局模板，再查看预览结果。</p>
+          <h3>当前任务</h3>
+          <p>把客户材料转成可复核、可导入税局的发票草稿。</p>
         </section>
       </aside>
 
@@ -42,6 +42,38 @@
           </div>
           <div class="ghost-button">工作台说明</div>
         </header>
+
+        <section class="work-card workflow-strip">
+          <div class="workflow-head">
+            <div>
+              <span class="rail-badge">Service Flow</span>
+              <h2>智能开票服务流程</h2>
+            </div>
+            <p>从客户材料到税局预览，全流程只在最后人工确认开具。</p>
+          </div>
+          <ol class="workflow-steps">
+            <li class="active">
+              <span>1</span>
+              <div><strong>录入材料</strong><small>粘贴文本 / 上传文件</small></div>
+            </li>
+            <li>
+              <span>2</span>
+              <div><strong>生成草稿</strong><small>抽取购买方与明细</small></div>
+            </li>
+            <li>
+              <span>3</span>
+              <div><strong>复核赋码</strong><small>确认票种、税率、编码</small></div>
+            </li>
+            <li>
+              <span>4</span>
+              <div><strong>批量导入</strong><small>上传税局模板，回流失败明细</small></div>
+            </li>
+            <li>
+              <span>5</span>
+              <div><strong>预览确认</strong><small>只到预览，不自动最终开具</small></div>
+            </li>
+          </ol>
+        </section>
 
         {% if errors %}
           <section class="banner alert">
@@ -112,57 +144,6 @@
         </form>
       </section>
 
-      <aside class="status-rail">
-        <header class="rail-head">
-          <span class="rail-badge">执行面板</span>
-          <h2>税局操作步骤</h2>
-        </header>
-
-        <section class="status-card">
-          <ol class="timeline">
-            <li class="active">
-              <span>1</span>
-              <div>
-                <strong>录入材料</strong>
-                <small>粘贴文本或上传客户原始文件</small>
-              </div>
-            </li>
-            <li>
-              <span>2</span>
-              <div>
-                <strong>生成草稿</strong>
-                <small>抽取购买方与开票明细</small>
-              </div>
-            </li>
-            <li>
-              <span>3</span>
-              <div>
-                <strong>复核赋码</strong>
-                <small>人工确认票种、税率、税收编码</small>
-              </div>
-            </li>
-            <li>
-              <span>4</span>
-              <div>
-                <strong>批量导入</strong>
-                <small>上传税局模板并回流失败明细</small>
-              </div>
-            </li>
-            <li>
-              <span>5</span>
-              <div>
-                <strong>预览确认</strong>
-                <small>税局预览正确后人工最终确认</small>
-              </div>
-            </li>
-          </ol>
-        </section>
-
-        <section class="status-card subdued">
-          <h3>结果展示</h3>
-          <p>生成草稿后，右侧会继续显示税局执行步骤和关键结果，不会打断中间的草稿复核。</p>
-        </section>
-      </aside>
     </main>
   </body>
 </html>
