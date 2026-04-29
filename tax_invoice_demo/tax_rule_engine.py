@@ -80,6 +80,7 @@ class TaxRuleEngine:
             _normalize_inline_tax_category(line)
             suggestion = self.suggest_line(line, context_text=context_text)
             if suggestion is None:
+                _apply_local_medical_consumable_hint(line)
                 taxonomy_suggestion = suggest_taxonomy(line.project_name)
                 if taxonomy_suggestion is not None and taxonomy_suggestion.score >= 84:
                     if not line.tax_category and taxonomy_suggestion.entry.category_short_name:
@@ -636,6 +637,24 @@ def _looks_like_generic_project_name(value: str) -> bool:
         "材料费",
         "货物",
     }
+
+
+def _apply_local_medical_consumable_hint(line: InvoiceLine) -> None:
+    if line.tax_code.strip():
+        return
+    text = f"{line.project_name} {line.specification}".strip()
+    if not text:
+        return
+    if re.search(r"(注射器|输液针|穿刺针|采血针|留置针|注射针)", text):
+        line.tax_category = line.tax_category or "医疗仪器器械"
+        line.tax_code = "1090245030000000000"
+        line.coding_reference = line.coding_reference or "本地医疗耗材规则，需人工复核: 注射穿刺器械 / 医疗仪器器械 / 1090245030000000000"
+        return
+    if re.search(r"(医用|检查|丁腈|乳胶|橡胶)", text) and "手套" in text:
+        line.tax_category = line.tax_category or "橡胶制品"
+        line.tax_code = "1070508010000000000"
+        line.coding_reference = line.coding_reference or "本地医疗耗材规则，需人工复核: 橡胶手套 / 橡胶制品 / 1070508010000000000"
+
 
 
 def _suggest_taxonomy_with_llm(line: InvoiceLine, *, cache: dict[str, TaxonomyEntry | None]) -> TaxonomyEntry | None:

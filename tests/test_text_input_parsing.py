@@ -337,6 +337,37 @@ class TextInputParsingTest(unittest.TestCase):
         self.assertEqual(draft.lines[0].tax_code, "")
         self.assertEqual(draft.lines[0].normalized_tax_rate(), "3%")
 
+    def test_mimo_ocr_medical_screenshot_text_maps_special_invoice_and_safe_codes(self):
+        old_provider = os.environ.get("TAX_INVOICE_LLM_PROVIDER")
+        os.environ["TAX_INVOICE_LLM_PROVIDER"] = "off"
+        text = """辽宁瑞康医疗科技有限公司
+91210103MAC7R8K26X
+增票
+税率：13%
+开票明细：
+1、一次性使用无菌注射器，规格型号：5ml 带针，单位：支，数量：800，含税金额：2400.00元
+2、一次性使用静脉输液针，规格型号：0.7mm，单位：支，数量：1200，含税金额：1800.00元
+3、医用检查手套，规格型号：丁腈 M号，单位：盒，数量：50，含税金额：1250.00元
+辽宁省沈阳市和平区南京北街88号 024-23886666
+中国建设银行沈阳和平支行 21050123456789012345
+"""
+        try:
+            draft = workbench_module.create_draft_from_workbench("", text, "", [])
+        finally:
+            if old_provider is None:
+                os.environ.pop("TAX_INVOICE_LLM_PROVIDER", None)
+            else:
+                os.environ["TAX_INVOICE_LLM_PROVIDER"] = old_provider
+
+        self.assertEqual(draft.invoice_kind, "增值税专用发票")
+        self.assertEqual(draft.buyer.name, "辽宁瑞康医疗科技有限公司")
+        self.assertEqual(draft.buyer.tax_id, "91210103MAC7R8K26X")
+        self.assertEqual(len(draft.lines), 3)
+        self.assertEqual(draft.lines[0].tax_code, "1090245030000000000")
+        self.assertEqual(draft.lines[1].tax_code, "1090245030000000000")
+        self.assertEqual(draft.lines[2].tax_code, "1070508010000000000")
+        self.assertTrue(all("需人工复核" in line.coding_reference for line in draft.lines))
+
     def test_minimal_inline_text_input_extracts_buyer_and_detail_line(self):
         buyer = extract_buyer_info_from_text(MINIMAL_INLINE_TEXT_INPUT)
         lines = extract_invoice_lines_from_text(MINIMAL_INLINE_TEXT_INPUT)
