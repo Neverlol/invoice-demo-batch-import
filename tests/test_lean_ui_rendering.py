@@ -38,6 +38,7 @@ class LeanUIRenderingTest(unittest.TestCase):
         self.old_batch_output_root = lean_workbench_module.BATCH_OUTPUT_ROOT
         self.old_sync_endpoint = os.environ.get("TAX_INVOICE_SYNC_ENDPOINT")
         self.old_sync_token = os.environ.get("TAX_INVOICE_SYNC_TOKEN")
+        self.old_sync_enabled = os.environ.get("TAX_INVOICE_SYNC_ENABLED")
 
         workbench_module.WORKBENCH_ROOT = self.temp_path / "workbench"
         case_events_module.EVENT_ROOT = self.temp_path / "events"
@@ -52,6 +53,7 @@ class LeanUIRenderingTest(unittest.TestCase):
         lean_workbench_module.BATCH_OUTPUT_ROOT = self.temp_path / "batch_import_preview"
         os.environ.pop("TAX_INVOICE_SYNC_ENDPOINT", None)
         os.environ.pop("TAX_INVOICE_SYNC_TOKEN", None)
+        os.environ["TAX_INVOICE_SYNC_ENABLED"] = "0"
 
     def tearDown(self):
         workbench_module.WORKBENCH_ROOT = self.old_workbench_root
@@ -75,6 +77,10 @@ class LeanUIRenderingTest(unittest.TestCase):
             os.environ.pop("TAX_INVOICE_SYNC_TOKEN", None)
         else:
             os.environ["TAX_INVOICE_SYNC_TOKEN"] = self.old_sync_token
+        if self.old_sync_enabled is None:
+            os.environ.pop("TAX_INVOICE_SYNC_ENABLED", None)
+        else:
+            os.environ["TAX_INVOICE_SYNC_ENABLED"] = self.old_sync_enabled
         self.tempdir.cleanup()
 
     def test_draft_page_shows_coding_reference_source(self):

@@ -72,6 +72,7 @@ class TextInputParsingTest(unittest.TestCase):
         self.old_tenant_rules_path = tax_rule_engine_module.TENANT_RULES_PATH
         self.old_sync_endpoint = os.environ.get("TAX_INVOICE_SYNC_ENDPOINT")
         self.old_sync_token = os.environ.get("TAX_INVOICE_SYNC_TOKEN")
+        self.old_sync_enabled = os.environ.get("TAX_INVOICE_SYNC_ENABLED")
         self.old_operator = os.environ.get("TAX_INVOICE_OPERATOR")
 
         workbench_module.WORKBENCH_ROOT = self.temp_path / "workbench"
@@ -89,6 +90,7 @@ class TextInputParsingTest(unittest.TestCase):
         tax_rule_engine_module.load_learned_coding_library.cache_clear()
         os.environ.pop("TAX_INVOICE_SYNC_ENDPOINT", None)
         os.environ.pop("TAX_INVOICE_SYNC_TOKEN", None)
+        os.environ["TAX_INVOICE_SYNC_ENABLED"] = "0"
         os.environ["TAX_INVOICE_OPERATOR"] = "seed-assistant"
 
     def tearDown(self):
@@ -117,6 +119,10 @@ class TextInputParsingTest(unittest.TestCase):
             os.environ.pop("TAX_INVOICE_SYNC_TOKEN", None)
         else:
             os.environ["TAX_INVOICE_SYNC_TOKEN"] = self.old_sync_token
+        if self.old_sync_enabled is None:
+            os.environ.pop("TAX_INVOICE_SYNC_ENABLED", None)
+        else:
+            os.environ["TAX_INVOICE_SYNC_ENABLED"] = self.old_sync_enabled
         if self.old_operator is None:
             os.environ.pop("TAX_INVOICE_OPERATOR", None)
         else:

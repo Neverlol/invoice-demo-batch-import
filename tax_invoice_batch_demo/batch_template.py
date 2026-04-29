@@ -11,7 +11,37 @@ from openpyxl import load_workbook
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_TEMPLATE_PATH = ROOT / "official_templates" / "(V251101版)批量开票-导入开票模板.xlsx"
+OFFICIAL_TEMPLATE_DIR = ROOT / "official_templates"
+LEGACY_TEMPLATE_PATH = OFFICIAL_TEMPLATE_DIR / "(V251101版)批量开票-导入开票模板.xlsx"
+
+
+def latest_official_template_path(template_dir: str | Path = OFFICIAL_TEMPLATE_DIR) -> Path:
+    """Return the newest bundled tax bureau batch-import template.
+
+    Tax bureaus can reject an otherwise valid workbook when the embedded official
+    template version is outdated. Prefer the highest `(Vxxxxxx版)` template in
+    `official_templates/` so dropping a newly downloaded official template into
+    that directory upgrades exports without code changes.
+    """
+
+    directory = Path(template_dir)
+    candidates = [path for path in directory.glob("*.xlsx") if not path.name.startswith("~$")]
+    if not candidates:
+        return LEGACY_TEMPLATE_PATH
+    return max(candidates, key=_official_template_sort_key)
+
+
+def _official_template_sort_key(path: Path) -> tuple[int, float, str]:
+    match = re.search(r"V(\d+)", path.name, flags=re.IGNORECASE)
+    version = int(match.group(1)) if match else 0
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    return version, mtime, path.name
+
+
+DEFAULT_TEMPLATE_PATH = latest_official_template_path()
 
 
 @dataclass
