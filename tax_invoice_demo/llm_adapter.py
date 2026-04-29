@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 import json
+import mimetypes
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -78,6 +80,9 @@ class BaseLLMAdapter:
     def classify_tax_code(self, item_name: str, candidates: list[str]) -> LLMResponse:
         raise LLMAdapterError("Tax code classification adapter is disabled.")
 
+    def extract_text_from_image(self, image_path: Path) -> LLMResponse:
+        raise LLMAdapterError("Image OCR adapter is disabled.")
+
 
 class NullLLMAdapter(BaseLLMAdapter):
     pass
@@ -122,15 +127,43 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
         )
         return self._chat_json(prompt, timeout_seconds=min(self.timeout_seconds, 6))
 
+    def extract_text_from_image(self, image_path: Path) -> LLMResponse:
+        mime_type = mimetypes.guess_type(str(image_path))[0] or "image/png"
+        encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+        prompt = (
+            "请对这张图片做 OCR，只提取图片中的开票文字。"
+            "必须只返回 JSON，格式为 {\"文字\": \"...\"}。"
+            "请保留换行、公司名称、税号、发票类型、税率、明细、规格型号、数量、金额、地址电话、开户行账号。"
+        )
+        return self._chat_json_messages(
+            [
+                {"role": "system", "content": "You are a careful invoice OCR assistant. Output JSON only."},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{encoded}"}},
+                    ],
+                },
+            ],
+            timeout_seconds=min(self.timeout_seconds, 8),
+        )
+
     def _chat_json(self, prompt: str, *, timeout_seconds: int | None = None) -> LLMResponse:
+        return self._chat_json_messages(
+            [
+                {"role": "system", "content": "You are a careful invoice extraction assistant. Output JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            timeout_seconds=timeout_seconds,
+        )
+
+    def _chat_json_messages(self, messages: list[dict[str, Any]], *, timeout_seconds: int | None = None) -> LLMResponse:
         if not self.api_key:
             raise LLMAdapterError("MiniMax API key is not configured.")
         payload = {
             "model": self.model,
-            "messages": [
-                {"role": "system", "content": "You are a careful invoice extraction assistant. Output JSON only."},
-                {"role": "user", "content": prompt},
-            ],
+            "messages": messages,
             "temperature": 0.1,
             "response_format": {"type": "json_object"},
         }

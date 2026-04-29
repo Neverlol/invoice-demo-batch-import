@@ -9,6 +9,8 @@ from pathlib import Path
 
 from PIL import Image, ImageFilter, ImageOps
 
+from .llm_adapter import LLMAdapterError, get_llm_adapter
+
 
 @dataclass
 class OcrImageResult:
@@ -39,9 +41,12 @@ def run_optional_ocr(image_paths: list[Path]) -> OptionalOcrResult:
 
     command = _resolve_tesseract_command()
     if not command:
+        fallback = _run_llm_image_ocr(image_paths, fallback_reason="未检测到 tesseract 命令")
+        if fallback is not None:
+            return fallback
         return OptionalOcrResult(
             status="unavailable",
-            note="未检测到 tesseract 命令；图片会先保留在草稿里，Windows 上安装 Tesseract OCR 并加入 PATH 后可启用本地 OCR。",
+            note="未检测到 tesseract 命令，且当前 LLM 图片 OCR 不可用；图片会先保留在草稿里。",
         )
 
     language = os.environ.get("TAX_INVOICE_TESSERACT_LANG", "chi_sim+eng").strip() or "chi_sim+eng"
@@ -103,6 +108,9 @@ def run_optional_ocr(image_paths: list[Path]) -> OptionalOcrResult:
         failure_examples = [item.error for item in image_results if item.error][:1]
         if failure_examples:
             note = f"{note} 最近一次错误：{failure_examples[0]}"
+        fallback = _run_llm_image_ocr(image_paths, fallback_reason=note)
+        if fallback is not None:
+            return fallback
         return OptionalOcrResult(
             status="empty",
             engine=f"tesseract ({language})",
@@ -121,6 +129,55 @@ def run_optional_ocr(image_paths: list[Path]) -> OptionalOcrResult:
         note=note,
         image_results=image_results,
     )
+
+
+def _run_llm_image_ocr(image_paths: list[Path], *, fallback_reason: str) -> OptionalOcrResult | None:
+    adapter = get_llm_adapter()
+    if not adapter.is_enabled:
+        return None
+    image_results: list[OcrImageResult] = []
+    combined_parts: list[str] = []
+    errors: list[str] = []
+    for image_path in image_paths:
+        try:
+            response = adapter.extract_text_from_image(image_path)
+        except (LLMAdapterError, OSError) as exc:
+            errors.append(str(exc))
+            image_results.append(OcrImageResult(image_name=image_path.name, error=f"LLM 图片 OCR 失败：{exc}"))
+            continue
+        text = _extract_llm_ocr_text(response.parsed_json).strip()
+        if text:
+            combined_parts.append(f"[{image_path.name}]\n{text}")
+            image_results.append(OcrImageResult(image_name=image_path.name, extracted_text=text))
+        else:
+            image_results.append(OcrImageResult(image_name=image_path.name, error="LLM 图片 OCR 已返回，但没有提取出稳定文本。"))
+    success_count = sum(1 for item in image_results if item.extracted_text)
+    if success_count == 0:
+        return OptionalOcrResult(
+            status="empty",
+            engine=f"{adapter.provider_name} image-ocr",
+            note=(
+                f"{fallback_reason}；已尝试 LLM 图片 OCR，但没有提取出可用文本。"
+                f" 最近一次错误：{errors[-1]}" if errors else f"{fallback_reason}；已尝试 LLM 图片 OCR，但没有提取出可用文本。"
+            ),
+            image_results=image_results,
+        )
+    status = "success" if success_count == len(image_paths) else "partial"
+    return OptionalOcrResult(
+        status=status,
+        engine=f"{adapter.provider_name} image-ocr",
+        combined_text="\n\n".join(part for part in combined_parts if part.strip()),
+        note="本地 OCR 不可用或未识别出文本，已改用 LLM 图片 OCR 提取文字；仍建议在复核页人工确认。",
+        image_results=image_results,
+    )
+
+
+def _extract_llm_ocr_text(payload: dict) -> str:
+    for key in ["文字", "text", "ocr_text", "OCR文本", "内容"]:
+        value = payload.get(key) if isinstance(payload, dict) else ""
+        if isinstance(value, str) and value.strip():
+            return value
+    return ""
 
 
 def _resolve_tesseract_command() -> str:
