@@ -33,6 +33,21 @@ document.querySelectorAll("[data-file-input]").forEach((input) => {
   input.addEventListener("change", () => updateSelectedFileStatus(input));
 });
 
+const createDraftForm = document.querySelector("[data-create-draft-form]");
+if (createDraftForm) {
+  createDraftForm.addEventListener("submit", () => {
+    const button = createDraftForm.querySelector("[data-submit-button]");
+    const status = createDraftForm.querySelector("[data-submit-status]");
+    if (button) {
+      button.disabled = true;
+      button.textContent = "正在生成草稿…";
+    }
+    if (status) {
+      status.hidden = false;
+    }
+  });
+}
+
 function setActionMode(mode) {
   const panel = document.querySelector("[data-action-panel]");
   if (!panel) {
@@ -150,7 +165,10 @@ const taxonomyPicker = document.querySelector("[data-taxonomy-picker]");
 if (taxonomyPicker) {
   const queryInput = taxonomyPicker.querySelector("[data-taxonomy-query]");
   const resultsBox = taxonomyPicker.querySelector("[data-taxonomy-results]");
+  const categoryInput = document.querySelector('[data-bulk-source="line_tax_category"]');
+  const codeInput = document.querySelector('[data-bulk-source="line_tax_code"]');
   let taxonomyTimer = null;
+  let codeLookupTimer = null;
 
   function hideTaxonomyResults() {
     if (resultsBox) {
@@ -163,8 +181,22 @@ if (taxonomyPicker) {
     if (!resultsBox) {
       return;
     }
-    resultsBox.innerHTML = `<div class="taxonomy-option is-message"><small>${message}</small></div>`;
+    resultsBox.innerHTML = `<div class="taxonomy-option is-message"><small>${escapeHtml(message)}</small></div>`;
     resultsBox.hidden = false;
+  }
+
+  function applyTaxonomyItem(item) {
+    if (categoryInput) {
+      categoryInput.value = item.category_short_name || item.official_name || "";
+      categoryInput.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    if (codeInput) {
+      codeInput.value = item.official_code || "";
+      codeInput.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    if (queryInput) {
+      queryInput.value = item.official_name || item.category_short_name || "";
+    }
   }
 
   function renderTaxonomyResults(items) {
@@ -173,7 +205,7 @@ if (taxonomyPicker) {
     }
     resultsBox.innerHTML = "";
     if (!items.length) {
-      renderTaxonomyMessage("没有匹配结果，换个关键词试试");
+      renderTaxonomyMessage("没有匹配结果，换个关键词试试；如果知道编码，可直接填入下方税收编码框。");
       return;
     }
     items.forEach((item) => {
@@ -181,28 +213,25 @@ if (taxonomyPicker) {
       button.type = "button";
       button.className = "taxonomy-option";
       button.innerHTML = `
-        <strong>${item.official_name || item.category_short_name}</strong>
-        <small>${item.category_short_name || ""}｜${item.official_code || ""}${item.is_summary ? "｜<em>汇总类，建议继续选更具体项</em>" : ""}</small>
+        <strong>${escapeHtml(item.official_name || item.category_short_name)}</strong>
+        <small>${escapeHtml(item.category_short_name || "")}｜${escapeHtml(item.official_code || "")}${item.is_summary ? "｜<em>汇总类，建议继续选更具体项</em>" : ""}</small>
       `;
       button.addEventListener("click", () => {
-        const categoryInput = document.querySelector('[data-bulk-source="line_tax_category"]');
-        const codeInput = document.querySelector('[data-bulk-source="line_tax_code"]');
-        if (categoryInput) {
-          categoryInput.value = item.category_short_name || item.official_name || "";
-          categoryInput.dispatchEvent(new Event("input", { bubbles: true }));
-        }
-        if (codeInput) {
-          codeInput.value = item.official_code || "";
-          codeInput.dispatchEvent(new Event("input", { bubbles: true }));
-        }
-        if (queryInput) {
-          queryInput.value = item.official_name || item.category_short_name || "";
-        }
+        applyTaxonomyItem(item);
         hideTaxonomyResults();
       });
       resultsBox.appendChild(button);
     });
     resultsBox.hidden = false;
+  }
+
+  async function fetchTaxonomy(query) {
+    const response = await fetch(`/api/taxonomy/search?q=${encodeURIComponent(query)}`);
+    if (!response.ok) {
+      throw new Error("taxonomy search unavailable");
+    }
+    const payload = await response.json();
+    return payload.results || [];
   }
 
   async function searchTaxonomy(query) {
@@ -213,15 +242,26 @@ if (taxonomyPicker) {
     }
     renderTaxonomyMessage("正在查找官方税收编码……");
     try {
-      const response = await fetch(`/api/taxonomy/search?q=${encodeURIComponent(keyword)}`);
-      if (!response.ok) {
-        renderTaxonomyMessage("搜索服务未启用，请重启工作台后再试。");
-        return;
-      }
-      const payload = await response.json();
-      renderTaxonomyResults(payload.results || []);
+      renderTaxonomyResults(await fetchTaxonomy(keyword));
     } catch (error) {
-      renderTaxonomyMessage("搜索失败，请确认工作台已重启且网络/本地服务正常。");
+      renderTaxonomyMessage("搜索服务未启用，请重启工作台后再试。");
+    }
+  }
+
+  async function completeCategoryFromCode(value) {
+    const code = value.trim();
+    if (!/^\d{12,20}$/.test(code)) {
+      return;
+    }
+    try {
+      const items = await fetchTaxonomy(code);
+      const exact = items.find((item) => item.official_code === code) || items[0];
+      if (exact && categoryInput) {
+        categoryInput.value = exact.category_short_name || exact.official_name || "";
+        categoryInput.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    } catch (error) {
+      // 反向补全失败不阻断手工填写。
     }
   }
 
@@ -237,6 +277,13 @@ if (taxonomyPicker) {
         searchTaxonomy(queryInput.value);
       }
     });
+  }
+  if (codeInput) {
+    codeInput.addEventListener("input", () => {
+      clearTimeout(codeLookupTimer);
+      codeLookupTimer = setTimeout(() => completeCategoryFromCode(codeInput.value), 260);
+    });
+    codeInput.addEventListener("blur", () => completeCategoryFromCode(codeInput.value));
   }
 }
 

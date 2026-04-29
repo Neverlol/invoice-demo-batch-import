@@ -431,6 +431,20 @@ textarea::placeholder {
   text-overflow: ellipsis;
 }
 
+.submit-status {
+  flex-basis: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+button[disabled] {
+  opacity: 0.68;
+  cursor: wait;
+}
+
 .file-trigger {
   display: inline-flex;
   align-items: center;
@@ -830,6 +844,7 @@ textarea::placeholder {
   background: transparent;
   text-align: left;
   cursor: pointer;
+  color: #0f172a;
 }
 
 .taxonomy-option:hover {
@@ -838,12 +853,13 @@ textarea::placeholder {
 
 .taxonomy-option strong {
   display: block;
-  color: var(--text);
+  color: #0f172a;
+  font-weight: 800;
 }
 
 .taxonomy-option small {
   display: block;
-  color: var(--muted);
+  color: #475569;
   margin-top: 2px;
 }
 

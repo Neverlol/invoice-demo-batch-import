@@ -94,8 +94,11 @@ class LeanUIRenderingTest(unittest.TestCase):
         self.assertIn("只到预览，不自动最终开具", html)
         self.assertIn("data-file-input", html)
         self.assertIn("data-file-status", html)
-        self.assertIn("20260429-v22", html)
+        self.assertIn("20260429-v23", html)
         self.assertIn("尚未选择材料", html)
+        self.assertIn("正在上传并识别材料", html)
+        self.assertNotIn("placeholder-card", html)
+        self.assertNotIn("生成后会在这里显示", html)
         self.assertNotIn("税局操作步骤", html)
         self.assertNotIn("执行面板", html)
 
@@ -134,7 +137,7 @@ class LeanUIRenderingTest(unittest.TestCase):
         self.assertIn("下载税局文件", html)
         self.assertIn("查找税收编码", html)
         self.assertIn("data-taxonomy-query", html)
-        self.assertIn("20260429-v21", html)
+        self.assertIn("20260429-v23", html)
         self.assertNotIn("草稿摘要", html)
         self.assertNotIn("识别提醒", html)
         self.assertNotIn("CDP 端口", html)
@@ -148,6 +151,12 @@ class LeanUIRenderingTest(unittest.TestCase):
         self.assertIn("医疗", labels)
         self.assertTrue(any(item["official_code"] for item in payload["results"]))
         self.assertTrue(any(item["category_short_name"] for item in payload["results"]))
+        self.assertTrue(any(item["official_code"] == "1090245030000000000" for item in payload["results"]))
+
+        code_response = app.test_client().get("/api/taxonomy/search?q=1090245030000000000")
+        code_payload = code_response.get_json()
+        self.assertEqual(code_payload["results"][0]["official_code"], "1090245030000000000")
+        self.assertEqual(code_payload["results"][0]["category_short_name"], "医疗仪器器械")
 
     def test_failure_repair_button_applies_suggestion_and_rebuilds_template(self):
         draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", MINIMAL_TEXT_INPUT, "", [])

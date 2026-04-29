@@ -27,7 +27,7 @@ class TaxonomySearchResult:
         }
 
 
-def search_taxonomy(query: str, *, limit: int = 12) -> list[TaxonomySearchResult]:
+def search_taxonomy(query: str, *, limit: int = 40) -> list[TaxonomySearchResult]:
     normalized_query = _normalize(query)
     if not normalized_query:
         return []

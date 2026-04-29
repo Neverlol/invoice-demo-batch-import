@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>批量开票轻工作台</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260429-v22') }}">
-    <script defer src="{{ url_for('static', filename='lean.js', v='20260429-v22') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260429-v23') }}">
+    <script defer src="{{ url_for('static', filename='lean.js', v='20260429-v23') }}"></script>
   </head>
   <body class="operator-body">
     <main class="dashboard-shell">
@@ -74,7 +74,7 @@
           </section>
         {% endif %}
 
-        <form class="stage-stack" method="post" action="{{ url_for('create_draft') }}" enctype="multipart/form-data">
+        <form class="stage-stack" method="post" action="{{ url_for('create_draft') }}" enctype="multipart/form-data" data-create-draft-form>
           <section class="work-card composer-card">
             <header class="card-head">
               <div class="card-title">
@@ -105,35 +105,12 @@
                   <span>选择或拖入图片 / Excel / PDF</span>
                 </label>
                 <small data-file-status>尚未选择材料；支持文字和文件同时输入，Excel 会优先解析明细。</small>
-                <button class="primary" type="submit">生成开票草稿</button>
+                <button class="primary" type="submit" data-submit-button>生成开票草稿</button>
+                <div class="submit-status" data-submit-status hidden>正在上传并识别材料；如已启用智能复核，可能需要 10 秒左右。</div>
               </div>
             </div>
           </section>
 
-          <section class="work-card draft-card placeholder-card">
-            <header class="card-head">
-              <div class="card-title">
-                <span class="card-icon">票</span>
-                <div>
-                  <h2>发票草稿</h2>
-                  <p>生成后会在这里显示接近真实发票的复核界面。</p>
-                </div>
-              </div>
-            </header>
-
-            <div class="placeholder-surface">
-              <div class="placeholder-block wide"></div>
-              <div class="placeholder-columns">
-                <div class="placeholder-block tall"></div>
-                <div class="placeholder-block tall"></div>
-              </div>
-              <div class="placeholder-table">
-                <div class="placeholder-line"></div>
-                <div class="placeholder-line"></div>
-                <div class="placeholder-line short"></div>
-              </div>
-            </div>
-          </section>
         </form>
       </section>
 
