@@ -186,6 +186,7 @@ class ExtractionPipelineTest(unittest.TestCase):
                                         "单价": "500",
                                         "金额": "500",
                                         "税率": "3%",
+                                        "税收编码": "3040802050000000000",
                                     }
                                 ],
                                 "价税合计": "500",
@@ -211,6 +212,7 @@ class ExtractionPipelineTest(unittest.TestCase):
         self.assertEqual(outcome.buyer.name, "辽宁恒润电力科技有限公司")
         self.assertEqual(outcome.lines[0].project_name, "代理记账和税务申报")
         self.assertEqual(outcome.lines[0].amount_with_tax, "500")
+        self.assertEqual(outcome.lines[0].tax_code, "3040802050000000000")
 
     def test_invalid_llm_payload_falls_back_to_rules(self):
         os.environ["TAX_INVOICE_LLM_PROVIDER"] = "minimax"

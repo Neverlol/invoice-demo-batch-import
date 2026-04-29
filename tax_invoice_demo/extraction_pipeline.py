@@ -111,6 +111,7 @@ def _lines_from_llm_payload(payload: dict) -> list[InvoiceLine]:
             unit_price=str(item.get("单价", "") or "").strip(),
             amount_with_tax=str(item.get("金额", "") or "").strip(),
             tax_rate=str(item.get("税率", "") or "").strip() or "3%",
+            tax_code=str(item.get("税收编码", "") or item.get("税收分类编码", "") or item.get("商品和服务税收编码", "") or "").strip(),
         )
         if line.project_name or line.amount_with_tax:
             lines.append(line)

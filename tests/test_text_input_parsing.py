@@ -11,7 +11,8 @@ import tax_invoice_demo.ledger as ledger_module
 import tax_invoice_demo.tax_rule_engine as tax_rule_engine_module
 import tax_invoice_demo.workbench as workbench_module
 import tax_invoice_batch_demo.lean_workbench as lean_workbench_module
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
+from werkzeug.datastructures import FileStorage
 
 
 SIMPLE_TEXT_INPUT = """购买方名称：黑龙江芃领飞象网络科技有限公司
@@ -147,6 +148,68 @@ class TextInputParsingTest(unittest.TestCase):
         self.assertEqual(lines[0].tax_category, "")
         self.assertEqual(lines[0].tax_code, "")
         self.assertEqual(lines[0].normalized_tax_rate(), "3%")
+
+    def test_real_business_excel_style_table_extracts_buyer_lines_and_global_tax_code(self):
+        text = """物料名称\t规格型号\t数量\t开票金额\t税率
+一次性使用微针电极\tCONSUMABLE TIP\t150\t35625\t0.13
+一次性使用微针电极\tJ18BS\t1\t433.03849999999994\t0.13
+一次性使用微针电极\tJ25BM\t3282\t1061785.36\t0.13
+一次性使用微针电极\tJ25BS\t1\t428.76349999999996\t0.13
+公司名称\t河北雅之颜医药有限公司
+税号\t91130101MA7MB4FA89
+税收编码\t1090245030000000000
+发票类型\t增票
+"""
+
+        buyer = extract_buyer_info_from_text(text)
+        lines = extract_invoice_lines_from_text(text)
+        profile = workbench_module._infer_invoice_profile(text)
+
+        self.assertEqual(buyer.name, "河北雅之颜医药有限公司")
+        self.assertEqual(buyer.tax_id, "91130101MA7MB4FA89")
+        self.assertEqual(len(lines), 4)
+        self.assertEqual(lines[0].project_name, "一次性使用微针电极")
+        self.assertEqual(lines[0].specification, "CONSUMABLE TIP")
+        self.assertEqual(lines[0].quantity, "150")
+        self.assertEqual(lines[0].resolved_amount_with_tax(), "35625.00")
+        self.assertEqual(lines[0].normalized_tax_rate(), "13%")
+        self.assertTrue(all(line.tax_code == "1090245030000000000" for line in lines))
+        self.assertEqual(profile["invoice_kind"], "增值税专用发票")
+
+    def test_real_business_excel_upload_creates_usable_draft_without_llm(self):
+        workbook_path = self.temp_path / "测试.xlsx"
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "Sheet3"
+        sheet.append(["物料名称", "规格型号", "数量", "开票金额", "税率"])
+        sheet.append(["一次性使用微针电极", "CONSUMABLE TIP", 150, 35625, 0.13])
+        sheet.append(["一次性使用微针电极", "J18BS", 1, 433.0385, 0.13])
+        sheet.append(["一次性使用微针电极", "J25BM", 3282, 1061785.36, 0.13])
+        sheet.append(["一次性使用微针电极", "J25BS", 1, 428.7635, 0.13])
+        sheet.append([])
+        sheet.append(["公司名称", "河北雅之颜医药有限公司"])
+        sheet.append(["税号", "91130101MA7MB4FA89"])
+        sheet.append(["税收编码", "1090245030000000000"])
+        sheet.append(["发票类型", "增票"])
+        workbook.save(workbook_path)
+
+        with workbook_path.open("rb") as handle:
+            draft = workbench_module.create_draft_from_workbench(
+                "吉林省风生水起商贸有限公司",
+                "",
+                "",
+                [FileStorage(stream=handle, filename="测试.xlsx")],
+            )
+
+        self.assertEqual(draft.buyer.name, "河北雅之颜医药有限公司")
+        self.assertEqual(draft.buyer.tax_id, "91130101MA7MB4FA89")
+        self.assertEqual(draft.invoice_kind, "增值税专用发票")
+        self.assertEqual(len(draft.lines), 4)
+        self.assertEqual(draft.lines[0].project_name, "一次性使用微针电极")
+        self.assertEqual(draft.lines[0].specification, "CONSUMABLE TIP")
+        self.assertEqual(draft.lines[0].normalized_tax_rate(), "13%")
+        self.assertTrue(all(line.tax_code == "1090245030000000000" for line in draft.lines))
+        self.assertFalse(any("当前还没自动识别出开票明细" in issue for issue in draft.issues))
 
     def test_simple_text_input_is_enriched_by_backend_coding_library(self):
         draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", SIMPLE_TEXT_INPUT, "", [])

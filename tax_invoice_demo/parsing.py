@@ -13,6 +13,8 @@ DETAIL_HEADERS = {
     "商品名称": "project_name",
     "品名": "project_name",
     "品目": "project_name",
+    "物料名称": "project_name",
+    "物料描述": "project_name",
     "货物或应税劳务、服务名称": "project_name",
     "货物或应税劳务服务名称": "project_name",
     "名称": "project_name",
@@ -64,11 +66,11 @@ DETAIL_HEADERS = {
 }
 
 BUYER_NAME_PATTERNS = [
-    re.compile(r"(?:购买方名称|购方名称|客户名称|开票抬头|抬头|购货单位)[：:]\s*(.+)"),
-    re.compile(r"(?:单位名称|名称)[：:]\s*(.+)"),
+    re.compile(r"^(?:购买方名称|购方名称|客户名称|公司名称|开票抬头|抬头|购货单位)[：:\t ]+\s*(.+)"),
+    re.compile(r"^(?:单位名称|名称)[：:\t ]+\s*(.+)"),
 ]
 BUYER_TAX_ID_PATTERNS = [
-    re.compile(r"(?:购买方税号|购方税号|税号|统一社会信用代码|纳税人识别号)[：:]\s*([0-9A-Z]{15,20})"),
+    re.compile(r"^(?:购买方税号|购方税号|税号|统一社会信用代码|纳税人识别号)[：:\t ]+\s*([0-9A-Z]{15,20})"),
 ]
 BUYER_ADDRESS_PATTERNS = [
     re.compile(r"(?:购买方地址|地址)[：:]\s*(.+)"),
@@ -183,7 +185,7 @@ def parse_bulk_invoice_lines(raw_text: str) -> list[InvoiceLine]:
                 if index >= len(header_map):
                     break
                 field_name = header_map[index]
-                if field_name and value and not data[field_name]:
+                if field_name and value and (not data[field_name] or field_name == "tax_rate" and data[field_name] == "3%"):
                     data[field_name] = value
             _fill_from_unmapped_columns(parts, header_map, data)
             if header_labels:
@@ -224,7 +226,52 @@ def parse_bulk_invoice_lines(raw_text: str) -> list[InvoiceLine]:
             continue
         parsed.append(InvoiceLine(**data))
 
-    return parsed
+    return _apply_global_line_defaults(parsed, raw_text)
+
+
+def _apply_global_line_defaults(lines: list[InvoiceLine], raw_text: str) -> list[InvoiceLine]:
+    if not lines:
+        return lines
+    defaults = _extract_global_line_defaults(raw_text)
+    if not defaults:
+        return lines
+    enriched: list[InvoiceLine] = []
+    for line in lines:
+        enriched.append(
+            InvoiceLine(
+                project_name=line.project_name,
+                amount_with_tax=line.amount_with_tax,
+                tax_rate=line.tax_rate or defaults.get("tax_rate", ""),
+                tax_category=line.tax_category,
+                specification=line.specification,
+                unit=line.unit,
+                quantity=line.quantity,
+                unit_price=line.unit_price,
+                tax_code=line.tax_code or defaults.get("tax_code", ""),
+                source_item_code=line.source_item_code,
+                coding_reference=line.coding_reference,
+            )
+        )
+    return enriched
+
+
+def _extract_global_line_defaults(raw_text: str) -> dict[str, str]:
+    defaults: dict[str, str] = {}
+    for raw_line in raw_text.splitlines():
+        parts = [part.strip() for part in re.split(r"[\t|]", raw_line) if part.strip()]
+        if len(parts) < 2:
+            key, value = _split_key_value(raw_line) if ("：" in raw_line or ":" in raw_line) else ("", "")
+        else:
+            key, value = parts[0], parts[1]
+        key = normalize_header(key)
+        value = value.strip()
+        if not value:
+            continue
+        if key in {"税收编码", "税收分类编码", "商品和服务税收编码", "商品和服务税收分类编码"}:
+            defaults["tax_code"] = value
+        elif key in {"统一税率", "默认税率", "税率", "税率/征收率"} and "tax_rate" not in defaults:
+            defaults["tax_rate"] = value
+    return defaults
 
 
 def serialize_invoice_lines(lines: list[InvoiceLine]) -> str:
@@ -1043,7 +1090,7 @@ def _looks_like_amount_in_words(value: str) -> bool:
 
 
 def _looks_like_bare_tax_id(value: str) -> bool:
-    return bool(re.fullmatch(r"[0-9A-Z]{15,20}", value)) and bool(re.search(r"[A-Z]", value))
+    return bool(re.fullmatch(r"[0-9][0-9A-Z]{14,19}", value)) and bool(re.search(r"[A-Z]", value))
 
 
 def _looks_like_minimal_amount_line(value: str) -> bool:

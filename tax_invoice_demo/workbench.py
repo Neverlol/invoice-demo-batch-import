@@ -842,7 +842,7 @@ def _infer_invoice_profile(parse_source: str, *, note: str = "") -> dict[str, st
     special_business = ""
 
     labeled_type = re.search(
-        r"(?:发票类型|票种|开票类型)[：:]?(增值税专用发票|专用发票|专票|增值税普通发票|普通发票|普票)",
+        r"(?:发票类型|票种|开票类型)[：:\t ]?(增值税专用发票|专用发票|专票|增票|增值税普通发票|普通发票|普票)",
         compact,
     )
     checked_special = re.search(r"(?:增值税专用发票|专用发票)(?:[（(]?[√✓✔][）)]?)", compact)
@@ -853,7 +853,7 @@ def _infer_invoice_profile(parse_source: str, *, note: str = "") -> dict[str, st
     if labeled_type and labeled_type.group(1) in {"普通发票", "增值税普通发票", "普票"}:
         invoice_kind = "普通发票"
         explicit_normal = True
-    elif labeled_type and labeled_type.group(1) in {"增值税专用发票", "专用发票", "专票"}:
+    elif labeled_type and labeled_type.group(1) in {"增值税专用发票", "专用发票", "专票", "增票"}:
         invoice_kind = "增值税专用发票"
         explicit_special = True
     elif checked_normal and not checked_special:
