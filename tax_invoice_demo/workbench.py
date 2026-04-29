@@ -151,40 +151,29 @@ def update_draft_from_form(
     if existing is None:
         raise FileNotFoundError(draft_id)
 
-    attachments = [*existing.source_images, *_save_uploads(draft_directory(draft_id), uploaded_files)]
-    document_result = _run_document_extraction(draft_directory(draft_id), attachments)
-    ocr_result = _run_draft_ocr(draft_directory(draft_id), attachments)
-    extraction = extract_invoice_structured_data(
-        raw_text=raw_text,
-        note=note,
-        document_text=document_result.combined_text,
-        ocr_text=ocr_result.combined_text,
-    )
-    parse_source = extraction.parse_source
-    inferred_buyer = extraction.buyer
-    inferred_buyer = _enrich_buyer_from_sheet_context(company_name, inferred_buyer, parse_source)
-    inferred_lines = extraction.lines
-    inferred_profile = _infer_invoice_profile(parse_source, note=note)
-    resolved_buyer = BuyerInfo(
-        name=buyer.name or inferred_buyer.name,
-        tax_id=buyer.tax_id or inferred_buyer.tax_id,
-        address=buyer.address or inferred_buyer.address,
-        phone=buyer.phone or inferred_buyer.phone,
-        bank_name=buyer.bank_name or inferred_buyer.bank_name,
-        bank_account=buyer.bank_account or inferred_buyer.bank_account,
-    )
-    resolved_lines = lines or inferred_lines
     manual_input_lines = bool(lines)
-    if manual_input_lines:
-        _mark_manual_coding_changes(resolved_lines, existing.lines)
-    resolved_lines = enrich_invoice_lines(
-        resolved_lines,
-        raw_text=parse_source,
-        note=note,
-        preserve_existing_tax_rate=manual_input_lines,
-    )
+    has_new_uploads = any((getattr(file, "filename", "") or "").strip() for file in uploaded_files)
     learned_rule_rows = []
-    if manual_input_lines:
+
+    if manual_input_lines and not has_new_uploads:
+        # 保存草稿上的人工编辑时，不重新解析原材料/OCR/调用 LLM；否则“保存修改”会被材料识别链路拖慢。
+        attachments = existing.source_images
+        parse_source = raw_text or existing.source_doc_text or existing.ocr_text
+        inferred_profile = {
+            "invoice_kind": existing.invoice_kind or "普通发票",
+            "invoice_medium": existing.invoice_medium or "电子发票",
+            "special_business": existing.special_business or "",
+        }
+        resolved_buyer = BuyerInfo(
+            name=buyer.name or existing.buyer.name,
+            tax_id=buyer.tax_id or existing.buyer.tax_id,
+            address=buyer.address or existing.buyer.address,
+            phone=buyer.phone or existing.buyer.phone,
+            bank_name=buyer.bank_name or existing.buyer.bank_name,
+            bank_account=buyer.bank_account or existing.buyer.bank_account,
+        )
+        resolved_lines = lines
+        _mark_manual_coding_changes(resolved_lines, existing.lines)
         learned_rule_rows = write_learned_rules_from_manual_update(
             before_lines=existing.lines,
             after_lines=resolved_lines,
@@ -192,6 +181,66 @@ def update_draft_from_form(
             draft_id=draft_id,
             company_name=company_name,
         )
+        document_status = existing.source_doc_status
+        document_note = existing.source_doc_note
+        document_text = existing.source_doc_text
+        ocr_status = existing.ocr_status
+        ocr_note = existing.ocr_note
+        ocr_text = existing.ocr_text
+        ocr_engine = existing.ocr_engine
+        extract_strategy = existing.extract_strategy
+        llm_provider = existing.llm_provider
+        extract_warnings = existing.extract_warnings
+    else:
+        attachments = [*existing.source_images, *_save_uploads(draft_directory(draft_id), uploaded_files)]
+        document_result = _run_document_extraction(draft_directory(draft_id), attachments)
+        ocr_result = _run_draft_ocr(draft_directory(draft_id), attachments)
+        extraction = extract_invoice_structured_data(
+            raw_text=raw_text,
+            note=note,
+            document_text=document_result.combined_text,
+            ocr_text=ocr_result.combined_text,
+        )
+        parse_source = extraction.parse_source
+        inferred_buyer = extraction.buyer
+        inferred_buyer = _enrich_buyer_from_sheet_context(company_name, inferred_buyer, parse_source)
+        inferred_lines = extraction.lines
+        inferred_profile = _infer_invoice_profile(parse_source, note=note)
+        resolved_buyer = BuyerInfo(
+            name=buyer.name or inferred_buyer.name,
+            tax_id=buyer.tax_id or inferred_buyer.tax_id,
+            address=buyer.address or inferred_buyer.address,
+            phone=buyer.phone or inferred_buyer.phone,
+            bank_name=buyer.bank_name or inferred_buyer.bank_name,
+            bank_account=buyer.bank_account or inferred_buyer.bank_account,
+        )
+        resolved_lines = lines or inferred_lines
+        if manual_input_lines:
+            _mark_manual_coding_changes(resolved_lines, existing.lines)
+        resolved_lines = enrich_invoice_lines(
+            resolved_lines,
+            raw_text=parse_source,
+            note=note,
+            preserve_existing_tax_rate=manual_input_lines,
+        )
+        if manual_input_lines:
+            learned_rule_rows = write_learned_rules_from_manual_update(
+                before_lines=existing.lines,
+                after_lines=resolved_lines,
+                case_id=existing.case_id or draft_id,
+                draft_id=draft_id,
+                company_name=company_name,
+            )
+        document_status = document_result.status
+        document_note = document_result.note
+        document_text = document_result.combined_text
+        ocr_status = ocr_result.status
+        ocr_note = ocr_result.note
+        ocr_text = ocr_result.combined_text
+        ocr_engine = ocr_result.engine
+        extract_strategy = extraction.strategy
+        llm_provider = extraction.llm_provider
+        extract_warnings = extraction.warnings
     issues = _build_draft_issues(
         company_name=company_name,
         raw_text=raw_text,
@@ -199,10 +248,10 @@ def update_draft_from_form(
         buyer=resolved_buyer,
         lines=resolved_lines,
         special_business=(special_business or existing.special_business or inferred_profile["special_business"]),
-        document_status=document_result.status,
-        document_note=document_result.note,
-        ocr_status=ocr_result.status,
-        ocr_note=ocr_result.note,
+        document_status=document_status,
+        document_note=document_note,
+        ocr_status=ocr_status,
+        ocr_note=ocr_note,
     )
 
     draft = InvoiceDraft(
@@ -220,16 +269,16 @@ def update_draft_from_form(
         invoice_kind=invoice_kind or existing.invoice_kind or inferred_profile["invoice_kind"],
         invoice_medium=invoice_medium or existing.invoice_medium or inferred_profile["invoice_medium"],
         special_business=special_business or existing.special_business or inferred_profile["special_business"],
-        ocr_status=ocr_result.status,
-        ocr_engine=ocr_result.engine,
-        ocr_text=ocr_result.combined_text,
-        ocr_note=ocr_result.note,
-        source_doc_status=document_result.status,
-        source_doc_text=document_result.combined_text,
-        source_doc_note=document_result.note,
-        extract_strategy=extraction.strategy,
-        llm_provider=extraction.llm_provider,
-        extract_warnings=extraction.warnings,
+        ocr_status=ocr_status,
+        ocr_engine=ocr_engine,
+        ocr_text=ocr_text,
+        ocr_note=ocr_note,
+        source_doc_status=document_status,
+        source_doc_text=document_text,
+        source_doc_note=document_note,
+        extract_strategy=extract_strategy,
+        llm_provider=llm_provider,
+        extract_warnings=extract_warnings,
     )
     save_draft(draft)
     edit_diffs = diff_drafts(existing, draft)

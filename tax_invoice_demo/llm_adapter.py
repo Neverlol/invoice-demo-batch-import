@@ -90,7 +90,8 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
         self.api_key = config.api_key
         self.endpoint = config.endpoint or DEFAULT_MINIMAX_ENDPOINT
         self.model = config.model or DEFAULT_MINIMAX_MODEL
-        self.timeout_seconds = config.timeout_seconds
+        # P0 现场链路不能被旧 local 配置中的 45s 长等待拖住。
+        self.timeout_seconds = min(config.timeout_seconds, 12)
         self.max_retries = config.max_retries
 
     @property
@@ -108,7 +109,7 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
             "材料如下：\n"
             f"{text}"
         )
-        return self._chat_json(prompt)
+        return self._chat_json(prompt, timeout_seconds=self.timeout_seconds)
 
     def classify_tax_code(self, item_name: str, candidates: list[str]) -> LLMResponse:
         prompt = (
@@ -119,9 +120,9 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
             f"项目名称：{item_name}\n"
             f"候选：{json.dumps(candidates, ensure_ascii=False)}"
         )
-        return self._chat_json(prompt)
+        return self._chat_json(prompt, timeout_seconds=min(self.timeout_seconds, 6))
 
-    def _chat_json(self, prompt: str) -> LLMResponse:
+    def _chat_json(self, prompt: str, *, timeout_seconds: int | None = None) -> LLMResponse:
         if not self.api_key:
             raise LLMAdapterError("MiniMax API key is not configured.")
         payload = {
@@ -143,7 +144,7 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
             method="POST",
         )
         try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:
+            with urlopen(request, timeout=timeout_seconds or self.timeout_seconds) as response:
                 raw_payload = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
             body = exc.read().decode("utf-8", errors="ignore")

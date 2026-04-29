@@ -217,15 +217,20 @@ class TextInputParsingTest(unittest.TestCase):
 税号：91130101MA7MB4FA89
 发票类型：增票
 税率：13%
-开票明细：一次性使用微针电极，规格型号：CONSUMABLE TIP，数量：150，金额：35625
+开票明细：
+1. 一次性使用微针电极，规格型号：CONSUMABLE TIP，数量：150，金额：35625
+2. 一次性使用微针电极，规格型号：J25BM，数量：2，金额：200
 """
 
-        with patch.object(tax_rule_engine_module, "get_llm_adapter", return_value=_FakeTaxCodeLLMAdapter()):
+        fake_adapter = _FakeTaxCodeLLMAdapter()
+        with patch.object(tax_rule_engine_module, "get_llm_adapter", return_value=fake_adapter):
             draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", text, "", [])
 
-        self.assertEqual(draft.lines[0].tax_category, "医疗仪器器械")
-        self.assertEqual(draft.lines[0].tax_code, "1090245030000000000")
-        self.assertTrue(draft.lines[0].coding_reference.startswith("智能推荐，需人工复核"))
+        self.assertEqual([line.tax_category for line in draft.lines], ["医疗仪器器械", "医疗仪器器械"])
+        self.assertEqual([line.tax_code for line in draft.lines], ["1090245030000000000", "1090245030000000000"])
+        self.assertTrue(all(line.coding_reference.startswith("智能推荐，需人工复核") for line in draft.lines))
+        self.assertEqual(fake_adapter.call_count, 1)
+
 
     def test_simple_text_input_is_enriched_by_backend_coding_library(self):
         draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", SIMPLE_TEXT_INPUT, "", [])
@@ -404,6 +409,23 @@ class TextInputParsingTest(unittest.TestCase):
         finally:
             workbook.close()
 
+    def test_save_manual_draft_edits_does_not_rerun_extraction_or_llm(self):
+        draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", MINIMAL_TEXT_INPUT, "", [])
+        form = _form_from_draft(
+            draft,
+            tax_category="纳税申报代理",
+            tax_code="3040802050000000000",
+            tax_rate="3%",
+        )
+
+        with patch.object(workbench_module, "extract_invoice_structured_data", side_effect=AssertionError("should not re-extract")), \
+             patch.object(workbench_module, "_run_document_extraction", side_effect=AssertionError("should not parse attachments")), \
+             patch.object(workbench_module, "_run_draft_ocr", side_effect=AssertionError("should not rerun OCR")), \
+             patch.object(tax_rule_engine_module, "get_llm_adapter", side_effect=AssertionError("should not call LLM")):
+            saved = lean_workbench_module.save_lean_draft_from_form(draft.draft_id, form, [])
+
+        self.assertEqual(saved.lines[0].tax_code, "3040802050000000000")
+
     def test_manual_coding_fix_is_learned_immediately_for_next_draft(self):
         draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", MINIMAL_TEXT_INPUT, "", [])
         self.assertEqual(draft.lines[0].tax_category, "")
@@ -554,7 +576,11 @@ class _FakeTaxCodeLLMResponse:
 class _FakeTaxCodeLLMAdapter:
     is_enabled = True
 
+    def __init__(self):
+        self.call_count = 0
+
     def classify_tax_code(self, item_name, candidates):
+        self.call_count += 1
         self.last_item_name = item_name
         self.last_candidates = candidates
         assert any("1090245030000000000" in candidate for candidate in candidates)

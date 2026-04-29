@@ -673,7 +673,8 @@ def _suggest_taxonomy_with_llm(line: InvoiceLine, *, cache: dict[str, TaxonomyEn
 
 
 def _smart_coding_cache_key(line: InvoiceLine) -> str:
-    return _normalize("|".join([line.project_name, line.specification, line.unit]))
+    # 同一商品/服务项目通常应共用同一个税收分类；规格不同不应触发多次 LLM 调用。
+    return _normalize(line.project_name)
 
 
 def _llm_taxonomy_candidates(line: InvoiceLine, *, limit: int = 60) -> list[TaxonomyEntry]:
