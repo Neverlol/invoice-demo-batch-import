@@ -774,7 +774,6 @@ textarea::placeholder {
 }
 
 .taxonomy-picker {
-  position: relative;
   margin-bottom: 10px;
 }
 
@@ -787,18 +786,14 @@ textarea::placeholder {
 }
 
 .taxonomy-results {
-  position: absolute;
-  z-index: 8;
-  left: 0;
-  right: 0;
-  top: calc(100% + 6px);
+  margin-top: 8px;
   max-height: 260px;
   overflow: auto;
   padding: 8px;
   border-radius: 14px;
   border: 1px solid rgba(37, 99, 235, 0.18);
   background: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.14);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.10);
 }
 
 .taxonomy-option {
@@ -829,6 +824,11 @@ textarea::placeholder {
 .taxonomy-option em {
   color: #b45309;
   font-style: normal;
+}
+
+.taxonomy-option.is-message {
+  cursor: default;
+  color: var(--muted);
 }
 
 .bulk-fields {

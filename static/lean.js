@@ -127,14 +127,21 @@ if (taxonomyPicker) {
     }
   }
 
+  function renderTaxonomyMessage(message) {
+    if (!resultsBox) {
+      return;
+    }
+    resultsBox.innerHTML = `<div class="taxonomy-option is-message"><small>${message}</small></div>`;
+    resultsBox.hidden = false;
+  }
+
   function renderTaxonomyResults(items) {
     if (!resultsBox) {
       return;
     }
     resultsBox.innerHTML = "";
     if (!items.length) {
-      resultsBox.innerHTML = '<div class="taxonomy-option"><small>没有匹配结果，换个关键词试试</small></div>';
-      resultsBox.hidden = false;
+      renderTaxonomyMessage("没有匹配结果，换个关键词试试");
       return;
     }
     items.forEach((item) => {
@@ -172,16 +179,17 @@ if (taxonomyPicker) {
       hideTaxonomyResults();
       return;
     }
+    renderTaxonomyMessage("正在查找官方税收编码……");
     try {
       const response = await fetch(`/api/taxonomy/search?q=${encodeURIComponent(keyword)}`);
       if (!response.ok) {
-        hideTaxonomyResults();
+        renderTaxonomyMessage("搜索服务未启用，请重启工作台后再试。");
         return;
       }
       const payload = await response.json();
       renderTaxonomyResults(payload.results || []);
     } catch (error) {
-      hideTaxonomyResults();
+      renderTaxonomyMessage("搜索失败，请确认工作台已重启且网络/本地服务正常。");
     }
   }
 
@@ -190,12 +198,14 @@ if (taxonomyPicker) {
       clearTimeout(taxonomyTimer);
       taxonomyTimer = setTimeout(() => searchTaxonomy(queryInput.value), 220);
     });
+    queryInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        clearTimeout(taxonomyTimer);
+        searchTaxonomy(queryInput.value);
+      }
+    });
   }
-  document.addEventListener("click", (event) => {
-    if (!taxonomyPicker.contains(event.target)) {
-      hideTaxonomyResults();
-    }
-  });
 }
 
 document.querySelectorAll("[data-apply-line-repair]").forEach((button) => {

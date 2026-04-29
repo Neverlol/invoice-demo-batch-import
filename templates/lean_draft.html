@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>开票草稿 {{ draft.draft_id }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260426-v19') }}">
-    <script defer src="{{ url_for('static', filename='lean.js', v='20260426-v19') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260429-v21') }}">
+    <script defer src="{{ url_for('static', filename='lean.js', v='20260429-v21') }}"></script>
   </head>
   <body class="operator-body">
     <main class="dashboard-shell">
@@ -249,12 +249,12 @@
                   <small>面对多行明细时，用这里统一改赋码和税率。</small>
                 </div>
                 <div class="taxonomy-picker" data-taxonomy-picker>
-                  <label>搜索官方编码<input data-taxonomy-query placeholder="输入关键词，如：医疗、注射、器械"></label>
+                  <label>查找税收编码<input data-taxonomy-query placeholder="输入关键词，如：医疗、注射、器械；选择后自动填入下方"></label>
                   <div class="taxonomy-results" data-taxonomy-results hidden></div>
                 </div>
                 <div class="bulk-fields">
-                  <label>赋码大类<input data-bulk-source="line_tax_category" placeholder="例如：医疗仪器器械"></label>
-                  <label>税收编码<input data-bulk-source="line_tax_code" placeholder="选择后自动填入"></label>
+                  <label>选中的赋码大类<input data-bulk-source="line_tax_category" placeholder="选择官方编码后自动填入，也可手动改"></label>
+                  <label>选中的税收编码<input data-bulk-source="line_tax_code" placeholder="选择官方编码后自动填入"></label>
                   <label>税率<input data-bulk-source="line_tax_rate" placeholder="例如：13%"></label>
                 </div>
                 <div class="bulk-actions">
