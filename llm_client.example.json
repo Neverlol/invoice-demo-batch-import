@@ -1,9 +1,10 @@
 {
-  "enabled": false,
-  "provider": "minimax_openai",
+  "enabled": true,
+  "provider": "mimo_openai",
   "region": "cn",
-  "model": "MiniMax-M2.7",
-  "api_key_env": "TAX_INVOICE_MINIMAX_API_KEY",
-  "timeout_seconds": 12,
+  "endpoint": "https://api.xiaomimimo.com/v1/chat/completions",
+  "model": "mimo-v2-omni",
+  "api_key_env": "TAX_INVOICE_MIMO_API_KEY",
+  "timeout_seconds": 25,
   "max_retries": 1
 }

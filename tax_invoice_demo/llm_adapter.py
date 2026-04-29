@@ -16,7 +16,11 @@ DEFAULT_MINIMAX_GLOBAL_ENDPOINT = "https://api.minimax.io/v1/chat/completions"
 DEFAULT_MINIMAX_CHINA_ENDPOINT = "https://api.minimaxi.com/v1/chat/completions"
 DEFAULT_MINIMAX_ENDPOINT = DEFAULT_MINIMAX_GLOBAL_ENDPOINT
 DEFAULT_MINIMAX_MODEL = "MiniMax-M2.7"
+DEFAULT_MIMO_ENDPOINT = "https://api.xiaomimimo.com/v1/chat/completions"
+DEFAULT_MIMO_MODEL = "mimo-v2-omni"
 SUPPORTED_MINIMAX_PROVIDERS = {"minimax", "minimax_openai", "minimax_m27"}
+SUPPORTED_MIMO_PROVIDERS = {"mimo", "mimo_openai", "xiaomi_mimo"}
+SUPPORTED_DIRECT_PROVIDERS = SUPPORTED_MINIMAX_PROVIDERS | SUPPORTED_MIMO_PROVIDERS
 AGENT_ORCHESTRATOR_PROVIDERS = {"openclaw", "hermes", "openclaw_minimax", "hermes_minimax"}
 
 EXTRACT_INVOICE_INFO_SCHEMA = {
@@ -94,11 +98,14 @@ class NullLLMAdapter(BaseLLMAdapter):
 
 class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
     provider_name = "minimax_openai"
+    provider_label = "MiniMax"
+    default_endpoint = DEFAULT_MINIMAX_ENDPOINT
+    default_model = DEFAULT_MINIMAX_MODEL
 
     def __init__(self, config: LLMConfig) -> None:
         self.api_key = config.api_key
-        self.endpoint = config.endpoint or DEFAULT_MINIMAX_ENDPOINT
-        self.model = config.model or DEFAULT_MINIMAX_MODEL
+        self.endpoint = config.endpoint or self.default_endpoint
+        self.model = config.model or self.default_model
         # P0 现场链路不能被旧 local 配置中的 45s 长等待拖住；
         # 但 MiniMax-M2.7 是 reasoning 模型，12s 对结构化开票 JSON 容易过短。
         self.timeout_seconds = min(config.timeout_seconds, 25)
@@ -168,7 +175,7 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
 
     def _chat_json_messages(self, messages: list[dict[str, Any]], *, timeout_seconds: int | None = None) -> LLMResponse:
         if not self.api_key:
-            raise LLMAdapterError("MiniMax API key is not configured.")
+            raise LLMAdapterError(f"{self.provider_label} API key is not configured.")
         payload = {
             "model": self.model,
             "messages": messages,
@@ -177,10 +184,7 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
         request = Request(
             self.endpoint,
             data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
+            headers=self._headers(),
             method="POST",
         )
         try:
@@ -188,11 +192,11 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
                 raw_payload = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
             body = exc.read().decode("utf-8", errors="ignore")
-            raise LLMAdapterError(f"MiniMax HTTP {exc.code}: {body}") from exc
+            raise LLMAdapterError(f"{self.provider_label} HTTP {exc.code}: {body}") from exc
         except URLError as exc:
-            raise LLMAdapterError(f"MiniMax network error: {exc.reason}") from exc
+            raise LLMAdapterError(f"{self.provider_label} network error: {exc.reason}") from exc
         except TimeoutError as exc:
-            raise LLMAdapterError("MiniMax request timed out.") from exc
+            raise LLMAdapterError(f"{self.provider_label} request timed out.") from exc
 
         content = _extract_openai_content(raw_payload)
         parsed_json = _parse_json_content(content)
@@ -203,6 +207,26 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
             parsed_json=parsed_json,
         )
 
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+
+class MiMoOpenAICompatibleAdapter(MiniMaxOpenAICompatibleAdapter):
+    provider_name = "mimo_openai"
+    provider_label = "MiMo"
+    default_endpoint = DEFAULT_MIMO_ENDPOINT
+    default_model = DEFAULT_MIMO_MODEL
+
+    def _headers(self) -> dict[str, str]:
+        # Xiaomi MiMo OpenAI-compatible API uses `api-key` instead of Bearer auth.
+        return {
+            "api-key": self.api_key,
+            "Content-Type": "application/json",
+        }
+
 
 def get_llm_adapter() -> BaseLLMAdapter:
     config = load_llm_config()
@@ -211,6 +235,8 @@ def get_llm_adapter() -> BaseLLMAdapter:
         return NullLLMAdapter()
     if provider in SUPPORTED_MINIMAX_PROVIDERS:
         return MiniMaxOpenAICompatibleAdapter(config)
+    if provider in SUPPORTED_MIMO_PROVIDERS:
+        return MiMoOpenAICompatibleAdapter(config)
     return NullLLMAdapter()
 
 
@@ -224,9 +250,9 @@ def diagnose_llm_config() -> LLMConfigDiagnostic:
     if enabled and provider.lower() in AGENT_ORCHESTRATOR_PROVIDERS:
         issues.append(
             "OpenClaw/Hermes is a later orchestration layer, not the phase-1 LLM provider. "
-            "Use provider=minimax_openai or minimax_m27 for direct MiniMax M2.7 API access."
+            "Use provider=minimax_openai, mimo_openai, or another direct model API provider."
         )
-    elif enabled and provider.lower() not in SUPPORTED_MINIMAX_PROVIDERS:
+    elif enabled and provider.lower() not in SUPPORTED_DIRECT_PROVIDERS:
         issues.append(f"Unsupported provider: {provider}")
     if enabled and not config.api_key:
         issues.append("API key is missing.")
@@ -292,6 +318,8 @@ def load_llm_config() -> LLMConfig:
     api_key = (
         os.getenv("TAX_INVOICE_LLM_API_KEY")
         or api_key_from_named_env
+        or os.getenv("TAX_INVOICE_MIMO_API_KEY")
+        or os.getenv("MIMO_API_KEY")
         or os.getenv("TAX_INVOICE_MINIMAX_API_KEY")
         or os.getenv("OPENAI_API_KEY")
         or str(file_config.get("api_key") or "")
@@ -301,11 +329,12 @@ def load_llm_config() -> LLMConfig:
         os.getenv("TAX_INVOICE_LLM_ENDPOINT")
         or str(file_config.get("endpoint") or "")
     ).strip()
-    endpoint = explicit_endpoint or _default_minimax_endpoint_for_region(region)
+    provider_key = provider.strip().lower()
+    endpoint = explicit_endpoint or _default_endpoint_for_provider(provider_key, region)
     model = (
         os.getenv("TAX_INVOICE_LLM_MODEL")
         or str(file_config.get("model") or "")
-        or DEFAULT_MINIMAX_MODEL
+        or _default_model_for_provider(provider_key)
     ).strip()
     return LLMConfig(
         enabled=enabled,
@@ -337,6 +366,18 @@ def _candidate_config_paths() -> list[Path]:
         ]
     )
     return candidates
+
+
+def _default_endpoint_for_provider(provider: str, region: str) -> str:
+    if provider in SUPPORTED_MIMO_PROVIDERS:
+        return DEFAULT_MIMO_ENDPOINT
+    return _default_minimax_endpoint_for_region(region)
+
+
+def _default_model_for_provider(provider: str) -> str:
+    if provider in SUPPORTED_MIMO_PROVIDERS:
+        return DEFAULT_MIMO_MODEL
+    return DEFAULT_MINIMAX_MODEL
 
 
 def _default_minimax_endpoint_for_region(region: str) -> str:
@@ -406,7 +447,7 @@ def _extract_openai_content(payload: dict[str, Any]) -> str:
     try:
         return str(payload["choices"][0]["message"]["content"]).strip()
     except (KeyError, IndexError, TypeError) as exc:
-        raise LLMAdapterError(f"Unexpected MiniMax response shape: {payload}") from exc
+        raise LLMAdapterError(f"Unexpected OpenAI-compatible response shape: {payload}") from exc
 
 
 def _parse_json_content(content: str) -> dict[str, Any]:

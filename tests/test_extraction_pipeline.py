@@ -33,6 +33,8 @@ class ExtractionPipelineTest(unittest.TestCase):
         self.old_region = os.environ.get("TAX_INVOICE_LLM_REGION")
         self.old_model = os.environ.get("TAX_INVOICE_LLM_MODEL")
         self.old_api_key = os.environ.get("TAX_INVOICE_LLM_API_KEY")
+        self.old_mimo_api_key = os.environ.get("TAX_INVOICE_MIMO_API_KEY")
+        self.old_mimo_api_key_alias = os.environ.get("MIMO_API_KEY")
         self.old_api_key_env = os.environ.get("TAX_INVOICE_LLM_API_KEY_ENV")
         self.old_timeout = os.environ.get("TAX_INVOICE_LLM_TIMEOUT")
         self.old_max_retries = os.environ.get("TAX_INVOICE_LLM_MAX_RETRIES")
@@ -44,6 +46,8 @@ class ExtractionPipelineTest(unittest.TestCase):
         os.environ.pop("TAX_INVOICE_LLM_REGION", None)
         os.environ.pop("TAX_INVOICE_LLM_MODEL", None)
         os.environ.pop("TAX_INVOICE_LLM_API_KEY", None)
+        os.environ.pop("TAX_INVOICE_MIMO_API_KEY", None)
+        os.environ.pop("MIMO_API_KEY", None)
         os.environ.pop("TAX_INVOICE_LLM_API_KEY_ENV", None)
         os.environ.pop("TAX_INVOICE_LLM_TIMEOUT", None)
         os.environ.pop("TAX_INVOICE_LLM_MAX_RETRIES", None)
@@ -57,6 +61,8 @@ class ExtractionPipelineTest(unittest.TestCase):
         self._restore_env("TAX_INVOICE_LLM_REGION", self.old_region)
         self._restore_env("TAX_INVOICE_LLM_MODEL", self.old_model)
         self._restore_env("TAX_INVOICE_LLM_API_KEY", self.old_api_key)
+        self._restore_env("TAX_INVOICE_MIMO_API_KEY", self.old_mimo_api_key)
+        self._restore_env("MIMO_API_KEY", self.old_mimo_api_key_alias)
         self._restore_env("TAX_INVOICE_LLM_API_KEY_ENV", self.old_api_key_env)
         self._restore_env("TAX_INVOICE_LLM_TIMEOUT", self.old_timeout)
         self._restore_env("TAX_INVOICE_LLM_MAX_RETRIES", self.old_max_retries)
@@ -163,6 +169,35 @@ class ExtractionPipelineTest(unittest.TestCase):
         self.assertEqual(config.endpoint, "https://api.minimaxi.com/v1/chat/completions")
         self.assertEqual(diagnostic.region, "cn")
         self.assertTrue(diagnostic.ready)
+
+    def test_mimo_provider_uses_xiaomi_defaults_and_api_key_header(self):
+        os.environ["TAX_INVOICE_LLM_PROVIDER"] = "mimo_openai"
+        os.environ["TAX_INVOICE_MIMO_API_KEY"] = "mimo-key"
+        os.environ.pop("TAX_INVOICE_LLM_ENDPOINT", None)
+        os.environ.pop("TAX_INVOICE_LLM_MODEL", None)
+        captured = {}
+
+        def fake_urlopen(request, timeout=None):
+            captured["headers"] = dict(request.header_items())
+            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            captured["url"] = request.full_url
+            return _FakeHTTPResponse({"choices": [{"message": {"content": '{"ok": true}'}}]})
+
+        config = llm_adapter_module.load_llm_config()
+        diagnostic = llm_adapter_module.diagnose_llm_config()
+        self.assertEqual(config.endpoint, "https://api.xiaomimimo.com/v1/chat/completions")
+        self.assertEqual(config.model, "mimo-v2-omni")
+        self.assertTrue(diagnostic.ready)
+
+        with patch.object(llm_adapter_module, "urlopen", side_effect=fake_urlopen):
+            response = llm_adapter_module.get_llm_adapter().ping_json()
+
+        self.assertEqual(response.provider, "mimo_openai")
+        self.assertEqual(response.parsed_json["ok"], True)
+        self.assertEqual(captured["url"], "https://api.xiaomimimo.com/v1/chat/completions")
+        self.assertEqual(captured["payload"]["model"], "mimo-v2-omni")
+        self.assertEqual(captured["headers"].get("Api-key"), "mimo-key")
+        self.assertNotIn("Authorization", captured["headers"])
 
     def test_llm_extracts_when_rules_are_weak(self):
         os.environ["TAX_INVOICE_LLM_PROVIDER"] = "minimax"
