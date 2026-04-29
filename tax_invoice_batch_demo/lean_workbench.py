@@ -439,8 +439,22 @@ def _attach_failure_target(record: dict[str, Any], draft: InvoiceDraft) -> None:
     record["repair_focus"] = _repair_focus(field_name, reason)
     record["repair_field"] = _repair_field(field_name)
     record["repair_value"] = _repair_value(record)
-    if record.get("repair_status") != "applied" and record["repair_field"] and record["repair_value"] and target_line_no:
+    if record.get("repair_status") == "applied" and _has_remaining_matching_repair(record, draft):
         record["repair_status"] = "ready"
+        record["repair_completion_hint"] = "检测到还有同类明细未应用该税局建议，可继续一键补齐。"
+    elif record.get("repair_status") != "applied" and record["repair_field"] and record["repair_value"] and target_line_no:
+        record["repair_status"] = "ready"
+
+
+def _has_remaining_matching_repair(record: dict[str, Any], draft: InvoiceDraft) -> bool:
+    if not _should_expand_repair_to_matching_lines(record):
+        return False
+    previous_value = str(record.get("previous_value") or "").strip()
+    repair_value = str(record.get("repair_value") or "").strip()
+    attr = REPAIR_FIELD_TO_LINE_ATTR.get(str(record.get("repair_field") or ""))
+    if not previous_value or not attr or previous_value == repair_value:
+        return False
+    return any(str(getattr(line, attr) or "").strip() == previous_value for line in draft.lines)
 
 
 def _infer_target_line_no(record: dict[str, Any], draft: InvoiceDraft) -> int:

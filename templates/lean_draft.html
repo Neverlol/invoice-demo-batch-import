@@ -126,6 +126,7 @@
                       <small>修复焦点：{{ item.repair_focus or item.suggested_action }}；类型：{{ item.failure_type or '未识别' }}</small>
                     {% endif %}
                     {% if item.repair_decision_hint %}<small>{{ item.repair_decision_hint }}</small>{% endif %}
+                    {% if item.repair_completion_hint %}<small>{{ item.repair_completion_hint }}</small>{% endif %}
                   </article>
                 {% endfor %}
               </div>
