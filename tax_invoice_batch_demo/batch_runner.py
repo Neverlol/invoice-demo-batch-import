@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlparse
 
 from openpyxl import load_workbook
 
@@ -68,7 +69,10 @@ class BatchImportRunner:
                 import_state = self._wait_for_import_result(page)
                 if import_state == "failed":
                     failure_path, failure_report = self._download_failure_details(page, PlaywrightTimeoutError)
-                    self._log("failed", "税局导入失败，已下载并解析失败明细。")
+                    if failure_path:
+                        self._log("failed", "税局导入失败，已下载并解析失败明细。")
+                    else:
+                        self._log("failed", "税局导入失败，未能自动下载失败明细；请手动下载后回传工作台。")
                     return BatchRunResult(
                         status="failed",
                         current_step="failed",
@@ -101,49 +105,69 @@ class BatchImportRunner:
 
     def _open_batch_import_page(self, page) -> None:
         self._log("navigate", "准备进入批量开票页面。")
-        if "批量开票" in page.content():
-            self._log("navigate", "当前页面已出现批量开票入口或页面内容。")
+        if _is_batch_import_page(page):
+            self._log("navigate", "当前页面已是批量导入页。")
             return
-        if "blue-invoice-makeout" not in page.url:
-            origin = _origin_from_url(page.url)
-            page.goto(f"{origin}/blue-invoice-makeout", wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_timeout(1500)
-        for text in ("批量开票", "批量导入", "导入开票"):
-            target = page.get_by_text(text, exact=False).first
-            if target.count():
-                target.click(timeout=5000)
-                page.wait_for_timeout(1500)
-                self._log("navigate", f"已点击入口: {text}")
+
+        origin = _origin_from_url(page.url)
+        direct_url = f"{origin}/blue-invoice-makeout/invoice-batch"
+        self._log("navigate", f"尝试直接进入批量导入页: {direct_url}")
+        page.goto(direct_url, wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_timeout(2500)
+        if _is_batch_import_page(page):
+            self._log("navigate", "已进入批量导入页。")
+            return
+
+        # Some tax-bureau deployments block direct routing until the makeout page
+        # initializes. Fall back to the visible menu entry, but do not treat the
+        # blue-invoice home page itself as the batch page just because it contains
+        # the words “批量开票”.
+        makeout_url = f"{origin}/blue-invoice-makeout"
+        self._log("navigate", "直接进入未确认成功，回到蓝字发票开具页查找批量入口。")
+        page.goto(makeout_url, wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_timeout(2000)
+        clicked = _click_first_visible_text(page, ("批量开票", "批量导入", "导入开票"), timeout=5000)
+        if clicked:
+            self._log("navigate", f"已点击入口: {clicked}")
+            page.wait_for_timeout(2500)
+            if _is_batch_import_page(page):
+                self._log("navigate", "已确认进入批量导入页。")
                 return
-        raise RuntimeError("未找到“批量开票/批量导入”入口。请先手动进入批量开票页后重试。")
+
+        raise RuntimeError(
+            "未进入税局批量导入页。请手动打开“批量开票/批量导入”页面，"
+            "确认地址包含 /blue-invoice-makeout/invoice-batch 后再重试。"
+            f" 当前地址: {page.url}"
+        )
 
     def _upload_template(self, page, timeout_error_cls) -> None:
+        if not _is_batch_import_page(page):
+            raise RuntimeError(
+                "当前页面不是批量导入页，已停止上传以避免误点。"
+                f" 请先进入 /blue-invoice-makeout/invoice-batch。当前地址: {page.url}"
+            )
+
         self._log("upload", f"准备上传模板: {self.template_path.name}")
         file_input = page.locator("input[type=file]").first
         if file_input.count():
             file_input.set_input_files(str(self.template_path))
         else:
             with page.expect_file_chooser(timeout=8000) as chooser_info:
-                clicked = False
-                for text in ("选择", "重新选择", "上传", "导入"):
-                    target = page.get_by_text(text, exact=False).first
-                    if target.count():
-                        target.click(timeout=3000)
-                        clicked = True
-                        break
+                clicked = _click_first_visible_text(
+                    page,
+                    ("选择文件", "选择模板", "上传文件", "点击上传", "重新选择", "选择"),
+                    timeout=5000,
+                )
                 if not clicked:
-                    raise RuntimeError("未找到文件选择按钮。")
+                    raise RuntimeError("未找到可见的文件选择按钮。请确认已停留在税局批量导入页。")
+                self._log("upload", f"已点击文件选择按钮: {clicked}")
             chooser_info.value.set_files(str(self.template_path))
         page.wait_for_timeout(1000)
-        for text in ("批量导入", "导入", "上传"):
-            target = page.get_by_text(text, exact=False).first
-            if target.count():
-                try:
-                    target.click(timeout=5000)
-                    self._log("upload", f"已点击提交按钮: {text}")
-                    break
-                except timeout_error_cls:
-                    continue
+        clicked_submit = _click_first_visible_text(page, ("批量导入", "开始导入", "确认导入", "导入", "上传"), timeout=5000)
+        if clicked_submit:
+            self._log("upload", f"已点击提交按钮: {clicked_submit}")
+        else:
+            self._log("upload", "已设置模板文件，但未自动找到提交按钮；请在税局页面手动点击批量导入。")
         page.wait_for_timeout(3000)
 
     def _wait_for_import_result(self, page) -> str:
@@ -274,11 +298,88 @@ def _safe_body_text(page) -> str:
 
 
 def _origin_from_url(url: str) -> str:
-    if "://" not in url:
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
         raise RuntimeError("当前标签页不是有效税局 URL。")
-    scheme, rest = url.split("://", 1)
-    host = rest.split("/", 1)[0]
-    return f"{scheme}://{host}"
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _is_batch_import_page(page) -> bool:
+    """Return True only for the actual batch-import workspace, not its menu entry.
+
+    The blue-invoice makeout home page can contain the text “批量开票”, which used
+    to cause a false positive. Prefer the routed URL and otherwise require upload
+    controls plus batch-import wording.
+    """
+
+    try:
+        path = urlparse(page.url).path.rstrip("/")
+        if path.endswith("/blue-invoice-makeout/invoice-batch"):
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+
+    text = _safe_body_text(page)
+    if not text or "蓝字发票开具" in _safe_title(page) and "批量导入" not in text:
+        return False
+    has_upload_control = False
+    try:
+        has_upload_control = page.locator("input[type=file]").count() > 0
+    except Exception:  # noqa: BLE001
+        has_upload_control = False
+    upload_tokens = ("选择文件", "上传文件", "点击上传", "批量导入")
+    return has_upload_control and any(token in text for token in upload_tokens)
+
+
+def _click_first_visible_text(page, texts: tuple[str, ...], *, timeout: int = 5000) -> str:
+    """Click the first visible interactive element matching the provided texts.
+
+    Avoids `get_by_text("选择").first`, which can match hidden dialog titles such
+    as “选择发票票种” instead of the upload button.
+    """
+
+    selectors = (
+        "button",
+        "a",
+        "[role=button]",
+        "label",
+        ".t-button",
+        ".el-button",
+        ".ant-btn",
+        ".ivu-btn",
+        ".arco-btn",
+        ".semi-button",
+        ".t-upload__trigger",
+        ".el-upload",
+        ".ant-upload",
+    )
+    deadline = datetime.now().timestamp() + max(timeout, 0) / 1000
+    last_error: Exception | None = None
+    while datetime.now().timestamp() <= deadline:
+        for text in texts:
+            for selector in selectors:
+                try:
+                    locator = page.locator(selector).filter(has_text=text)
+                    count = min(locator.count(), 20)
+                except Exception as exc:  # noqa: BLE001
+                    last_error = exc
+                    continue
+                for index in range(count):
+                    candidate = locator.nth(index)
+                    try:
+                        if not candidate.is_visible(timeout=150):
+                            continue
+                        if hasattr(candidate, "is_enabled") and not candidate.is_enabled(timeout=150):
+                            continue
+                        candidate.click(timeout=1000)
+                        return text
+                    except Exception as exc:  # noqa: BLE001
+                        last_error = exc
+                        continue
+        page.wait_for_timeout(200)
+    if last_error:
+        return ""
+    return ""
 
 
 def _read_template_serials(template_path: Path) -> tuple[str, ...]:
