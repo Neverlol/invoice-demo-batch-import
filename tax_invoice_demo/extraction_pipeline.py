@@ -42,7 +42,14 @@ def extract_invoice_structured_data(
     )
 
     adapter = get_llm_adapter()
-    if not adapter.is_enabled or not _should_try_llm(buyer, lines, parse_source):
+    if not adapter.is_enabled or not _should_try_llm(
+        buyer,
+        lines,
+        parse_source,
+        raw_text=raw_text,
+        document_text=document_text,
+        ocr_text=ocr_text,
+    ):
         return outcome
 
     llm_errors: list[str] = []
@@ -55,6 +62,7 @@ def extract_invoice_structured_data(
                 continue
             llm_buyer = _buyer_from_llm_payload(response.parsed_json)
             llm_lines = _lines_from_llm_payload(response.parsed_json)
+            conflict_warnings = _build_extraction_conflict_warnings(buyer, lines, llm_buyer, llm_lines)
             merged_buyer = _merge_buyer(buyer, llm_buyer)
             merged_lines = _merge_lines(lines, llm_lines)
             return ExtractionOutcome(
@@ -63,7 +71,7 @@ def extract_invoice_structured_data(
                 parse_source=parse_source,
                 strategy="rules_plus_llm",
                 llm_provider=response.provider,
-                warnings=llm_errors,
+                warnings=[*llm_errors, *conflict_warnings],
             )
         except LLMAdapterError as exc:
             llm_errors.append(f"第 {attempt} 次 LLM 调用失败: {exc}")
@@ -71,9 +79,20 @@ def extract_invoice_structured_data(
     return outcome
 
 
-def _should_try_llm(buyer: BuyerInfo, lines: list[InvoiceLine], parse_source: str) -> bool:
+def _should_try_llm(
+    buyer: BuyerInfo,
+    lines: list[InvoiceLine],
+    parse_source: str,
+    *,
+    raw_text: str,
+    document_text: str,
+    ocr_text: str,
+) -> bool:
     if not parse_source.strip():
         return False
+    # 上传附件、OCR、长文本最容易出现“规则错得很自信”，需要让 LLM 做复核候选。
+    if document_text.strip() or ocr_text.strip() or len(raw_text.strip()) >= 120:
+        return True
     if not buyer.name.strip() or not buyer.tax_id.strip():
         return True
     if not lines:
@@ -83,6 +102,37 @@ def _should_try_llm(buyer: BuyerInfo, lines: list[InvoiceLine], parse_source: st
     if sum(1 for line in lines if line.project_name.strip()) == 0:
         return True
     return False
+
+
+def _build_extraction_conflict_warnings(
+    rule_buyer: BuyerInfo,
+    rule_lines: list[InvoiceLine],
+    llm_buyer: BuyerInfo,
+    llm_lines: list[InvoiceLine],
+) -> list[str]:
+    warnings: list[str] = []
+    _append_conflict(warnings, "购买方名称", rule_buyer.name, llm_buyer.name)
+    _append_conflict(warnings, "购买方税号", rule_buyer.tax_id, llm_buyer.tax_id)
+    if rule_lines and llm_lines and len(rule_lines) != len(llm_lines):
+        warnings.append(f"识别差异需确认：规则识别出 {len(rule_lines)} 行明细，智能识别为 {len(llm_lines)} 行。")
+    for index, (rule_line, llm_line) in enumerate(zip(rule_lines, llm_lines), start=1):
+        _append_conflict(warnings, f"第 {index} 行项目名称", rule_line.project_name, llm_line.project_name)
+        _append_conflict(warnings, f"第 {index} 行金额", rule_line.resolved_amount_with_tax(), llm_line.resolved_amount_with_tax())
+        _append_conflict(warnings, f"第 {index} 行税率", rule_line.normalized_tax_rate(), llm_line.normalized_tax_rate())
+        _append_conflict(warnings, f"第 {index} 行税收编码", rule_line.tax_code, llm_line.tax_code)
+    return warnings[:12]
+
+
+def _append_conflict(warnings: list[str], label: str, rule_value: str, llm_value: str) -> None:
+    rule_normalized = _normalize_compare_value(rule_value)
+    llm_normalized = _normalize_compare_value(llm_value)
+    if not rule_normalized or not llm_normalized or rule_normalized == llm_normalized:
+        return
+    warnings.append(f"识别差异需确认：{label}，规则识别为“{rule_value}”，智能识别为“{llm_value}”。")
+
+
+def _normalize_compare_value(value: str) -> str:
+    return str(value or "").strip().replace(" ", "").replace("，", ",").upper()
 
 
 def _buyer_from_llm_payload(payload: dict) -> BuyerInfo:

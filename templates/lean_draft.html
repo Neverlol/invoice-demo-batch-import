@@ -93,6 +93,15 @@
             <section class="banner notice"><p>有 {{ export.warning_count }} 条提醒，但无阻断错误。</p></section>
           {% endif %}
 
+          {% if draft.extract_warnings %}
+            <section class="banner notice">
+              <strong>识别结果需复核</strong>
+              {% for warning in draft.extract_warnings %}
+                <p>{{ warning }}</p>
+              {% endfor %}
+            </section>
+          {% endif %}
+
           {% if failure_report %}
             <section class="banner alert failure-panel">
               <div class="banner-head">

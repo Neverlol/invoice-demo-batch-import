@@ -214,6 +214,54 @@ class ExtractionPipelineTest(unittest.TestCase):
         self.assertEqual(outcome.lines[0].amount_with_tax, "500")
         self.assertEqual(outcome.lines[0].tax_code, "3040802050000000000")
 
+    def test_document_extraction_uses_llm_as_reviewer_and_flags_conflicts(self):
+        os.environ["TAX_INVOICE_LLM_PROVIDER"] = "minimax"
+        os.environ["TAX_INVOICE_LLM_API_KEY"] = "fake-key"
+        document_text = """物料名称\t规格型号\t数量\t开票金额\t税率
+一次性使用微针电极\tJ25BM\t3282\t1061785.36\t0.13
+公司名称\t河北雅之颜医药有限公司
+税号\t91130101MA7MB4FA89
+税收编码\t1090245030000000000
+"""
+        response_payload = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "客户名称": "河北雅之颜医药有限公司",
+                                "纳税人识别号": "91130101MA7MB4FA89",
+                                "地址电话": "",
+                                "开户行及账号": "",
+                                "项目列表": [
+                                    {
+                                        "项目名称": "一次性使用微针电极",
+                                        "规格型号": "J25BM",
+                                        "单位": "",
+                                        "数量": "3282",
+                                        "单价": "",
+                                        "金额": "1061785.36",
+                                        "税率": "3%",
+                                        "税收编码": "1090245030000000000",
+                                    }
+                                ],
+                                "价税合计": "1061785.36",
+                                "备注": "",
+                            },
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ]
+        }
+
+        with patch.object(llm_adapter_module, "urlopen", return_value=_FakeHTTPResponse(response_payload)):
+            outcome = extract_invoice_structured_data(raw_text="", note="", document_text=document_text, ocr_text="")
+
+        self.assertEqual(outcome.strategy, "rules_plus_llm")
+        self.assertEqual(outcome.lines[0].normalized_tax_rate(), "13%")
+        self.assertTrue(any("识别差异需确认：第 1 行税率" in warning for warning in outcome.warnings))
+
     def test_invalid_llm_payload_falls_back_to_rules(self):
         os.environ["TAX_INVOICE_LLM_PROVIDER"] = "minimax"
         os.environ["TAX_INVOICE_LLM_API_KEY"] = "fake-key"
