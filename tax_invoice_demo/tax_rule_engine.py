@@ -10,6 +10,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Iterable
 
+from .llm_adapter import LLMAdapterError, get_llm_adapter
 from .models import InvoiceLine
 from .taxonomy_master import TaxonomyEntry, load_taxonomy_master, suggest_taxonomy
 
@@ -74,6 +75,7 @@ class TaxRuleEngine:
     ) -> list[InvoiceLine]:
         enriched: list[InvoiceLine] = []
         context_text = f"{raw_text}\n{note}".strip()
+        smart_coding_cache: dict[str, TaxonomyEntry | None] = {}
         for line in lines:
             _normalize_inline_tax_category(line)
             suggestion = self.suggest_line(line, context_text=context_text)
@@ -93,6 +95,19 @@ class TaxRuleEngine:
                 elif line.tax_category and not line.coding_reference:
                     line.coding_reference = f"来源表格/材料识别税目大类: {line.tax_category}"
                 _apply_taxonomy_code(line)
+                if not line.tax_category or not line.tax_code:
+                    smart_entry = _suggest_taxonomy_with_llm(line, cache=smart_coding_cache)
+                    if smart_entry is not None:
+                        if not line.tax_category:
+                            line.tax_category = smart_entry.category_short_name
+                        if not line.tax_code:
+                            line.tax_code = smart_entry.official_code
+                        line.coding_reference = (
+                            "智能推荐，需人工复核: "
+                            f"大类 {smart_entry.category_short_name} / "
+                            f"细分 {smart_entry.official_name} / "
+                            f"编码 {smart_entry.official_code}"
+                        )
                 enriched.append(line)
                 continue
 
@@ -396,6 +411,12 @@ def _normalize(value: str) -> str:
     return re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "", value).upper()
 
 
+def _bigrams(value: str) -> tuple[str, ...]:
+    if len(value) < 2:
+        return (value,) if value else ()
+    return tuple(value[index : index + 2] for index in range(len(value) - 1))
+
+
 def _normalize_rate_text(value: str) -> str:
     return value.strip().replace("％", "%")
 
@@ -615,6 +636,108 @@ def _looks_like_generic_project_name(value: str) -> bool:
         "材料费",
         "货物",
     }
+
+
+def _suggest_taxonomy_with_llm(line: InvoiceLine, *, cache: dict[str, TaxonomyEntry | None]) -> TaxonomyEntry | None:
+    key = _smart_coding_cache_key(line)
+    if key in cache:
+        return cache[key]
+    cache[key] = None
+    candidates = _llm_taxonomy_candidates(line)
+    if not candidates:
+        return None
+    adapter = get_llm_adapter()
+    if not adapter.is_enabled:
+        return None
+    candidate_text = [
+        "｜".join(
+            part
+            for part in [
+                entry.official_name,
+                entry.category_short_name,
+                entry.official_code,
+                entry.description[:120],
+            ]
+            if part
+        )
+        for entry in candidates
+    ]
+    item_name = " / ".join(part for part in [line.project_name.strip(), line.specification.strip()] if part)
+    try:
+        response = adapter.classify_tax_code(item_name, candidate_text)
+    except LLMAdapterError:
+        return None
+    entry = _resolve_llm_taxonomy_choice(response.parsed_json, candidates)
+    cache[key] = entry
+    return entry
+
+
+def _smart_coding_cache_key(line: InvoiceLine) -> str:
+    return _normalize("|".join([line.project_name, line.specification, line.unit]))
+
+
+def _llm_taxonomy_candidates(line: InvoiceLine, *, limit: int = 60) -> list[TaxonomyEntry]:
+    text = f"{line.project_name} {line.specification} {line.tax_category}".strip()
+    normalized = _normalize(text)
+    scored: list[tuple[int, TaxonomyEntry]] = []
+    medical_hint = bool(re.search(r"医|药|械|针|电极|耗材|一次性|导管|探头|诊断|治疗|手术|卫生", text))
+    for entry in load_taxonomy_master():
+        official = _normalize(entry.official_name)
+        short = _normalize(entry.category_short_name)
+        description = _normalize(entry.description)
+        score = 0
+        if normalized:
+            for token in _bigrams(normalized):
+                if token and token in official:
+                    score += 10
+                elif token and token in short:
+                    score += 7
+                elif token and token in description:
+                    score += 3
+        if medical_hint and (
+            entry.official_code.startswith("109024")
+            or "医" in entry.official_name
+            or "医疗" in entry.description
+            or "医用" in entry.description
+        ):
+            score += 32
+        if "针" in text and re.search(r"注射|穿刺|针", entry.official_name + entry.description):
+            score += 45
+        if "电极" in text and re.search(r"电极|高频|诊断|治疗|监护", entry.official_name + entry.description):
+            score += 28
+        if score > 0:
+            scored.append((score, entry))
+    scored.sort(key=lambda item: (-item[0], item[1].official_code))
+    seen: set[str] = set()
+    candidates: list[TaxonomyEntry] = []
+    for _, entry in scored:
+        if entry.official_code in seen:
+            continue
+        seen.add(entry.official_code)
+        candidates.append(entry)
+        if len(candidates) >= limit:
+            break
+    return candidates
+
+
+def _resolve_llm_taxonomy_choice(payload: dict, candidates: list[TaxonomyEntry]) -> TaxonomyEntry | None:
+    code_map = {entry.official_code: entry for entry in candidates}
+    name_map = {_normalize(entry.official_name): entry for entry in candidates}
+    candidate_items = payload.get("候选分类") if isinstance(payload, dict) else None
+    if isinstance(candidate_items, list):
+        for item in candidate_items:
+            if not isinstance(item, dict):
+                continue
+            code = str(item.get("税收编码") or item.get("编码") or "").strip()
+            if code in code_map:
+                return code_map[code]
+            name = _normalize(str(item.get("分类名称") or item.get("细分品类") or item.get("大类") or ""))
+            if name in name_map:
+                return name_map[name]
+    code = str(payload.get("税收编码") or payload.get("编码") or "").strip() if isinstance(payload, dict) else ""
+    if code in code_map:
+        return code_map[code]
+    return None
 
 
 def _normalize_inline_tax_category(line: InvoiceLine) -> None:

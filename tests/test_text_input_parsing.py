@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 import os
+from unittest.mock import patch
 
 from tax_invoice_demo.parsing import extract_buyer_info_from_text, extract_invoice_lines_from_text
 import tax_invoice_demo.case_events as case_events_module
@@ -210,6 +211,21 @@ class TextInputParsingTest(unittest.TestCase):
         self.assertEqual(draft.lines[0].normalized_tax_rate(), "13%")
         self.assertTrue(all(line.tax_code == "1090245030000000000" for line in draft.lines))
         self.assertFalse(any("当前还没自动识别出开票明细" in issue for issue in draft.issues))
+
+    def test_llm_tax_code_recommendation_writes_draft_fields_with_review_label(self):
+        text = """购买方名称：河北雅之颜医药有限公司
+税号：91130101MA7MB4FA89
+发票类型：增票
+税率：13%
+开票明细：一次性使用微针电极，规格型号：CONSUMABLE TIP，数量：150，金额：35625
+"""
+
+        with patch.object(tax_rule_engine_module, "get_llm_adapter", return_value=_FakeTaxCodeLLMAdapter()):
+            draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", text, "", [])
+
+        self.assertEqual(draft.lines[0].tax_category, "医疗仪器器械")
+        self.assertEqual(draft.lines[0].tax_code, "1090245030000000000")
+        self.assertTrue(draft.lines[0].coding_reference.startswith("智能推荐，需人工复核"))
 
     def test_simple_text_input_is_enriched_by_backend_coding_library(self):
         draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", SIMPLE_TEXT_INPUT, "", [])
@@ -521,6 +537,28 @@ def _form_from_draft(draft, *, tax_category: str, tax_code: str, tax_rate: str):
         form.add("line_tax_rate", tax_rate)
         form.add("line_coding_reference", line.coding_reference)
     return form
+
+
+class _FakeTaxCodeLLMResponse:
+    parsed_json = {
+        "候选分类": [
+            {
+                "分类名称": "注射穿刺器械",
+                "税收编码": "1090245030000000000",
+                "置信度": "0.82",
+            }
+        ]
+    }
+
+
+class _FakeTaxCodeLLMAdapter:
+    is_enabled = True
+
+    def classify_tax_code(self, item_name, candidates):
+        self.last_item_name = item_name
+        self.last_candidates = candidates
+        assert any("1090245030000000000" in candidate for candidate in candidates)
+        return _FakeTaxCodeLLMResponse()
 
 
 if __name__ == "__main__":

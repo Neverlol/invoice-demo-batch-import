@@ -322,7 +322,7 @@
                           <td><input name="line_tax_code" value="{{ line.tax_code }}" readonly data-lockable></td>
                           {% set coding_reference = line.coding_reference or '' %}
                           <td>
-                            <span class="coding-note" data-coding-note title="{{ coding_reference }}">
+                            <span class="coding-note{% if coding_reference.startswith('智能推荐') %} smart-suggestion{% endif %}" data-coding-note title="{{ coding_reference }}">
                               {{ coding_reference.split(':', 1)[0] if coding_reference else '待人工复核' }}
                             </span>
                           </td>

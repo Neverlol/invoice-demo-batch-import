@@ -213,8 +213,8 @@ if (taxonomyPicker) {
       button.type = "button";
       button.className = "taxonomy-option";
       button.innerHTML = `
-        <strong>${escapeHtml(item.official_name || item.category_short_name)}</strong>
-        <small>${escapeHtml(item.category_short_name || "")}｜${escapeHtml(item.official_code || "")}${item.is_summary ? "｜<em>汇总类，建议继续选更具体项</em>" : ""}</small>
+        <strong>细分品类：${escapeHtml(item.official_name || item.category_short_name)}</strong>
+        <small>大类：${escapeHtml(item.category_short_name || "未识别")}｜税收编码：${escapeHtml(item.official_code || "")}${item.is_summary ? "｜<em>汇总类，建议继续选更具体项</em>" : ""}</small>
       `;
       button.addEventListener("click", () => {
         applyTaxonomyItem(item);

@@ -946,6 +946,18 @@ th {
   color: #ffd68a;
 }
 
+.coding-note.smart-suggestion {
+  display: inline-flex;
+  align-items: center;
+  min-width: auto;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  font-weight: 800;
+}
+
 .draft-foot {
   display: flex;
   justify-content: flex-end;
@@ -1525,6 +1537,13 @@ th {
 .coding-note.pending-change {
   color: #a16207;
   background: #fef3c7;
+}
+
+.coding-note.smart-suggestion {
+  color: #92400e;
+  background: #fef3c7;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  font-weight: 800;
 }
 
 .line-failure-list {
