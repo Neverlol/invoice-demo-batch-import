@@ -15,6 +15,7 @@ from tax_invoice_batch_demo.lean_workbench import (
     create_lean_draft,
     default_form,
     draft_preview,
+    enrich_failure_report_for_draft,
     export_batch_template,
     export_draft_template,
     line_form_rows,
@@ -23,6 +24,7 @@ from tax_invoice_batch_demo.lean_workbench import (
     load_draft_batch,
     parse_failure_file,
     record_success_to_ledger,
+    save_failure_report_for_draft,
     save_lean_draft_from_form,
 )
 from tax_invoice_demo.case_events import record_case_event
@@ -191,7 +193,11 @@ def execute_draft(draft_id: str):
             run_blocked=True,
             applied_failure_repairs=None,
         ), 400
-    run_id = _queue_batch_run(export["output_path"], request.form.get("cdp_endpoint", "http://127.0.0.1:9222"))
+    run_id = _queue_batch_run(
+        export["output_path"],
+        request.form.get("cdp_endpoint", "http://127.0.0.1:9222"),
+        draft_id=draft.draft_id,
+    )
     record_case_event(
         case_id=draft.case_id,
         draft_id=draft.draft_id,
@@ -248,7 +254,21 @@ def run_failure_download(run_id: str):
     return send_file(run["downloaded_failure_path"], as_attachment=True)
 
 
-def _queue_batch_run(template_path: Path, cdp_endpoint: str) -> str:
+@app.post("/runs/<run_id>/apply-failure-repairs")
+def run_apply_failure_repairs(run_id: str):
+    with RUN_LOCK:
+        run = RUNS.get(run_id)
+    if run is None:
+        abort(404)
+    draft_id = str(run.get("draft_id") or "")
+    draft = load_draft(draft_id) if draft_id else None
+    if draft is None:
+        abort(404)
+    apply_failure_repairs_to_draft(draft)
+    return redirect(url_for("draft_detail", draft_id=draft.draft_id))
+
+
+def _queue_batch_run(template_path: Path, cdp_endpoint: str, *, draft_id: str = "") -> str:
     run_id = uuid4().hex[:10]
     with RUN_LOCK:
         RUNS[run_id] = {
@@ -258,6 +278,7 @@ def _queue_batch_run(template_path: Path, cdp_endpoint: str) -> str:
             "logs": [],
             "error": "",
             "template_path": str(template_path),
+            "draft_id": draft_id or _draft_id_from_template_path(template_path),
             "downloaded_failure_path": "",
             "failure_report": None,
             "preview_clicked": False,
@@ -278,14 +299,30 @@ def _execute_batch_run(run_id: str, template_path: Path, cdp_endpoint: str) -> N
     runner = BatchImportRunner(template_path=template_path, cdp_endpoint=cdp_endpoint, status_hook=status_hook)
     result = runner.run()
     with RUN_LOCK:
+        draft_id = str(RUNS[run_id].get("draft_id") or "")
+    failure_report = result.failure_report
+    if failure_report and draft_id:
+        draft = load_draft(draft_id)
+        if draft is not None:
+            failure_report = enrich_failure_report_for_draft(failure_report, draft)
+            save_failure_report_for_draft(draft_id, failure_report)
+    with RUN_LOCK:
         record = RUNS[run_id]
         record["status"] = result.status
         record["current_step"] = result.current_step
         record["logs"] = result.logs
         record["error"] = result.error
         record["downloaded_failure_path"] = result.downloaded_failure_path
-        record["failure_report"] = result.failure_report
+        record["failure_report"] = failure_report
         record["preview_clicked"] = result.preview_clicked
+
+
+def _draft_id_from_template_path(template_path: Path) -> str:
+    stem = Path(template_path).stem
+    suffix = "_batch_import"
+    if stem.endswith(suffix):
+        return stem[: -len(suffix)]
+    return ""
 
 
 @app.template_filter("json_pretty")

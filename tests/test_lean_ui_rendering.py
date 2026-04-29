@@ -5,6 +5,7 @@ from pathlib import Path
 
 from werkzeug.datastructures import MultiDict
 
+import app as app_module
 from app import app
 import tax_invoice_batch_demo.lean_workbench as lean_workbench_module
 import tax_invoice_demo.case_events as case_events_module
@@ -150,6 +151,52 @@ class LeanUIRenderingTest(unittest.TestCase):
         self.assertIn("已应用 1 条税局建议", html)
         self.assertIn('name="line_tax_rate" value="3%"', html)
         self.assertIn("已应用：3%", html)
+
+    def test_failed_run_page_links_back_to_existing_draft_and_uses_clear_failure_wording(self):
+        draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", MINIMAL_TEXT_INPUT, "", [])
+        report = lean_workbench_module.enrich_failure_report_for_draft(
+            {
+                "failure_count": 1,
+                "records": [
+                    {
+                        "serial_no": draft.draft_id,
+                        "source_sheet": "2-发票明细信息",
+                        "field_name": "税率",
+                        "reason": "第4行税率不合法，请使用如下税率：0.01。",
+                        "failure_type": "seller_tax_rate_restriction",
+                        "suggested_action": "请按税局返回的可用税率调整草稿后重建模板。",
+                        "allowed_values": ["1%"],
+                        "suggested_value": "1%",
+                    }
+                ],
+            },
+            draft,
+        )
+        app_module.RUNS["runfailed1"] = {
+            "run_id": "runfailed1",
+            "draft_id": draft.draft_id,
+            "status": "failed",
+            "current_step": "failed",
+            "logs": ["failed: 税局导入失败，已下载并解析失败明细。"],
+            "error": "",
+            "template_path": str(self.temp_path / "batch_import_preview" / f"{draft.draft_id}_batch_import.xlsx"),
+            "downloaded_failure_path": str(self.temp_path / "failure.xlsx"),
+            "failure_report": report,
+            "preview_clicked": False,
+        }
+        try:
+            response = app.test_client().get("/runs/runfailed1")
+        finally:
+            app_module.RUNS.pop("runfailed1", None)
+
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn("税局导入未通过；失败明细 Excel 已下载并解析", html)
+        self.assertIn("返回草稿修改", html)
+        self.assertIn(f"/drafts/{draft.draft_id}", html)
+        self.assertIn("当前进度与下一步", html)
+        self.assertIn("应用 1 条安全建议并回草稿", html)
+        self.assertNotIn("税局返回导入失败。<a", html)
 
 
 def _form_from_draft(draft, *, tax_category: str, tax_code: str, tax_rate: str):

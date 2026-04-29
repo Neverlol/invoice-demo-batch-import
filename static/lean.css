@@ -1519,9 +1519,60 @@ th {
   color: #991b1b;
 }
 
-.failure-panel {
+.failure-panel,
+.run-overview-card {
   display: grid;
   gap: 12px;
+}
+
+.run-overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.run-progress-box,
+.run-result-box {
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.compact-timeline {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.compact-timeline li {
+  align-items: flex-start;
+  min-height: 92px;
+}
+
+.compact-timeline li::before {
+  display: none;
+}
+
+.compact-timeline div {
+  min-width: 0;
+}
+
+.run-next-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.run-next-actions form {
+  margin: 0;
+}
+
+.run-next-actions .secondary,
+.run-next-actions .ghost-button {
+  min-height: 38px;
 }
 
 .failure-summary-grid {
@@ -1671,6 +1722,10 @@ th {
     position: static;
     height: auto;
   }
+
+  .run-shell .status-rail {
+    display: none;
+  }
 }
 
 @media (max-width: 860px) {
@@ -1688,7 +1743,9 @@ th {
   .compact-composer,
   .compact-composer .chat-composer,
   .bulk-fields,
-  .failure-summary-grid {
+  .failure-summary-grid,
+  .run-overview-grid,
+  .compact-timeline {
     grid-template-columns: 1fr;
   }
 

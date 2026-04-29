@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260423-v15') }}">
   </head>
   <body class="operator-body">
-    <main class="dashboard-shell">
+    <main class="dashboard-shell run-shell">
       <aside class="sidebar">
         <div class="brand-block">
           <div class="brand-logo">AI</div>
@@ -21,10 +21,17 @@
         </div>
 
         <nav class="sidebar-nav">
-          <a class="nav-item" href="{{ url_for('index') }}">
-            <span class="nav-dot">＋</span>
-            <span>新建发票</span>
-          </a>
+          {% if run.draft_id %}
+            <a class="nav-item" href="{{ url_for('draft_detail', draft_id=run.draft_id) }}">
+              <span class="nav-dot">改</span>
+              <span>返回草稿</span>
+            </a>
+          {% else %}
+            <a class="nav-item" href="{{ url_for('index') }}">
+              <span class="nav-dot">＋</span>
+              <span>新建发票</span>
+            </a>
+          {% endif %}
           <a class="nav-item active" href="{{ url_for('run_detail', run_id=run.run_id) }}">
             <span class="nav-dot">跑</span>
             <span>执行监控</span>
@@ -43,7 +50,11 @@
             <p class="eyebrow">Run {{ run.run_id }}</p>
             <h1>税局执行监控</h1>
           </div>
-          <a class="ghost-button" href="{{ url_for('index') }}">返回工作台</a>
+          {% if run.draft_id %}
+            <a class="ghost-button" href="{{ url_for('draft_detail', draft_id=run.draft_id) }}">返回草稿修改</a>
+          {% else %}
+            <a class="ghost-button" href="{{ url_for('index') }}">返回工作台</a>
+          {% endif %}
         </header>
 
         {% if run.error %}
@@ -56,9 +67,69 @@
         {% endif %}
         {% if run.status == "failed" %}
           <section class="banner alert">
-            <p>税局返回导入失败。{% if run.downloaded_failure_path %}<a href="{{ url_for('run_failure_download', run_id=run.run_id) }}">下载失败明细</a>{% endif %}</p>
+            {% if run.downloaded_failure_path %}
+              <p>税局导入未通过；失败明细 Excel 已下载并解析。<a href="{{ url_for('run_failure_download', run_id=run.run_id) }}">下载原始失败明细</a></p>
+            {% else %}
+              <p>税局导入未通过；本次未自动获取失败明细。请在税局页面手动下载失败明细后，回到草稿页上传解析。</p>
+            {% endif %}
           </section>
         {% endif %}
+
+        <section class="work-card run-overview-card">
+          <header class="card-head">
+            <div class="card-title">
+              <span class="card-icon">进</span>
+              <div>
+                <h2>当前进度与下一步</h2>
+                <p>{% if run.status == 'failed' %}本次停在税局校验失败，先处理失败明细，再由助理手动二次上传。{% elif run.status == 'done' %}本次已到达处理完成状态，请只预览核对，不要自动最终开具。{% else %}正在执行，请保持 Edge 和税局页面打开。{% endif %}</p>
+              </div>
+            </div>
+          </header>
+          <div class="run-overview-grid">
+            <div class="run-progress-box">
+              <ol class="timeline compact-timeline">
+                <li class="{% if run.current_step == 'queued' %}active{% elif run.current_step != 'queued' %}done{% endif %}">
+                  <span>1</span>
+                  <div><strong>排队启动</strong><small>创建执行任务</small></div>
+                </li>
+                <li class="{% if run.current_step in ['attach', 'navigate'] %}active{% elif run.current_step not in ['queued'] %}done{% endif %}">
+                  <span>2</span>
+                  <div><strong>连接税局</strong><small>附着 Edge 并进入批量开票</small></div>
+                </li>
+                <li class="{% if run.current_step in ['upload', 'wait_result'] %}active{% elif run.status in ['done', 'failed'] %}done{% endif %}">
+                  <span>3</span>
+                  <div><strong>上传模板</strong><small>提交税局模板</small></div>
+                </li>
+                <li class="{% if run.status == 'failed' %}error{% elif run.status == 'done' %}done{% endif %}">
+                  <span>4</span>
+                  <div><strong>处理结果</strong><small>{% if run.status == 'failed' %}税局校验未通过{% elif run.status == 'done' %}税局处理完成{% else %}等待处理结果{% endif %}</small></div>
+                </li>
+                <li class="{% if run.preview_clicked %}done{% endif %}">
+                  <span>5</span>
+                  <div><strong>预览发票</strong><small>{% if run.preview_clicked %}已尝试打开预览{% else %}未到预览或需人工查看{% endif %}</small></div>
+                </li>
+              </ol>
+            </div>
+            <div class="run-result-box">
+              <div class="result-list">
+                <div><span>状态</span><strong>{{ run.status }}</strong></div>
+                <div><span>当前步骤</span><strong>{{ run.current_step }}</strong></div>
+                <div><span>失败明细</span><strong>{% if run.downloaded_failure_path %}已下载/已解析{% else %}无{% endif %}</strong></div>
+                <div><span>预览发票</span><strong>{% if run.preview_clicked %}已点击{% else %}未点击{% endif %}</strong></div>
+              </div>
+              {% if run.status == 'failed' and run.draft_id %}
+                <div class="run-next-actions">
+                  <a class="ghost-button" href="{{ url_for('draft_detail', draft_id=run.draft_id) }}">回到本次草稿修改</a>
+                  {% if run.failure_report and run.failure_report.actionable_count %}
+                    <form method="post" action="{{ url_for('run_apply_failure_repairs', run_id=run.run_id) }}">
+                      <button class="secondary" type="submit">应用 {{ run.failure_report.actionable_count }} 条安全建议并回草稿</button>
+                    </form>
+                  {% endif %}
+                </div>
+              {% endif %}
+            </div>
+          </div>
+        </section>
 
         <section class="work-card">
           <header class="card-head">
@@ -74,22 +145,29 @@
         </section>
 
         {% if run.failure_report %}
-          <section class="work-card">
+          <section class="work-card failure-panel">
             <header class="card-head">
               <div class="card-title">
                 <span class="card-icon">错</span>
                 <div>
                   <h2>失败明细解析</h2>
-                  <p>下载后的税局失败明细已经在这里结构化展示。</p>
+                  <p>税局返回的失败明细已结构化展示；能安全写回的建议会标出，其他项需要人工确认。</p>
                 </div>
               </div>
             </header>
+            <div class="failure-summary-grid">
+              <div><span>可一键修复</span><strong>{{ run.failure_report.safe_actionable_count or run.failure_report.actionable_count or 0 }}</strong><small>税局给出明确建议值</small></div>
+              <div><span>需人工确认</span><strong>{{ run.failure_report.manual_review_count or 0 }}</strong><small>需助理核对字段</small></div>
+              <div><span>不可自动修复</span><strong>{{ run.failure_report.non_auto_count or 0 }}</strong><small>主体/业务口径风险</small></div>
+              <div><span>已应用</span><strong>{{ run.failure_report.applied_count or 0 }}</strong><small>已写回草稿</small></div>
+            </div>
             <div class="table-wrap">
               <table class="line-table">
                 <thead>
                   <tr>
                     <th>流水号</th>
                     <th>字段</th>
+                    <th>处理判断</th>
                     <th>类型</th>
                     <th>原因</th>
                     <th>建议处理</th>
@@ -100,9 +178,10 @@
                     <tr>
                       <td>{{ item.serial_no }}</td>
                       <td>{{ item.field_name or '未识别' }}</td>
+                      <td><span class="failure-pill">{{ item.repair_decision_label or '需人工确认' }}</span></td>
                       <td>{{ item.failure_type or '未识别' }}</td>
                       <td>{{ item.reason }}</td>
-                      <td>{{ item.suggested_action }}</td>
+                      <td>{{ item.repair_focus or item.suggested_action }}</td>
                     </tr>
                   {% endfor %}
                 </tbody>
