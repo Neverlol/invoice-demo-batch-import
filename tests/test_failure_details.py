@@ -95,6 +95,57 @@ class FailureDetailsTest(unittest.TestCase):
         self.assertEqual(rows[0]["failure_alerts"][0]["target_line_no"], "1")
         self.assertEqual(rows[1]["failure_alerts"], [])
 
+    def test_failure_report_summary_splits_safe_manual_and_non_auto_items(self):
+        report = {
+            "records": [
+                {
+                    "serial_no": "draft001",
+                    "source_sheet": "2-发票明细信息",
+                    "field_name": "税率",
+                    "reason": "第4行税率不合法，请使用如下税率：0.01。",
+                    "failure_type": "seller_tax_rate_restriction",
+                    "suggested_action": "请按税局返回的可用税率调整草稿后重建模板。",
+                    "allowed_values": ["1%"],
+                    "suggested_value": "1%",
+                },
+                {
+                    "serial_no": "draft001",
+                    "source_sheet": "2-发票明细信息",
+                    "field_name": "商品和服务税收编码",
+                    "reason": "第5行您不属于涉税专业服务机构，商品和服务税收分类编码不允许填写3040802050000000000。",
+                    "failure_type": "seller_qualification_restriction",
+                    "suggested_action": "主体资质限制。",
+                },
+                {
+                    "serial_no": "draft001",
+                    "source_sheet": "1-发票基本信息",
+                    "field_name": "购买方纳税人识别号",
+                    "reason": "购买方纳税人识别号格式不正确。",
+                    "failure_type": "template_option_error",
+                    "suggested_action": "请核对购买方税号。",
+                },
+            ]
+        }
+        draft = InvoiceDraft(
+            draft_id="draft001",
+            case_id="case001",
+            company_name="吉林省风生水起商贸有限公司",
+            buyer=BuyerInfo(name="辽宁恒润电力科技有限公司", tax_id="91210102MABWM3X12T"),
+            lines=[
+                InvoiceLine(project_name="办公用品", amount_with_tax="100", tax_rate="13%"),
+                InvoiceLine(project_name="纳税申报代理", amount_with_tax="200", tax_code="3040802050000000000"),
+            ],
+        )
+
+        enriched = enrich_failure_report_for_draft(report, draft)
+
+        self.assertEqual(enriched["safe_actionable_count"], 1)
+        self.assertEqual(enriched["manual_review_count"], 1)
+        self.assertEqual(enriched["non_auto_count"], 1)
+        self.assertEqual(enriched["records"][0]["repair_decision_label"], "可一键修复")
+        self.assertEqual(enriched["records"][1]["repair_decision_label"], "不可自动修复")
+        self.assertEqual(enriched["records"][2]["repair_decision_label"], "需人工确认")
+
     def test_tax_rate_failure_builds_line_repair_action(self):
         report = {
             "records": [

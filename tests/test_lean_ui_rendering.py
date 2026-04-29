@@ -134,7 +134,10 @@ class LeanUIRenderingTest(unittest.TestCase):
         page = client.get(f"/drafts/{draft.draft_id}")
         self.assertEqual(page.status_code, 200)
         html = page.get_data(as_text=True)
-        self.assertIn("应用 1 条建议并重建模板", html)
+        self.assertIn("应用 1 条安全建议并重建模板", html)
+        self.assertIn("可一键修复", html)
+        self.assertIn("需人工确认", html)
+        self.assertIn("不可自动修复", html)
         self.assertIn("应用建议：3%", html)
 
         response = client.post(

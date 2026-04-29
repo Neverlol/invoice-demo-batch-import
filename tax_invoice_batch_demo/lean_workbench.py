@@ -515,18 +515,59 @@ def _refresh_failure_report_summary(report: dict[str, Any]) -> None:
     records = report.get("records", [])
     actionable_count = 0
     applied_count = 0
+    manual_review_count = 0
+    non_auto_count = 0
     for record in records:
-        if record.get("repair_status") == "applied":
-            applied_count += 1
-        if (
+        repair_status = str(record.get("repair_status") or "")
+        can_apply_safely = bool(
             record.get("target_line_no")
             and record.get("repair_field")
             and record.get("repair_value")
-            and record.get("repair_status") != "applied"
-        ):
+            and repair_status != "applied"
+        )
+        if repair_status == "applied":
+            applied_count += 1
+            record["repair_decision"] = "applied"
+            record["repair_decision_label"] = "已应用"
+            record["repair_decision_hint"] = "这条税局建议已写回草稿。"
+            continue
+        if can_apply_safely:
             actionable_count += 1
+            record["repair_decision"] = "safe_auto_repair"
+            record["repair_decision_label"] = "可一键修复"
+            record["repair_decision_hint"] = "税局给出了明确建议值，可由助理确认后一键写回并重建模板。"
+            continue
+        if _is_non_auto_repairable_failure(record):
+            non_auto_count += 1
+            record["repair_decision"] = "not_auto_repairable"
+            record["repair_decision_label"] = "不可自动修复"
+            record["repair_decision_hint"] = "涉及开票主体、业务实质或税收编码口径，系统不会自动替换。"
+            continue
+        manual_review_count += 1
+        record["repair_decision"] = "manual_review"
+        record["repair_decision_label"] = "需人工确认"
+        record["repair_decision_hint"] = "系统已定位修复焦点，但缺少可安全自动写回的明确值。"
     report["actionable_count"] = actionable_count
+    report["safe_actionable_count"] = actionable_count
+    report["manual_review_count"] = manual_review_count
+    report["non_auto_count"] = non_auto_count
     report["applied_count"] = applied_count
+
+
+def _is_non_auto_repairable_failure(record: dict[str, Any]) -> bool:
+    failure_type = str(record.get("failure_type") or "")
+    field_name = str(record.get("field_name") or "")
+    reason = str(record.get("reason") or "")
+    if failure_type == "seller_qualification_restriction":
+        return True
+    if failure_type in {"taxonomy_code_level_error", "tax_bureau_validation_error"} and field_name in {
+        "商品和服务税收编码",
+        "商品和服务分类简称",
+    }:
+        return True
+    if "不属于涉税专业服务机构" in reason or "不允许填写" in reason:
+        return True
+    return False
 
 
 def _failures_by_line(failure_report: dict[str, Any] | None) -> dict[int, list[dict[str, str]]]:

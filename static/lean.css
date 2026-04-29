@@ -1519,6 +1519,92 @@ th {
   color: #991b1b;
 }
 
+.failure-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.failure-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.failure-summary-grid div {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border: 1px solid rgba(185, 28, 28, 0.16);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.failure-summary-grid span,
+.failure-summary-grid small {
+  color: #7f1d1d;
+  font-size: 12px;
+}
+
+.failure-summary-grid strong {
+  color: #991b1b;
+  font-size: 22px;
+}
+
+.failure-record-list {
+  display: grid;
+  gap: 8px;
+}
+
+.failure-record {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.failure-record-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.failure-pill {
+  width: fit-content;
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: #991b1b;
+  background: #fee2e2;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.failure-record.safe_auto_repair .failure-pill {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.failure-record.manual_review .failure-pill {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.failure-record.not_auto_repairable .failure-pill {
+  color: #7f1d1d;
+  background: #fee2e2;
+}
+
+.failure-record.applied .failure-pill {
+  color: #166534;
+  background: #bbf7d0;
+}
+
+.failure-record p,
+.failure-record small {
+  margin: 0;
+}
+
 .alert {
   color: #991b1b;
   background: #fef2f2;
@@ -1601,7 +1687,8 @@ th {
   .draft-toolbar,
   .compact-composer,
   .compact-composer .chat-composer,
-  .bulk-fields {
+  .bulk-fields,
+  .failure-summary-grid {
     grid-template-columns: 1fr;
   }
 

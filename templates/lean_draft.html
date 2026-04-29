@@ -72,23 +72,41 @@
           {% endif %}
 
           {% if failure_report %}
-            <section class="banner alert">
+            <section class="banner alert failure-panel">
               <div class="banner-head">
-                <strong>税局失败明细回流</strong>
+                <div>
+                  <strong>税局失败明细回流</strong>
+                  <p>已解析 {{ failure_report.failure_count or (failure_report.records|length) }} 条失败原因。系统只会写回安全白名单建议，二次上传仍需助理确认后手动启动。</p>
+                </div>
                 {% if failure_report.actionable_count %}
                   <button
                     class="secondary compact-action"
                     formaction="{{ url_for('apply_failure_repairs', draft_id=draft.draft_id) }}"
                     type="submit"
-                  >应用 {{ failure_report.actionable_count }} 条建议并重建模板</button>
+                  >应用 {{ failure_report.actionable_count }} 条安全建议并重建模板</button>
                 {% endif %}
               </div>
-              {% for item in failure_report.records %}
-                <p>{{ item.target_label or ('流水号 ' ~ item.serial_no) }}：{{ item.field_name or '未识别字段' }} - {{ item.reason }}</p>
-                {% if item.failure_type or item.suggested_action %}
-                  <p>修复焦点：{{ item.repair_focus or item.suggested_action }}；类型：{{ item.failure_type or '未识别' }}</p>
-                {% endif %}
-              {% endfor %}
+              <div class="failure-summary-grid">
+                <div><span>可一键修复</span><strong>{{ failure_report.safe_actionable_count or failure_report.actionable_count or 0 }}</strong><small>税局给出明确建议值</small></div>
+                <div><span>需人工确认</span><strong>{{ failure_report.manual_review_count or 0 }}</strong><small>需助理补充/核对字段</small></div>
+                <div><span>不可自动修复</span><strong>{{ failure_report.non_auto_count or 0 }}</strong><small>主体资质/业务口径风险</small></div>
+                <div><span>已应用</span><strong>{{ failure_report.applied_count or 0 }}</strong><small>已写回草稿</small></div>
+              </div>
+              <div class="failure-record-list">
+                {% for item in failure_report.records %}
+                  <article class="failure-record {{ item.repair_decision or '' }}">
+                    <div class="failure-record-top">
+                      <span class="failure-pill">{{ item.repair_decision_label or '需人工确认' }}</span>
+                      <strong>{{ item.target_label or ('流水号 ' ~ item.serial_no) }}</strong>
+                    </div>
+                    <p>{{ item.field_name or '未识别字段' }}：{{ item.reason }}</p>
+                    {% if item.failure_type or item.suggested_action %}
+                      <small>修复焦点：{{ item.repair_focus or item.suggested_action }}；类型：{{ item.failure_type or '未识别' }}</small>
+                    {% endif %}
+                    {% if item.repair_decision_hint %}<small>{{ item.repair_decision_hint }}</small>{% endif %}
+                  </article>
+                {% endfor %}
+              </div>
             </section>
           {% endif %}
 
@@ -244,9 +262,10 @@
                               <div class="line-failure-list">
                                 {% for failure in line.failure_alerts %}
                                   <div class="line-failure">
-                                    <span>税局退回</span>
+                                    <span>{{ failure.repair_decision_label or '税局退回' }}</span>
                                     <strong>{{ failure.field_name or '明细字段' }}</strong>
                                     <small>{{ failure.repair_focus or failure.suggested_action }}</small>
+                                    {% if failure.repair_decision_hint %}<small>{{ failure.repair_decision_hint }}</small>{% endif %}
                                     {% if failure.repair_status == 'applied' %}
                                       <em class="repair-applied">已应用：{{ failure.applied_value or failure.repair_value }}</em>
                                     {% elif failure.repair_field and failure.repair_value %}
