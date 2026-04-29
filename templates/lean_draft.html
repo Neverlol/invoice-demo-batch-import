@@ -185,10 +185,10 @@
               <textarea name="raw_text" rows="4">{{ draft.raw_text }}</textarea>
               <div class="composer-toolbar">
                 <label class="file-trigger">
-                  <input type="file" name="source_files" multiple>
-                  <span>拖拽或上传图片 / Excel / PDF</span>
+                  <input type="file" name="source_files" multiple data-file-input>
+                  <span>选择或拖入图片 / Excel / PDF</span>
                 </label>
-                <small>修改后请先保存。</small>
+                <small data-file-status>修改后请先保存；尚未选择新材料。</small>
                 <button class="secondary" type="submit">重新生成</button>
               </div>
             </div>

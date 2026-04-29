@@ -405,6 +405,32 @@ textarea::placeholder {
   flex: 1;
 }
 
+.composer-toolbar small.has-files {
+  color: #0f766e;
+  font-weight: 700;
+}
+
+.file-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 220px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #ecfeff;
+  color: #0f766e;
+  border: 1px solid rgba(20, 184, 166, 0.22);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .file-trigger {
   display: inline-flex;
   align-items: center;

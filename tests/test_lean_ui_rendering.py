@@ -92,6 +92,10 @@ class LeanUIRenderingTest(unittest.TestCase):
         self.assertIn("智能开票服务流程", html)
         self.assertIn("Service Flow", html)
         self.assertIn("只到预览，不自动最终开具", html)
+        self.assertIn("data-file-input", html)
+        self.assertIn("data-file-status", html)
+        self.assertIn("20260429-v22", html)
+        self.assertIn("尚未选择材料", html)
         self.assertNotIn("税局操作步骤", html)
         self.assertNotIn("执行面板", html)
 

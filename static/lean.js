@@ -1,6 +1,38 @@
 const addButton = document.querySelector("[data-add-line]");
 const tbody = document.querySelector("[data-lines]");
 
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function updateSelectedFileStatus(input) {
+  const toolbar = input.closest(".composer-toolbar") || input.closest("form");
+  const status = toolbar ? toolbar.querySelector("[data-file-status]") : null;
+  if (!status) {
+    return;
+  }
+  const files = Array.from(input.files || []);
+  status.classList.toggle("has-files", files.length > 0);
+  if (!files.length) {
+    status.textContent = "尚未选择材料。";
+    return;
+  }
+  const names = files.slice(0, 4).map((file) => file.name);
+  const extra = files.length > names.length ? `，另有 ${files.length - names.length} 个` : "";
+  status.innerHTML = `已选择 ${files.length} 个材料，点击“生成开票草稿”后上传：<span class="file-chip-list">${names
+    .map((name) => `<span class="file-chip" title="${escapeHtml(name)}">${escapeHtml(name)}</span>`)
+    .join("")}</span>${extra}`;
+}
+
+document.querySelectorAll("[data-file-input]").forEach((input) => {
+  input.addEventListener("change", () => updateSelectedFileStatus(input));
+});
+
 function setActionMode(mode) {
   const panel = document.querySelector("[data-action-panel]");
   if (!panel) {
