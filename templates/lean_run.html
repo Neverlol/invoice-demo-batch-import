@@ -110,38 +110,25 @@
                 </li>
               </ol>
             </div>
-            <div class="run-result-box">
-              <div class="result-list">
-                <div><span>状态</span><strong>{{ run.status }}</strong></div>
-                <div><span>当前步骤</span><strong>{{ run.current_step }}</strong></div>
-                <div><span>失败明细</span><strong>{% if run.downloaded_failure_path %}已下载/已解析{% else %}无{% endif %}</strong></div>
-                <div><span>预览发票</span><strong>{% if run.preview_clicked %}已点击{% else %}未点击{% endif %}</strong></div>
-              </div>
+            <div class="run-result-box run-action-box">
+              <h3>{% if run.status == 'failed' %}建议下一步{% elif run.status == 'done' %}请核对预览{% else %}执行中{% endif %}</h3>
               {% if run.status == 'failed' and run.draft_id %}
+                <p>税局已返回失败原因。优先应用安全建议，或回到草稿人工修改后再次上传。</p>
                 <div class="run-next-actions">
-                  <a class="ghost-button" href="{{ url_for('draft_detail', draft_id=run.draft_id) }}">回到本次草稿修改</a>
                   {% if run.failure_report and run.failure_report.actionable_count %}
                     <form method="post" action="{{ url_for('run_apply_failure_repairs', run_id=run.run_id) }}">
-                      <button class="secondary" type="submit">应用 {{ run.failure_report.actionable_count }} 条安全建议并回草稿</button>
+                      <button class="primary" type="submit">应用安全建议并回草稿</button>
                     </form>
                   {% endif %}
+                  <a class="ghost-button" href="{{ url_for('draft_detail', draft_id=run.draft_id) }}">回到本次草稿修改</a>
                 </div>
+              {% elif run.status == 'done' %}
+                <p>系统只到预览边界。请助理人工核对后再决定是否最终开具。</p>
+              {% else %}
+                <p>保持 Edge 与税局页面打开，等待税局返回处理结果。</p>
               {% endif %}
             </div>
           </div>
-        </section>
-
-        <section class="work-card">
-          <header class="card-head">
-            <div class="card-title">
-              <span class="card-icon">模</span>
-              <div>
-                <h2>本次模板</h2>
-                <p>当前提交到税局的官方批量导入模板。</p>
-              </div>
-            </div>
-          </header>
-          <p class="muted-copy">{{ run.template_path }}</p>
         </section>
 
         {% if run.failure_report %}
@@ -203,48 +190,6 @@
           <pre class="logs">{{ "\n".join(run.logs) }}</pre>
         </section>
       </section>
-
-      <aside class="status-rail">
-        <header class="rail-head">
-          <span class="rail-badge">执行步骤</span>
-          <h2>当前进度</h2>
-        </header>
-
-        <section class="status-card">
-          <ol class="timeline">
-            <li class="{% if run.current_step == 'queued' %}active{% elif run.current_step != 'queued' %}done{% endif %}">
-              <span>1</span>
-              <div><strong>排队启动</strong><small>创建执行任务</small></div>
-            </li>
-            <li class="{% if run.current_step in ['attach', 'navigate'] %}active{% elif run.current_step not in ['queued'] %}done{% endif %}">
-              <span>2</span>
-              <div><strong>连接税局</strong><small>附着已登录 Edge 并进入批量开票</small></div>
-            </li>
-            <li class="{% if run.current_step in ['upload', 'wait_result'] %}active{% elif run.status in ['done', 'failed'] %}done{% endif %}">
-              <span>3</span>
-              <div><strong>上传模板</strong><small>提交税局模板</small></div>
-            </li>
-            <li class="{% if run.status == 'failed' %}error{% elif run.status == 'done' %}done{% endif %}">
-              <span>4</span>
-              <div><strong>处理结果</strong><small>{% if run.status == 'failed' %}税局返回失败{% elif run.status == 'done' %}处理完成{% else %}等待税局处理{% endif %}</small></div>
-            </li>
-            <li class="{% if run.preview_clicked %}done{% endif %}">
-              <span>5</span>
-              <div><strong>预览发票</strong><small>{% if run.preview_clicked %}已尝试打开预览{% else %}等待预览或人工查看{% endif %}</small></div>
-            </li>
-          </ol>
-        </section>
-
-        <section class="status-card">
-          <h3>核心结果</h3>
-          <div class="result-list">
-            <div><span>状态</span><strong>{{ run.status }}</strong></div>
-            <div><span>当前步骤</span><strong>{{ run.current_step }}</strong></div>
-            <div><span>预览发票</span><strong>{% if run.preview_clicked %}已点击{% else %}未点击{% endif %}</strong></div>
-            <div><span>失败明细</span><strong>{% if run.downloaded_failure_path %}已下载{% else %}无{% endif %}</strong></div>
-          </div>
-        </section>
-      </aside>
     </main>
   </body>
 </html>

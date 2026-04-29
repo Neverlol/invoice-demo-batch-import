@@ -222,6 +222,104 @@ class FailureDetailsTest(unittest.TestCase):
         self.assertEqual(reloaded["applied_count"], 1)
         self.assertEqual(reloaded["records"][0]["repair_status"], "applied")
 
+    def test_tax_rate_repair_expands_to_lines_with_same_invalid_rate(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            old_root = workbench_module.WORKBENCH_ROOT
+            old_event_root = case_events_module.EVENT_ROOT
+            workbench_module.WORKBENCH_ROOT = Path(tempdir)
+            case_events_module.EVENT_ROOT = Path(tempdir) / "events"
+            try:
+                draft = InvoiceDraft(
+                    draft_id="draft001",
+                    case_id="case001",
+                    company_name="吉林省风生水起商贸有限公司",
+                    buyer=BuyerInfo(name="辽宁恒润电力科技有限公司", tax_id="91210102MABWM3X12T"),
+                    lines=[
+                        InvoiceLine(project_name="纸制文具及用品", amount_with_tax="300", tax_rate="13%"),
+                        InvoiceLine(project_name="文件夹", amount_with_tax="120", tax_rate="13%"),
+                        InvoiceLine(project_name="文件架", amount_with_tax="80", tax_rate="13%"),
+                    ],
+                    workbook_name="draft001.xlsx",
+                )
+                report = enrich_failure_report_for_draft(
+                    {
+                        "records": [
+                            {
+                                "serial_no": "draft001",
+                                "source_sheet": "2-发票明细信息",
+                                "field_name": "税率",
+                                "reason": "2-发票明细信息：第4行 税率不合法!请使用如下税率:0.03,0.01",
+                                "failure_type": "seller_tax_rate_restriction",
+                                "suggested_action": "请按税局返回的可用税率调整草稿后重建模板。",
+                                "allowed_values": ["3%", "1%"],
+                                "suggested_value": "3%",
+                            }
+                        ]
+                    },
+                    draft,
+                )
+                save_failure_report_for_draft("draft001", report)
+
+                result = apply_failure_repairs_to_draft(draft)
+                reloaded = load_failure_report_for_draft("draft001")
+            finally:
+                workbench_module.WORKBENCH_ROOT = old_root
+                case_events_module.EVENT_ROOT = old_event_root
+
+        self.assertEqual(result["applied_count"], 3)
+        self.assertEqual([line.tax_rate for line in draft.lines], ["3%", "3%", "3%"])
+        self.assertEqual(reloaded["records"][0]["applied_line_count"], 3)
+        self.assertEqual(reloaded["records"][0]["repair_scope"], "matching_lines")
+
+    def test_tax_rate_repair_can_complete_previous_partial_application(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            old_root = workbench_module.WORKBENCH_ROOT
+            old_event_root = case_events_module.EVENT_ROOT
+            workbench_module.WORKBENCH_ROOT = Path(tempdir)
+            case_events_module.EVENT_ROOT = Path(tempdir) / "events"
+            try:
+                draft = InvoiceDraft(
+                    draft_id="draft001",
+                    case_id="case001",
+                    company_name="吉林省风生水起商贸有限公司",
+                    buyer=BuyerInfo(name="辽宁恒润电力科技有限公司", tax_id="91210102MABWM3X12T"),
+                    lines=[
+                        InvoiceLine(project_name="纸制文具及用品", amount_with_tax="300", tax_rate="3%"),
+                        InvoiceLine(project_name="文件夹", amount_with_tax="120", tax_rate="13%"),
+                        InvoiceLine(project_name="文件架", amount_with_tax="80", tax_rate="13%"),
+                    ],
+                    workbook_name="draft001.xlsx",
+                )
+                report = enrich_failure_report_for_draft(
+                    {
+                        "records": [
+                            {
+                                "serial_no": "draft001",
+                                "source_sheet": "2-发票明细信息",
+                                "field_name": "税率",
+                                "reason": "2-发票明细信息：第4行 税率不合法!请使用如下税率:0.03,0.01",
+                                "failure_type": "seller_tax_rate_restriction",
+                                "suggested_action": "请按税局返回的可用税率调整草稿后重建模板。",
+                                "allowed_values": ["3%", "1%"],
+                                "suggested_value": "3%",
+                                "repair_status": "applied",
+                                "previous_value": "13%",
+                                "applied_value": "3%",
+                            }
+                        ]
+                    },
+                    draft,
+                )
+                save_failure_report_for_draft("draft001", report)
+
+                result = apply_failure_repairs_to_draft(draft)
+            finally:
+                workbench_module.WORKBENCH_ROOT = old_root
+                case_events_module.EVENT_ROOT = old_event_root
+
+        self.assertEqual(result["applied_count"], 2)
+        self.assertEqual([line.tax_rate for line in draft.lines], ["3%", "3%", "3%"])
+
     def test_enriched_failure_report_can_be_reloaded_for_draft(self):
         report = {"records": [{"target_line_no": "1", "target_label": "第 1 行：服务费"}]}
         with tempfile.TemporaryDirectory() as tempdir:

@@ -122,6 +122,9 @@ class LeanUIRenderingTest(unittest.TestCase):
         self.assertIn("下一步操作", html)
         self.assertIn("税局失败明细", html)
         self.assertIn("浏览器连接设置", html)
+        self.assertIn("下载税局模板", html)
+        self.assertNotIn("草稿摘要", html)
+        self.assertNotIn("识别提醒", html)
         self.assertNotIn("CDP 端口", html)
 
     def test_failure_repair_button_applies_suggestion_and_rebuilds_template(self):
@@ -149,7 +152,7 @@ class LeanUIRenderingTest(unittest.TestCase):
         page = client.get(f"/drafts/{draft.draft_id}")
         self.assertEqual(page.status_code, 200)
         html = page.get_data(as_text=True)
-        self.assertIn("应用 1 条安全建议并重建模板", html)
+        self.assertIn("应用安全建议并重建模板", html)
         self.assertIn("可一键修复", html)
         self.assertIn("需人工确认", html)
         self.assertIn("不可自动修复", html)
@@ -209,7 +212,9 @@ class LeanUIRenderingTest(unittest.TestCase):
         self.assertIn("返回草稿修改", html)
         self.assertIn(f"/drafts/{draft.draft_id}", html)
         self.assertIn("当前进度与下一步", html)
-        self.assertIn("应用 1 条安全建议并回草稿", html)
+        self.assertIn("应用安全建议并回草稿", html)
+        self.assertNotIn("本次模板", html)
+        self.assertNotIn("执行步骤", html)
         self.assertNotIn("税局返回导入失败。<a", html)
 
 

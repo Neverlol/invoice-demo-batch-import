@@ -14,7 +14,7 @@
           <div class="brand-logo">AI</div>
           <div>
             <strong>智能开票助手</strong>
-            <small>草稿 {{ draft.draft_id }}</small>
+            <small>发票草稿</small>
           </div>
         </div>
 
@@ -41,17 +41,7 @@
 
       <form class="dashboard-form" method="post" action="{{ url_for('save_draft', draft_id=draft.draft_id) }}" enctype="multipart/form-data">
         <section class="main-stage">
-          <header class="stage-head">
-            <div>
-              <p class="eyebrow">Draft {{ draft.draft_id }}</p>
-              <h1>发票草稿</h1>
-            </div>
-            <div class="head-actions">
-              <a class="ghost-button" href="{{ url_for('download_template', draft_id=draft.draft_id) }}">导出模板</a>
-            </div>
-          </header>
-
-          <section class="work-card workflow-strip">
+          <section class="work-card workflow-strip workflow-strip-primary">
             <div class="workflow-head">
               <div>
                 <span class="rail-badge">Service Flow</span>
@@ -115,7 +105,7 @@
                     class="secondary compact-action"
                     formaction="{{ url_for('apply_failure_repairs', draft_id=draft.draft_id) }}"
                     type="submit"
-                  >应用 {{ failure_report.actionable_count }} 条安全建议并重建模板</button>
+                  >应用安全建议并重建模板</button>
                 {% endif %}
               </div>
               <div class="failure-summary-grid">
@@ -209,7 +199,7 @@
                 <div class="surface-chip">待上传税局</div>
               </div>
 
-              <div class="party-grid">
+              <div class="party-grid single-party-grid">
                 <section class="info-card">
                   <div class="section-head">
                     <h3>购买方</h3>
@@ -222,23 +212,6 @@
                     <div class="editable-field"><span class="field-label">电话</span><input name="buyer_phone" value="{{ draft.buyer.phone }}" readonly data-lockable></div>
                     <div class="editable-field"><span class="field-label">开户行</span><input name="buyer_bank_name" value="{{ draft.buyer.bank_name }}" readonly data-lockable></div>
                     <div class="editable-field"><span class="field-label">银行账号</span><input name="buyer_bank_account" value="{{ draft.buyer.bank_account }}" readonly data-lockable></div>
-                  </div>
-                </section>
-
-                <section class="info-card">
-                  <div class="section-head">
-                    <h3>草稿摘要</h3>
-                    <button type="button" class="icon-button" data-edit-section="summary-fields" title="编辑摘要">✎</button>
-                  </div>
-                  <div class="summary-list">
-                    <div><span>纳税主体</span><strong>{{ draft.company_name or '以税局登录主体为准' }}</strong></div>
-                    <div><span>草稿编号</span><strong>{{ draft.draft_id }}</strong></div>
-                    <div><span>明细行数</span><strong>{{ draft.lines|length }}</strong></div>
-                    <div><span>价税合计</span><strong>{{ preview.amount_total or '0.00' }}</strong></div>
-                  </div>
-                  <div class="summary-note" data-edit-scope="summary-fields">
-                    <span>备注摘要</span>
-                    <textarea name="summary_note_shadow" rows="4" readonly data-lockable>{{ draft.note or '当前没有补充说明。' }}</textarea>
                   </div>
                 </section>
               </div>
@@ -350,25 +323,6 @@
               </footer>
             </div>
           </section>
-
-          <section class="work-card source-card">
-            <header class="card-head">
-              <div class="card-title">
-                <span class="card-icon">源</span>
-                <div>
-                  <h2>识别提醒</h2>
-                  <p>只保留对复核有帮助的提醒。</p>
-                </div>
-              </div>
-            </header>
-            {% if draft.issues %}
-              <ul class="issues">
-                {% for issue in draft.issues %}<li>{{ issue }}</li>{% endfor %}
-              </ul>
-            {% else %}
-              <p class="muted-copy">当前没有草稿级识别提醒。</p>
-            {% endif %}
-          </section>
         </section>
 
         <aside class="status-rail">
@@ -404,6 +358,7 @@
             <div class="status-actions">
               <button class="primary" formaction="{{ url_for('execute_draft', draft_id=draft.draft_id) }}" type="submit">启动批量导入</button>
               <button class="secondary" type="submit">保存并重建模板</button>
+              <a class="secondary action-link" href="{{ url_for('download_template', draft_id=draft.draft_id) }}">下载税局模板</a>
               <button class="secondary" formaction="{{ url_for('upload_failure', draft_id=draft.draft_id) }}" type="submit">解析失败明细</button>
               <button class="secondary quiet-action" formaction="{{ url_for('mark_success', draft_id=draft.draft_id) }}" type="submit">标记成功并累计</button>
             </div>

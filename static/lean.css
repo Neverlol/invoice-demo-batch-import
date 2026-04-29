@@ -125,7 +125,8 @@ textarea::placeholder {
 .sidebar {
   position: sticky;
   top: 22px;
-  height: calc(100vh - 44px);
+  height: auto;
+  align-self: start;
   border-radius: var(--radius-xl);
   padding: 18px;
   display: flex;
@@ -1032,7 +1033,7 @@ th {
 
 .sidebar {
   top: 16px;
-  height: calc(100vh - 32px);
+  height: auto;
   border-radius: 10px;
   padding: 14px;
   gap: 16px;
@@ -1128,6 +1129,10 @@ th {
 
 .workflow-strip {
   padding: 16px 18px;
+}
+
+.workflow-strip-primary {
+  margin-top: 0;
 }
 
 .workflow-head h2 {
@@ -1314,8 +1319,10 @@ textarea::placeholder {
 .editable-field input[readonly],
 .editable-field textarea[readonly],
 .line-table input[readonly],
-.summary-note textarea[readonly] {
+.summary-note textarea[readonly],
+.choice-display {
   color: #111827;
+  font-weight: 700;
 }
 
 .editable-field.is-editing input,
@@ -1584,9 +1591,17 @@ th {
 }
 
 .operation-card .primary,
-.operation-card .secondary {
+.operation-card .secondary,
+.operation-card .action-link {
   justify-content: center;
   width: 100%;
+}
+
+.action-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  text-align: center;
 }
 
 .quiet-action {
@@ -1712,9 +1727,24 @@ th {
   margin: 0;
 }
 
+.run-action-box h3,
+.run-action-box p {
+  margin: 0;
+}
+
+.run-action-box p {
+  color: #64748b;
+  line-height: 1.55;
+}
+
+.run-next-actions .primary,
 .run-next-actions .secondary,
 .run-next-actions .ghost-button {
-  min-height: 38px;
+  min-height: 42px;
+}
+
+.run-next-actions .primary {
+  padding: 0 18px;
 }
 
 .failure-summary-grid {

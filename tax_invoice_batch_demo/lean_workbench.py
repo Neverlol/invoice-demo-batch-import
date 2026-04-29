@@ -249,26 +249,45 @@ def apply_failure_repairs_to_draft(draft: InvoiceDraft) -> dict[str, Any]:
     applied_records: list[dict[str, str]] = []
     applied_at = datetime.now().isoformat(timespec="seconds")
     for record in report.get("records", []):
-        line = _repair_target_line(record, draft)
         attr = REPAIR_FIELD_TO_LINE_ATTR.get(str(record.get("repair_field") or ""))
         value = str(record.get("repair_value") or "").strip()
-        if line is None or not attr or not value:
+        if not attr or not value:
             continue
-        before = getattr(line, attr)
-        setattr(line, attr, value)
+        target_lines = _repair_target_lines(record, draft, attr=attr, value=value)
+        if not target_lines:
+            continue
+        previous_values: list[str] = []
+        applied_line_labels: list[str] = []
+        for line_no, line in target_lines:
+            before = getattr(line, attr)
+            if str(before).strip() == value:
+                continue
+            setattr(line, attr, value)
+            previous_values.append(before)
+            applied_line_labels.append(f"第 {line_no} 行：{line.project_name}" if line.project_name else f"第 {line_no} 行")
+            applied_records.append(
+                {
+                    "target_label": f"第 {line_no} 行：{line.project_name}" if line.project_name else f"第 {line_no} 行",
+                    "field_name": str(record.get("field_name") or ""),
+                    "repair_field": str(record.get("repair_field") or ""),
+                    "previous_value": before,
+                    "applied_value": value,
+                }
+            )
+        if not applied_line_labels:
+            continue
         record["repair_status"] = "applied"
         record["applied_at"] = applied_at
         record["applied_value"] = value
-        record["previous_value"] = before
-        applied_records.append(
-            {
-                "target_label": str(record.get("target_label") or ""),
-                "field_name": str(record.get("field_name") or ""),
-                "repair_field": str(record.get("repair_field") or ""),
-                "previous_value": before,
-                "applied_value": value,
-            }
-        )
+        record["previous_value"] = "、".join(dict.fromkeys(previous_values))
+        record["applied_line_count"] = len(applied_line_labels)
+        record["applied_line_labels"] = applied_line_labels
+        if len(applied_line_labels) > 1:
+            record["repair_scope"] = "matching_lines"
+            record["repair_scope_label"] = f"已同步修复 {len(applied_line_labels)} 行同类问题"
+        else:
+            record["repair_scope"] = "single_line"
+            record["repair_scope_label"] = "已修复定位明细行"
     _refresh_failure_report_summary(report)
     if applied_records:
         draft.issues = [
@@ -511,6 +530,44 @@ def _repair_target_line(record: dict[str, Any], draft: InvoiceDraft) -> InvoiceL
     return draft.lines[line_no - 1]
 
 
+def _repair_target_lines(
+    record: dict[str, Any],
+    draft: InvoiceDraft,
+    *,
+    attr: str,
+    value: str,
+) -> list[tuple[int, InvoiceLine]]:
+    target_line = _repair_target_line(record, draft)
+    if target_line is None:
+        return []
+    try:
+        target_line_no = int(record.get("target_line_no") or 0)
+    except (TypeError, ValueError):
+        target_line_no = 0
+    if not _should_expand_repair_to_matching_lines(record):
+        return [(target_line_no, target_line)] if target_line_no else []
+    before = str(getattr(target_line, attr) or "").strip()
+    if before == value:
+        previous_value = str(record.get("previous_value") or "").strip()
+        if previous_value and previous_value != value:
+            before = previous_value
+    if not before or before == value:
+        return [(target_line_no, target_line)] if target_line_no else []
+    matched: list[tuple[int, InvoiceLine]] = []
+    for index, line in enumerate(draft.lines, start=1):
+        if str(getattr(line, attr) or "").strip() == before:
+            matched.append((index, line))
+    return matched or ([(target_line_no, target_line)] if target_line_no else [])
+
+
+def _should_expand_repair_to_matching_lines(record: dict[str, Any]) -> bool:
+    return (
+        str(record.get("failure_type") or "") == "seller_tax_rate_restriction"
+        and str(record.get("repair_field") or "") == "line_tax_rate"
+        and bool(record.get("repair_value"))
+    )
+
+
 def _refresh_failure_report_summary(report: dict[str, Any]) -> None:
     records = report.get("records", [])
     actionable_count = 0
@@ -526,7 +583,10 @@ def _refresh_failure_report_summary(report: dict[str, Any]) -> None:
             and repair_status != "applied"
         )
         if repair_status == "applied":
-            applied_count += 1
+            try:
+                applied_count += int(record.get("applied_line_count") or 1)
+            except (TypeError, ValueError):
+                applied_count += 1
             record["repair_decision"] = "applied"
             record["repair_decision_label"] = "已应用"
             record["repair_decision_hint"] = "这条税局建议已写回草稿。"
