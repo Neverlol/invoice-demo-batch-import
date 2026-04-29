@@ -6,6 +6,7 @@ from pathlib import Path
 from werkzeug.datastructures import MultiDict
 
 import app as app_module
+from tax_invoice_batch_demo.batch_runner import BatchRunResult
 from app import app
 import tax_invoice_batch_demo.lean_workbench as lean_workbench_module
 import tax_invoice_demo.case_events as case_events_module
@@ -203,6 +204,52 @@ class LeanUIRenderingTest(unittest.TestCase):
         self.assertIn('name="line_tax_rate" value="3%"', html)
         self.assertIn("已应用：3%", html)
         self.assertIn("再次上传前必须人工确认", html)
+
+    def test_batch_run_finished_event_is_recorded_for_cloud_observability(self):
+        draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", MINIMAL_TEXT_INPUT, "", [])
+        template_path = self.temp_path / "batch_import_preview" / f"{draft.draft_id}_batch_import.xlsx"
+        run_id = "runfinish1"
+        app_module.RUNS[run_id] = {
+            "run_id": run_id,
+            "draft_id": draft.draft_id,
+            "status": "queued",
+            "current_step": "queued",
+            "logs": [],
+            "error": "",
+            "template_path": str(template_path),
+            "downloaded_failure_path": "",
+            "failure_report": None,
+            "preview_clicked": False,
+        }
+
+        class FakeRunner:
+            def __init__(self, **kwargs):
+                pass
+
+            def run(self):
+                return BatchRunResult(
+                    status="done",
+                    current_step="done",
+                    logs=["attach: ok", "preview: 已点击预览发票"],
+                    preview_clicked=True,
+                )
+
+        old_runner = app_module.BatchImportRunner
+        app_module.BatchImportRunner = FakeRunner
+        try:
+            app_module._execute_batch_run(run_id, template_path, "http://127.0.0.1:9222")
+        finally:
+            app_module.BatchImportRunner = old_runner
+            app_module.RUNS.pop(run_id, None)
+
+        events = case_events_module.read_jsonl(case_events_module.pending_events_path())
+        finished_events = [event for event in events if event["event_type"] == "batch_run_finished"]
+        self.assertEqual(len(finished_events), 1)
+        payload = finished_events[0]["payload"]
+        self.assertEqual(payload["run_id"], run_id)
+        self.assertEqual(payload["status"], "done")
+        self.assertTrue(payload["preview_clicked"])
+        self.assertEqual(payload["logs_tail"][-1], "preview: 已点击预览发票")
 
     def test_failed_run_page_links_back_to_existing_draft_and_uses_clear_failure_wording(self):
         draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", MINIMAL_TEXT_INPUT, "", [])

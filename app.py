@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from flask import Flask, abort, jsonify, redirect, render_template, request, send_file, url_for
 
-from tax_invoice_batch_demo.batch_runner import BatchImportRunner
+from tax_invoice_batch_demo.batch_runner import BatchImportRunner, BatchRunResult
 from tax_invoice_batch_demo.lean_workbench import (
     BATCH_OUTPUT_ROOT,
     SUCCESS_LEDGER_XLSX,
@@ -331,6 +331,39 @@ def _execute_batch_run(run_id: str, template_path: Path, cdp_endpoint: str) -> N
         record["downloaded_failure_path"] = result.downloaded_failure_path
         record["failure_report"] = failure_report
         record["preview_clicked"] = result.preview_clicked
+    _record_batch_run_finished_event(run_id, result, template_path)
+
+
+def _record_batch_run_finished_event(run_id: str, result: BatchRunResult, template_path: Path) -> None:
+    with RUN_LOCK:
+        run = dict(RUNS.get(run_id) or {})
+    draft_id = str(run.get("draft_id") or _draft_id_from_template_path(template_path))
+    draft = load_draft(draft_id) if draft_id else None
+    case_id = draft.case_id if draft is not None else draft_id
+    if not case_id:
+        return
+    failure_report = result.failure_report if isinstance(result.failure_report, dict) else None
+    failure_summary = failure_report.get("summary") if isinstance(failure_report, dict) else None
+    failure_records = failure_report.get("records") if isinstance(failure_report, dict) else []
+    record_case_event(
+        case_id=case_id,
+        draft_id=draft_id,
+        event_type="batch_run_finished",
+        payload={
+            "run_id": run_id,
+            "status": result.status,
+            "current_step": result.current_step,
+            "error": result.error,
+            "template_path": str(template_path),
+            "downloaded_failure_path": result.downloaded_failure_path,
+            "downloaded_failure_exists": bool(result.downloaded_failure_path),
+            "failure_summary": failure_summary or {},
+            "failure_count": len(failure_records) if isinstance(failure_records, list) else 0,
+            "preview_clicked": bool(result.preview_clicked),
+            "logs_tail": list(result.logs[-12:]),
+        },
+    )
+
 
 
 def _draft_id_from_template_path(template_path: Path) -> str:
