@@ -212,6 +212,23 @@ class TextInputParsingTest(unittest.TestCase):
         self.assertEqual(rates, ["0.03", "0.03", "0.03"])
         self.assertEqual(tax_codes, ["1030209990000000000", "1030209990000000000", "1030209990000000000"])
 
+    def test_one_percent_preview_tax_amount_is_not_treated_as_hundred_percent(self):
+        text = """购买方名称：辽宁恒润电力科技有限公司
+纳税人识别号：91210102MABWM3X12T
+发票类型：普通发票
+税率：1%
+开票明细：
+1. 纸制文具及用品，规格型号：A4资料册，单位：批，数量：1，含税金额：300.00
+2. 文件夹，规格型号：办公用，单位：批，数量：1，含税金额：120.00
+3. 文件架，规格型号：办公用，单位：批，数量：1，含税金额：80.00
+"""
+        draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", text, "", [])
+        preview = lean_workbench_module.draft_preview(draft)
+
+        self.assertEqual(preview["amount_total"], "500.00")
+        self.assertEqual(preview["tax_total"], "4.95")
+        self.assertEqual([row["tax_rate"] for row in preview["line_rows"]], ["1%", "1%", "1%"])
+
     def test_minimal_five_line_text_input_extracts_buyer_and_detail_line(self):
         buyer = extract_buyer_info_from_text(MINIMAL_TEXT_INPUT)
         lines = extract_invoice_lines_from_text(MINIMAL_TEXT_INPUT)

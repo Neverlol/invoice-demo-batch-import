@@ -632,12 +632,15 @@ def _rate_decimal(raw: str) -> Decimal | None:
     text = (raw or "").strip().replace("％", "%")
     if text in {"免税", "不征税", "免征增值税"}:
         return Decimal("0")
-    if text.endswith("%"):
+    is_percent_text = text.endswith("%")
+    if is_percent_text:
         text = text[:-1]
     try:
         value = Decimal(text)
     except InvalidOperation:
         return None
+    if is_percent_text:
+        return value / Decimal("100")
     if value > Decimal("1"):
         value = value / Decimal("100")
     return value
