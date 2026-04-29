@@ -40,7 +40,7 @@ class FailureDetailsTest(unittest.TestCase):
         self.assertEqual(record["source_sheet"], "2-发票明细信息")
         self.assertEqual(record["field_name"], "商品和服务税收编码")
         self.assertEqual(record["failure_type"], "seller_qualification_restriction")
-        self.assertIn("不是模板格式错误", record["suggested_action"])
+        self.assertIn("不是文件格式错误", record["suggested_action"])
 
     def test_tax_rate_restriction_extracts_allowed_values(self):
         reason = "第4行税率不合法，请使用如下税率：0.03、0.01、0。"

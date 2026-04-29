@@ -6,16 +6,16 @@ function setActionMode(mode) {
   if (!panel) {
     return;
   }
-  const importButton = panel.querySelector("[data-import-action]");
+  const invoiceButton = panel.querySelector("[data-invoice-action]");
   const saveButton = panel.querySelector("[data-save-action]");
-  if (!importButton || !saveButton) {
+  if (!invoiceButton || !saveButton) {
     return;
   }
   const saveIsPrimary = mode === "save";
   saveButton.classList.toggle("primary", saveIsPrimary);
   saveButton.classList.toggle("secondary", !saveIsPrimary);
-  importButton.classList.toggle("primary", !saveIsPrimary);
-  importButton.classList.toggle("secondary", saveIsPrimary);
+  invoiceButton.classList.toggle("primary", !saveIsPrimary);
+  invoiceButton.classList.toggle("secondary", saveIsPrimary);
   panel.dataset.currentAction = mode;
 }
 
@@ -25,7 +25,7 @@ function markDraftNeedsRebuild() {
 
 const draftForm = document.querySelector("[data-draft-form]");
 if (draftForm) {
-  setActionMode(draftForm.dataset.initialAction || "import");
+  setActionMode(draftForm.dataset.initialAction || "invoice");
   draftForm.addEventListener("input", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)) {

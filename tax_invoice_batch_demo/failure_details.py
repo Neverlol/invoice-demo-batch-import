@@ -210,17 +210,17 @@ def _infer_failure_type(reason: str) -> str:
 def _suggested_action(failure_type: str) -> str:
     if failure_type == "seller_qualification_restriction":
         return (
-            "这是当前销售方主体权限/资质限制，不是模板格式错误，也不要直接回写成赋码库错误。"
+            "这是当前销售方主体权限/资质限制，不是文件格式错误，也不要直接回写成赋码库错误。"
             "请改用具备对应资质的开票主体，或由会计人工确认是否存在可开具的替代税目口径。"
         )
     if failure_type == "seller_tax_rate_restriction":
-        return "这是当前销售方主体/票种允许税率限制。请按税局返回的可用税率调整草稿后重建模板。"
+        return "这是当前销售方主体/票种允许税率限制。请按税局返回的可用税率调整草稿后保存修改。"
     if failure_type == "taxonomy_code_level_error":
         return "当前编码层级过粗。请改用税局允许的下级具体商品和服务税收编码。"
     if failure_type == "template_option_error":
         return "当前字段值不符合税局模板下拉项。请按失败原因改成官方允许值。"
     if failure_type == "missing_required_field":
-        return "模板存在必填字段缺失。请回到草稿补齐对应字段后重建模板。"
+        return "当前开票信息有必填字段缺失。请回到草稿补齐对应字段后保存修改。"
     return "税局返回业务校验失败。请按失败原因人工复核草稿字段和当前开票主体限制。"
 
 

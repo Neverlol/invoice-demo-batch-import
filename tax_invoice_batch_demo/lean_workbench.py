@@ -510,7 +510,7 @@ def _repair_focus(field_name: str, reason: str) -> str:
     if field_name in {"商品和服务税收编码", "商品和服务分类简称"}:
         return "检查税收编码，必要时改成税局允许的下级具体编码"
     if field_name == "税率":
-        return "按税局允许税率调整这一行后重建模板"
+        return "按税局允许税率调整这一行后保存修改"
     if field_name in {"购买方纳税人识别号", "购买方税号"}:
         return "核对购买方税号格式和专票必填要求"
     if field_name == "购买方名称":
@@ -619,14 +619,14 @@ def _refresh_failure_report_summary(report: dict[str, Any]) -> None:
             human_confirmation_count += applied_line_count
             record["repair_decision"] = "applied"
             record["repair_decision_label"] = "已应用"
-            record["repair_decision_hint"] = "这条税局建议已写回草稿；再次上传前仍需助理人工确认并保存重建模板。"
+            record["repair_decision_hint"] = "这条税局建议已写回草稿；再次开票前仍需助理人工确认并保存修改。"
             continue
         if can_apply_safely:
             actionable_count += 1
             human_confirmation_count += 1
             record["repair_decision"] = "safe_auto_repair"
             record["repair_decision_label"] = "可一键修复"
-            record["repair_decision_hint"] = "税局给出了明确建议值，可由助理确认后一键写回并重建模板。"
+            record["repair_decision_hint"] = "税局给出了明确建议值，可由助理确认后一键写回，然后保存修改。"
             continue
         if _is_non_auto_repairable_failure(record):
             non_auto_count += 1

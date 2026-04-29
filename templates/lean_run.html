@@ -68,9 +68,9 @@
         {% if run.status == "failed" %}
           <section class="banner alert">
             {% if run.downloaded_failure_path %}
-              <p>税局导入未通过；失败明细 Excel 已下载并解析。<a href="{{ url_for('run_failure_download', run_id=run.run_id) }}">下载原始失败明细</a></p>
+              <p>开票未通过；失败明细 Excel 已下载并解析。<a href="{{ url_for('run_failure_download', run_id=run.run_id) }}">下载原始失败明细</a></p>
             {% else %}
-              <p>税局导入未通过；本次未自动获取失败明细。请在税局页面手动下载失败明细后，回到草稿页上传解析。</p>
+              <p>开票未通过；本次未自动获取失败明细。请在税局页面手动下载失败明细后，回到草稿页上传解析。</p>
             {% endif %}
           </section>
         {% endif %}
@@ -81,7 +81,7 @@
               <span class="card-icon">进</span>
               <div>
                 <h2>当前进度与下一步</h2>
-                <p>{% if run.status == 'failed' %}本次停在税局校验失败，先处理失败明细，再由助理手动二次上传。{% elif run.status == 'done' %}本次已到达处理完成状态，请只预览核对，不要自动最终开具。{% else %}正在执行，请保持 Edge 和税局页面打开。{% endif %}</p>
+                <p>{% if run.status == 'failed' %}本次未通过税局校验，请先处理失败原因，再由助理确认后重新发起开票。{% elif run.status == 'done' %}本次已到达处理完成状态，请只预览核对，不要自动最终开具。{% else %}正在执行，请保持 Edge 和税局页面打开。{% endif %}</p>
               </div>
             </div>
           </header>
@@ -94,11 +94,11 @@
                 </li>
                 <li class="{% if run.current_step in ['attach', 'navigate'] %}active{% elif run.current_step not in ['queued'] %}done{% endif %}">
                   <span>2</span>
-                  <div><strong>连接税局</strong><small>附着 Edge 并进入批量开票</small></div>
+                  <div><strong>连接税局</strong><small>连接已登录税局页面</small></div>
                 </li>
                 <li class="{% if run.current_step in ['upload', 'wait_result'] %}active{% elif run.status in ['done', 'failed'] %}done{% endif %}">
                   <span>3</span>
-                  <div><strong>上传模板</strong><small>提交税局模板</small></div>
+                  <div><strong>提交开票</strong><small>系统向税局提交本次开票信息</small></div>
                 </li>
                 <li class="{% if run.status == 'failed' %}error{% elif run.status == 'done' %}done{% endif %}">
                   <span>4</span>
@@ -113,7 +113,7 @@
             <div class="run-result-box run-action-box">
               <h3>{% if run.status == 'failed' %}建议下一步{% elif run.status == 'done' %}请核对预览{% else %}执行中{% endif %}</h3>
               {% if run.status == 'failed' and run.draft_id %}
-                <p>税局已返回失败原因。优先应用安全建议，或回到草稿人工修改后再次上传。</p>
+                <p>税局已返回失败原因。优先应用安全建议，或回到草稿人工修改后重新发起开票。</p>
                 <div class="run-next-actions">
                   {% if run.failure_report and run.failure_report.actionable_count %}
                     <form method="post" action="{{ url_for('run_apply_failure_repairs', run_id=run.run_id) }}">

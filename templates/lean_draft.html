@@ -35,11 +35,11 @@
 
         <section class="sidebar-panel">
           <h3>当前任务</h3>
-          <p>复核草稿、处理退回原因，并在确认后上传税局模板。</p>
+          <p>复核草稿、处理退回原因，确认后发起开票。</p>
         </section>
       </aside>
 
-      <form class="dashboard-form" method="post" action="{{ url_for('save_draft', draft_id=draft.draft_id) }}" enctype="multipart/form-data" data-draft-form data-initial-action="{% if needs_rebuild %}save{% else %}import{% endif %}">
+      <form class="dashboard-form" method="post" action="{{ url_for('save_draft', draft_id=draft.draft_id) }}" enctype="multipart/form-data" data-draft-form data-initial-action="{% if needs_rebuild %}save{% else %}invoice{% endif %}">
         <section class="main-stage">
           <section class="work-card workflow-strip workflow-strip-primary">
             <div class="workflow-head">
@@ -47,7 +47,7 @@
                 <span class="rail-badge">Service Flow</span>
                 <h2>智能开票服务流程</h2>
               </div>
-              <p>{% if export.error_count %}当前停在复核赋码，请先修正阻断问题。{% else %}草稿已可进入税局导入，最终开具仍由人工确认。{% endif %}</p>
+              <p>{% if export.error_count %}当前停在复核赋码，请先修正阻断问题。{% else %}草稿已可发起开票，最终开具仍由人工确认。{% endif %}</p>
             </div>
             <ol class="workflow-steps">
               <li class="done">
@@ -60,11 +60,11 @@
               </li>
               <li class="{% if export.error_count %}active{% else %}done{% endif %}">
                 <span>3</span>
-                <div><strong>复核赋码</strong><small>{% if export.error_count %}还有 {{ export.error_count }} 个阻断问题{% else %}当前可进入批量导入{% endif %}</small></div>
+                <div><strong>复核赋码</strong><small>{% if export.error_count %}还有 {{ export.error_count }} 个阻断问题{% else %}当前可发起开票{% endif %}</small></div>
               </li>
               <li>
                 <span>4</span>
-                <div><strong>导入税局</strong><small>上传税局模板，回流失败明细</small></div>
+                <div><strong>发起开票</strong><small>系统处理税局提交和退回原因</small></div>
               </li>
               <li>
                 <span>5</span>
@@ -73,14 +73,14 @@
             </ol>
           </section>
 
-          {% if saved %}<section class="banner ok"><p>草稿已保存，官方模板已重新生成。</p></section>{% endif %}
-          {% if success_recorded %}<section class="banner ok"><p>已累计写入批量导入成功明细表。</p></section>{% endif %}
+          {% if saved %}<section class="banner ok"><p>修改已保存。</p></section>{% endif %}
+          {% if success_recorded %}<section class="banner ok"><p>已记录本次开票结果。</p></section>{% endif %}
           {% if applied_failure_repairs and applied_failure_repairs.applied_count %}
             <section class="banner ok">
-              <p>已应用 {{ applied_failure_repairs.applied_count }} 条税局建议，并重新生成模板。</p>
+              <p>已应用 {{ applied_failure_repairs.applied_count }} 条税局建议，请确认后保存修改。</p>
             </section>
           {% endif %}
-          {% if run_blocked %}<section class="banner alert"><p>当前模板预校验存在错误，已阻止启动。</p></section>{% endif %}
+          {% if run_blocked %}<section class="banner alert"><p>当前草稿还有错误，暂不能发起开票。</p></section>{% endif %}
 
           {% if export.error_count %}
             <section class="banner alert">
@@ -105,7 +105,7 @@
                     class="secondary compact-action"
                     formaction="{{ url_for('apply_failure_repairs', draft_id=draft.draft_id) }}"
                     type="submit"
-                  >应用安全建议并重建模板</button>
+                  >应用安全建议</button>
                 {% endif %}
               </div>
               <div class="failure-summary-grid">
@@ -179,7 +179,7 @@
                   <input type="file" name="source_files" multiple>
                   <span>拖拽或上传图片 / Excel / PDF</span>
                 </label>
-                <small>保存后会重新生成模板。</small>
+                <small>修改后请先保存。</small>
                 <button class="secondary" type="submit">重新生成</button>
               </div>
             </div>
@@ -191,7 +191,7 @@
                 <span class="card-icon">票</span>
                 <div>
                   <h2>发票草稿</h2>
-                  <p>像发票一样复核，再进入批量导入。</p>
+                  <p>像发票一样复核，确认无误后发起开票。</p>
                 </div>
               </div>
             </header>
@@ -362,21 +362,21 @@
           <section class="status-card operation-card">
             <div class="operation-head">
               <h3>下一步操作</h3>
-              <span>{% if export.error_count %}待修正{% else %}可导入{% endif %}</span>
+              <span>{% if export.error_count %}待修正{% else %}可开票{% endif %}</span>
             </div>
 
             <label class="failure-upload">
               <span>税局失败明细</span>
               <strong>上传失败明细 Excel</strong>
-              <small>导入被退回时，用这里回流错误原因并定位明细行。</small>
+              <small>开票未通过时，用这里查看原因并定位明细。</small>
               <em>选择 Excel 文件</em>
               <input type="file" name="failure_file" accept=".xlsx">
             </label>
 
             <div class="status-actions" data-action-panel>
-              <button class="{% if needs_rebuild %}secondary{% else %}primary{% endif %}" data-import-action formaction="{{ url_for('execute_draft', draft_id=draft.draft_id) }}" type="submit">启动导入</button>
-              <button class="{% if needs_rebuild %}primary{% else %}secondary{% endif %}" data-save-action type="submit">保存并重建模板</button>
-              <a class="secondary action-link" href="{{ url_for('download_template', draft_id=draft.draft_id) }}">下载税局模板</a>
+              <button class="{% if needs_rebuild %}secondary{% else %}primary{% endif %}" data-invoice-action formaction="{{ url_for('execute_draft', draft_id=draft.draft_id) }}" type="submit">启动开票</button>
+              <button class="{% if needs_rebuild %}primary{% else %}secondary{% endif %}" data-save-action type="submit">保存修改</button>
+              <a class="secondary action-link" href="{{ url_for('download_template', draft_id=draft.draft_id) }}">下载税局文件</a>
               <button class="secondary" formaction="{{ url_for('upload_failure', draft_id=draft.draft_id) }}" type="submit">解析失败明细</button>
               <button class="secondary quiet-action" formaction="{{ url_for('mark_success', draft_id=draft.draft_id) }}" type="submit">标记成功并累计</button>
             </div>

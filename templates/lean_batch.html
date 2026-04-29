@@ -10,12 +10,12 @@
     <main class="shell wide">
       <nav class="topbar">
         <a href="{{ url_for('index') }}">新建草稿</a>
-        <a href="{{ url_for('download_batch_template', batch_id=batch.batch_id) }}">下载批量导入模板</a>
+        <a href="{{ url_for('download_batch_template', batch_id=batch.batch_id) }}">下载税局文件</a>
       </nav>
       <section class="hero compact-hero">
         <p class="eyebrow">Batch {{ batch.batch_id }}</p>
         <h1>批量草稿</h1>
-        <p>系统识别为一份输入拆多张发票。当前先支持下载整批官方导入模板，逐张编辑入口保留在下表。</p>
+        <p>系统识别为一份输入拆多张发票。请先逐张复核，确认后再发起开票。</p>
       </section>
 
       {% if export.error_count %}
