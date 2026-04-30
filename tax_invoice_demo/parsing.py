@@ -114,6 +114,11 @@ INVOICE_OCR_LINE_RE = re.compile(
     r"(?P<amount>\d+(?:\.\s*\d+)?)\s+"
     r"(?P<tax>免税|不征税|免征增值税|\d+(?:\.\d+)?%?)"
 )
+DAILY_CHAT_ITEM_RE = re.compile(
+    r"^(?P<name>.+?)\s+"
+    r"(?P<quantity>\d+(?:\.\d+)?)(?P<unit>[\u4e00-\u9fffA-Za-z]{1,8})\s+"
+    r"[¥￥]?(?P<amount>\d+(?:,\d{3})*(?:\.\d{1,2})?)\s*元?$"
+)
 
 NON_DETAIL_PREFIXES = (
     "税号",
@@ -393,6 +398,10 @@ def extract_invoice_lines_from_text(raw_text: str) -> list[InvoiceLine]:
     if contextual_chat_lines:
         return contextual_chat_lines
 
+    daily_chat_item_lines = _extract_daily_chat_item_lines(raw_text)
+    if daily_chat_item_lines:
+        return daily_chat_item_lines
+
     minimal_request_lines = _extract_minimal_request_invoice_lines(raw_text)
     if minimal_request_lines:
         return minimal_request_lines
@@ -646,6 +655,32 @@ def _extract_contextual_chat_invoice_lines(raw_text: str) -> list[InvoiceLine]:
     return extracted
 
 
+def _extract_daily_chat_item_lines(raw_text: str) -> list[InvoiceLine]:
+    default_tax_rate = _extract_default_tax_rate(raw_text)
+    extracted: list[InvoiceLine] = []
+    for raw_line in raw_text.splitlines():
+        line = raw_line.strip(" -•\t，,。；;")
+        if not line or _looks_like_daily_chat_non_detail_line(line):
+            continue
+        matched = DAILY_CHAT_ITEM_RE.match(line)
+        if not matched:
+            continue
+        name = matched.group("name").strip(" -*，,。；;")
+        if not name or _looks_like_daily_chat_non_detail_line(name) or _looks_like_company_name(name):
+            continue
+        extracted.append(
+            InvoiceLine(
+                project_name=name,
+                quantity=matched.group("quantity").strip(),
+                unit=matched.group("unit").strip(),
+                amount_with_tax=_normalize_minimal_amount_line(matched.group("amount").strip()),
+                tax_rate=default_tax_rate or "3%",
+            )
+        )
+    return extracted
+
+
+
 def _extract_minimal_request_invoice_lines(raw_text: str) -> list[InvoiceLine]:
     """Parse short operator inputs like: buyer, tax id, amount, invoice type, project."""
 
@@ -759,6 +794,22 @@ def _looks_like_structured_detail(data: dict[str, str]) -> bool:
 def _looks_like_non_detail_label(value: str) -> bool:
     normalized = value.strip().replace("：", "").replace(":", "")
     return any(normalized.startswith(prefix) for prefix in NON_DETAIL_PREFIXES)
+
+
+def _looks_like_daily_chat_non_detail_line(value: str) -> bool:
+    compact = value.strip().replace(" ", "")
+    if not compact:
+        return True
+    if _looks_like_non_detail_label(value):
+        return True
+    if _looks_like_bare_tax_id(compact.upper()) or _looks_like_company_name(value):
+        return True
+    return bool(
+        re.search(
+            r"(麻烦|帮我|帮忙|开个|开票|普票|专票|发票|电子票|电子发票|微信|发我|备注|不用写|总共|合计|按[一二三四五六七八九十0-9]+个点|税率|这次是|大概这样)",
+            compact,
+        )
+    )
 
 
 def _looks_like_unheaded_detail_row(parts: list[str]) -> bool:
@@ -957,7 +1008,7 @@ def _cleanup_inline_company_name(value: str) -> str:
 
 def _extract_inline_amount(text: str) -> str:
     labeled_match = re.search(
-        r"(?:价税合计|含税金额|开票金额|金额|合计)[：:]?\s*[¥￥]?\s*(\d+(?:,\d{3})*(?:\.\d{1,2})?)\s*元?",
+        r"(?:价税合计|含税金额|开票金额|金额|合计|总共|总计)[：:]?\s*[¥￥]?\s*(\d+(?:,\d{3})*(?:\.\d{1,2})?)\s*元?",
         text,
     )
     if labeled_match:
@@ -1020,7 +1071,7 @@ def _cleanup_inline_project_name(value: str) -> str:
     cleaned = value.strip(" -*，,。；;：:")
     cleaned = re.sub(r"^(?:开|开具|需要|项目|服务|品名|为|是)", "", cleaned)
     cleaned = re.sub(r"(?:金额|价税合计|含税金额|税率).*$", "", cleaned)
-    if not cleaned or _looks_like_non_detail_label(cleaned) or _looks_like_company_name(cleaned):
+    if not cleaned or _looks_like_non_detail_label(cleaned) or _looks_like_daily_chat_non_detail_line(cleaned) or _looks_like_company_name(cleaned):
         return ""
     if not re.search(r"[\u4e00-\u9fff]", cleaned):
         return ""

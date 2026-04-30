@@ -337,6 +337,41 @@ class TextInputParsingTest(unittest.TestCase):
         self.assertEqual(draft.lines[0].tax_code, "")
         self.assertEqual(draft.lines[0].normalized_tax_rate(), "3%")
 
+    def test_daily_wechat_text_extracts_office_items_and_ignores_delivery_note(self):
+        old_provider = os.environ.get("TAX_INVOICE_LLM_PROVIDER")
+        os.environ["TAX_INVOICE_LLM_PROVIDER"] = "off"
+        text = """麻烦开个普票哈
+
+辽宁恒润电力科技有限公司
+91210102MABWM3X12T
+
+这次是办公室用的一些东西，明细大概这样：
+A4复印纸 10包 240元
+蓝色文件夹 20个 160元
+桌面文件架 5个 100元
+
+总共500，按1个点开就行
+备注不用写，电子票发我微信
+"""
+        try:
+            draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", text, "", [])
+        finally:
+            if old_provider is None:
+                os.environ.pop("TAX_INVOICE_LLM_PROVIDER", None)
+            else:
+                os.environ["TAX_INVOICE_LLM_PROVIDER"] = old_provider
+
+        self.assertEqual(draft.invoice_kind, "普通发票")
+        self.assertEqual(draft.buyer.name, "辽宁恒润电力科技有限公司")
+        self.assertEqual(draft.buyer.tax_id, "91210102MABWM3X12T")
+        self.assertEqual([line.project_name for line in draft.lines], ["A4复印纸", "蓝色文件夹", "桌面文件架"])
+        self.assertEqual([line.amount_with_tax for line in draft.lines], ["240", "160", "100"])
+        self.assertEqual([line.tax_rate for line in draft.lines], ["1%", "1%", "1%"])
+        self.assertNotIn("电子票发我微信", [line.project_name for line in draft.lines])
+        self.assertEqual(draft.lines[0].tax_code, "1060105020000000000")
+        self.assertEqual(draft.lines[1].tax_code, "1060401020000000000")
+        self.assertEqual(draft.lines[2].tax_code, "1060401030000000000")
+
     def test_mimo_ocr_medical_screenshot_text_maps_special_invoice_and_safe_codes(self):
         old_provider = os.environ.get("TAX_INVOICE_LLM_PROVIDER")
         os.environ["TAX_INVOICE_LLM_PROVIDER"] = "off"

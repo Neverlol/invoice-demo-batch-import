@@ -80,7 +80,7 @@ class TaxRuleEngine:
             _normalize_inline_tax_category(line)
             suggestion = self.suggest_line(line, context_text=context_text)
             if suggestion is None:
-                _apply_local_medical_consumable_hint(line)
+                _apply_local_safe_coding_hint(line)
                 taxonomy_suggestion = suggest_taxonomy(line.project_name)
                 if taxonomy_suggestion is not None and taxonomy_suggestion.score >= 84:
                     if not line.tax_category and taxonomy_suggestion.entry.category_short_name:
@@ -639,7 +639,7 @@ def _looks_like_generic_project_name(value: str) -> bool:
     }
 
 
-def _apply_local_medical_consumable_hint(line: InvoiceLine) -> None:
+def _apply_local_safe_coding_hint(line: InvoiceLine) -> None:
     if line.tax_code.strip():
         return
     text = f"{line.project_name} {line.specification}".strip()
@@ -654,6 +654,21 @@ def _apply_local_medical_consumable_hint(line: InvoiceLine) -> None:
         line.tax_category = line.tax_category or "橡胶制品"
         line.tax_code = "1070508010000000000"
         line.coding_reference = line.coding_reference or "本地医疗耗材规则，需人工复核: 橡胶手套 / 橡胶制品 / 1070508010000000000"
+        return
+    if re.search(r"(复印纸|打印纸|A4纸|A4复印纸)", text, re.IGNORECASE):
+        line.tax_category = line.tax_category or "纸制品"
+        line.tax_code = "1060105020000000000"
+        line.coding_reference = line.coding_reference or "本地办公用品规则，需人工复核: 纸制文具及用品 / 纸制品 / 1060105020000000000"
+        return
+    if "文件夹" in text:
+        line.tax_category = line.tax_category or "文具"
+        line.tax_code = "1060401020000000000"
+        line.coding_reference = line.coding_reference or "本地办公用品规则，需人工复核: 文件夹 / 文具 / 1060401020000000000"
+        return
+    if "文件架" in text:
+        line.tax_category = line.tax_category or "文具"
+        line.tax_code = "1060401030000000000"
+        line.coding_reference = line.coding_reference or "本地办公用品规则，需人工复核: 文件架 / 文具 / 1060401030000000000"
 
 
 
