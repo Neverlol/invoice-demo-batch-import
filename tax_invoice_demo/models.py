@@ -301,6 +301,9 @@ class DraftBatch:
     invoice_kind: str = "普通发票"
     invoice_medium: str = "电子发票"
     special_business: str = ""
+    extract_strategy: str = ""
+    llm_provider: str = ""
+    extract_warnings: list[str] = field(default_factory=list)
 
 
 @dataclass

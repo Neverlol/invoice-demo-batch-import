@@ -14,11 +14,12 @@ from werkzeug.datastructures import FileStorage
 
 from .case_events import batch_snapshot, diff_drafts, draft_snapshot, record_case_event
 from .coding_library import enrich_invoice_lines, load_formal_coding_library
-from .customer_profiles import apply_line_history_hints, resolve_buyer_from_history
+from .customer_profiles import apply_line_history_hints, resolve_buyer_from_history, seller_default_line_profile
 from .extraction_pipeline import compose_parse_source, extract_invoice_structured_data
 from .ledger import sync_draft_to_ledger
 from .models import BuyerInfo, DraftAttachment, DraftBatch, DraftBatchItem, InvoiceDraft, InvoiceLine
 from .ocr import run_optional_ocr
+from .platform_invoice_screenshots import PlatformInvoiceRequest, extract_platform_invoice_requests
 from .source_documents import extract_supported_documents, serialize_document_results
 from .tax_rule_engine import write_learned_rules_from_manual_update
 
@@ -41,6 +42,26 @@ def create_draft_from_workbench(company_name: str, raw_text: str, note: str, upl
     attachments = _save_uploads(draft_dir, uploaded_files)
     document_result = _run_document_extraction(draft_dir, attachments)
     ocr_result = _run_draft_ocr(draft_dir, attachments)
+    early_parse_source = _compose_parse_source(raw_text, document_result.combined_text, ocr_result.combined_text)
+    invoice_profile = _infer_invoice_profile(early_parse_source, note=note)
+    platform_requests = extract_platform_invoice_requests(early_parse_source)
+    if platform_requests:
+        line_profile = seller_default_line_profile(company_name)
+        if line_profile is not None:
+            return _create_platform_screenshot_draft_batch(
+                batch_id=draft_id,
+                case_id=case_id,
+                draft_dir=draft_dir,
+                company_name=company_name,
+                raw_text=raw_text,
+                note=note,
+                attachments=attachments,
+                document_result=document_result,
+                ocr_result=ocr_result,
+                invoice_profile=invoice_profile,
+                requests=platform_requests,
+                line_profile=line_profile,
+            )
     extraction = extract_invoice_structured_data(
         raw_text=raw_text,
         note=note,
@@ -58,6 +79,27 @@ def create_draft_from_workbench(company_name: str, raw_text: str, note: str, upl
         parse_source=parse_source,
     )
     invoice_profile = _infer_invoice_profile(parse_source, note=note)
+    platform_requests = extract_platform_invoice_requests(parse_source)
+    if platform_requests:
+        line_profile = seller_default_line_profile(company_name)
+        if line_profile is not None:
+            return _create_platform_screenshot_draft_batch(
+                batch_id=draft_id,
+                case_id=case_id,
+                draft_dir=draft_dir,
+                company_name=company_name,
+                raw_text=raw_text,
+                note=note,
+                attachments=attachments,
+                document_result=document_result,
+                ocr_result=ocr_result,
+                invoice_profile=invoice_profile,
+                requests=platform_requests,
+                line_profile=line_profile,
+                extract_strategy=extraction.strategy,
+                llm_provider=extraction.llm_provider,
+                extract_warnings=extraction.warnings,
+            )
     split_lines = _build_amount_split_lines(
         company_name=company_name,
         parse_source=parse_source,
@@ -493,6 +535,138 @@ def load_draft(draft_id: str) -> InvoiceDraft | None:
 
 def draft_directory(draft_id: str) -> Path:
     return WORKBENCH_ROOT / draft_id
+
+
+def _create_platform_screenshot_draft_batch(
+    *,
+    batch_id: str,
+    case_id: str,
+    draft_dir: Path,
+    company_name: str,
+    raw_text: str,
+    note: str,
+    attachments: list[DraftAttachment],
+    document_result,
+    ocr_result,
+    invoice_profile: dict[str, str],
+    requests: list[PlatformInvoiceRequest],
+    line_profile,
+    extract_strategy: str = "platform_screenshot_batch",
+    llm_provider: str = "",
+    extract_warnings: list[str] | None = None,
+) -> DraftBatch:
+    items: list[DraftBatchItem] = []
+    batch_issues: list[str] = []
+    for request in requests:
+        child_draft_id = uuid4().hex[:10]
+        buyer = request.buyer
+        line = InvoiceLine(
+            project_name=line_profile.project_name,
+            amount_with_tax=request.amount_with_tax,
+            tax_rate=line_profile.tax_rate or "1%",
+            tax_category=line_profile.tax_category,
+            tax_code=line_profile.tax_code,
+            unit=line_profile.unit or "项",
+            quantity="1",
+            coding_reference=(
+                "销售主体历史开票档案推荐，需人工复核: "
+                f"{line_profile.matched_source} -> {line_profile.tax_category or '未记录大类'}"
+                f" / {line_profile.tax_code or '未记录编码'}"
+            ),
+        )
+        child_note_parts = [note.strip(), f"来源图片：{request.source_name}"]
+        if request.order_no:
+            child_note_parts.append(f"订单号：{request.order_no}")
+        if request.email:
+            child_note_parts.append(f"邮箱：{request.email}")
+        child_note = "；".join(part for part in child_note_parts if part)
+        child_issues = _build_draft_issues(
+            company_name=company_name,
+            raw_text=request.source_excerpt or raw_text,
+            attachments=attachments,
+            buyer=buyer,
+            lines=[line],
+            special_business=invoice_profile["special_business"],
+            document_status=document_result.status,
+            document_note=document_result.note,
+            ocr_status=ocr_result.status,
+            ocr_note=ocr_result.note,
+        )
+        if not buyer.name.strip():
+            child_issues.append(f"{request.source_name} 已识别税号 {buyer.tax_id}，但截图抬头不完整；请人工补全购买方名称。")
+        child_draft = InvoiceDraft(
+            draft_id=child_draft_id,
+            case_id=case_id,
+            company_name=company_name.strip(),
+            buyer=buyer,
+            lines=[line],
+            raw_text=request.source_excerpt or raw_text,
+            note=child_note,
+            issues=child_issues,
+            source_images=attachments,
+            workbook_name="开票明细表.xlsx",
+            created_at=datetime.now().isoformat(timespec="seconds"),
+            invoice_kind=invoice_profile["invoice_kind"],
+            invoice_medium=invoice_profile["invoice_medium"],
+            special_business=invoice_profile["special_business"],
+            ocr_status=ocr_result.status,
+            ocr_engine=ocr_result.engine,
+            ocr_text=request.source_excerpt,
+            ocr_note=ocr_result.note,
+            source_doc_status=document_result.status,
+            source_doc_text=document_result.combined_text,
+            source_doc_note=document_result.note,
+            extract_strategy=extract_strategy,
+            llm_provider=llm_provider,
+            extract_warnings=list(extract_warnings or []),
+        )
+        save_draft(child_draft)
+        record_case_event(
+            case_id=case_id,
+            draft_id=child_draft_id,
+            batch_id=batch_id,
+            event_type="platform_screenshot_child_draft_created",
+            payload=draft_snapshot(child_draft),
+        )
+        items.append(
+            DraftBatchItem(
+                draft_id=child_draft_id,
+                buyer_name=buyer.name or buyer.tax_id,
+                invoice_kind=invoice_profile["invoice_kind"],
+                amount_total=line.resolved_amount_with_tax(),
+                project_summary=line.project_name,
+                line_count=1,
+                issue_summary=child_issues[0] if child_issues else "",
+            )
+        )
+        batch_issues.extend(child_issues)
+
+    batch = DraftBatch(
+        batch_id=batch_id,
+        case_id=case_id,
+        company_name=company_name.strip(),
+        created_at=datetime.now().isoformat(timespec="seconds"),
+        items=items,
+        raw_text=raw_text,
+        note=note.strip(),
+        issues=batch_issues,
+        source_images=attachments,
+        invoice_kind=invoice_profile["invoice_kind"],
+        invoice_medium=invoice_profile["invoice_medium"],
+        special_business=invoice_profile["special_business"],
+        extract_strategy=extract_strategy,
+        llm_provider=llm_provider,
+        extract_warnings=list(extract_warnings or []),
+    )
+    save_draft_batch(batch)
+    record_case_event(
+        case_id=case_id,
+        batch_id=batch_id,
+        event_type="platform_screenshot_draft_batch_created",
+        payload=batch_snapshot(batch),
+    )
+    return batch
+
 
 
 def _create_split_draft_batch(

@@ -5,6 +5,7 @@ from pathlib import Path
 import os
 from unittest.mock import patch
 
+from tax_invoice_demo.models import BuyerInfo, InvoiceDraft, InvoiceLine
 from tax_invoice_demo.parsing import extract_buyer_info_from_text, extract_invoice_lines_from_text
 import tax_invoice_demo.case_events as case_events_module
 import tax_invoice_demo.coding_library as coding_library_module
@@ -412,6 +413,59 @@ A4复印纸 10包 240元
         self.assertEqual(draft.lines[1].tax_code, "1090245030000000000")
         self.assertEqual(draft.lines[2].tax_code, "1070508010000000000")
         self.assertTrue(all("需人工复核" in line.coding_reference for line in draft.lines))
+
+    def test_platform_screenshot_text_creates_batch_with_seller_history_profile(self):
+        seller = "哈尔滨市道里区庆成记隆江猪脚饭店（个体工商户）"
+        ledger_module.sync_draft_to_ledger(
+            InvoiceDraft(
+                draft_id="history-food",
+                case_id="history-food",
+                company_name=seller,
+                buyer=BuyerInfo(name="历史购买方", tax_id="91230102MAEMEM2G2M"),
+                lines=[
+                    InvoiceLine(
+                        project_name="餐费",
+                        amount_with_tax="86.20",
+                        tax_rate="1%",
+                        tax_category="餐饮服务",
+                        tax_code="3070401000000000000",
+                        unit="项",
+                        quantity="1",
+                        coding_reference="税局历史明细导入，需人工复核",
+                    )
+                ],
+                created_at="2026-04-30T10:00:00",
+            )
+        )
+        text = """[01.jpg]
+发票详情
+税号 91230102MAEMEM2G2M
+联系人邮箱 2029794338@qq.com
+建议开票金额 14.80
+订单号: 8086410250960608559
+
+[02.jpg]
+发票详情
+抬头 黑龙江源速商贸有限公司
+税号 91230102MA1CDKE47Y
+联系人邮箱 jsls7@163.com
+建议开票金额 13.80
+订单号: 8011766126836281741
+"""
+
+        batch = workbench_module.create_draft_from_workbench(seller, text, "平台截图批量测试", [])
+
+        self.assertEqual(batch.__class__.__name__, "DraftBatch")
+        self.assertEqual(len(batch.items), 2)
+        first = workbench_module.load_draft(batch.items[0].draft_id)
+        second = workbench_module.load_draft(batch.items[1].draft_id)
+        self.assertEqual(first.lines[0].project_name, "餐费")
+        self.assertEqual(first.lines[0].tax_category, "餐饮服务")
+        self.assertEqual(first.lines[0].tax_code, "3070401000000000000")
+        self.assertEqual(first.lines[0].amount_with_tax, "14.80")
+        self.assertTrue(any("购买方名称" in issue for issue in first.issues))
+        self.assertEqual(second.buyer.name, "黑龙江源速商贸有限公司")
+        self.assertEqual(second.lines[0].amount_with_tax, "13.80")
 
     def test_weak_chat_text_uses_history_profile_for_buyer_and_project(self):
         _seed_history_profile_row(

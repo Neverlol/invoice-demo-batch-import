@@ -57,6 +57,14 @@ def resolve_buyer_from_history(raw_text: str, *, company_name: str = "") -> Buye
     )
 
 
+def seller_default_line_profile(company_name: str) -> LineHistoryMatch | None:
+    rows = _profile_rows(company_name=company_name)
+    if not rows:
+        return None
+    return _dominant_line_profile(rows)
+
+
+
 def apply_line_history_hints(
     lines: list[InvoiceLine],
     *,
@@ -106,6 +114,42 @@ def _apply_single_line_history_hint(line: InvoiceLine, rows: list[dict[str, str]
     return line
 
 
+def _dominant_line_profile(rows: list[dict[str, str]]) -> LineHistoryMatch | None:
+    scored: Counter[tuple[str, str, str, str, str]] = Counter()
+    latest_row_by_key: dict[tuple[str, str, str, str, str], dict[str, str]] = {}
+    for row in rows:
+        if not _row_is_positive_normal_invoice(row):
+            continue
+        project_name = row.get("project_name", "").strip()
+        if not project_name:
+            continue
+        key = (
+            project_name,
+            row.get("tax_category", "").strip(),
+            row.get("tax_code", "").strip(),
+            row.get("tax_rate", "").strip(),
+            row.get("unit", "").strip(),
+        )
+        scored[key] += 1
+        latest_row_by_key[key] = row
+    if not scored:
+        return None
+    key, _count = scored.most_common(1)[0]
+    row = latest_row_by_key[key]
+    return LineHistoryMatch(
+        project_name=key[0],
+        tax_category=key[1],
+        tax_code=key[2],
+        tax_rate=key[3] or "1%",
+        specification=row.get("specification", "").strip(),
+        unit=key[4] or "项",
+        quantity="1",
+        matched_source=key[0],
+        confidence="high" if _count >= 2 else "medium",
+    )
+
+
+
 def _match_line_history(line: InvoiceLine, rows: list[dict[str, str]], *, raw_text: str) -> LineHistoryMatch | None:
     query = line.project_name.strip()
     normalized_query = _normalize(query)
@@ -153,6 +197,17 @@ def _match_line_history(line: InvoiceLine, rows: list[dict[str, str]], *, raw_te
         matched_source=row.get("project_name", "").strip(),
         confidence="medium",
     )
+
+
+def _row_is_positive_normal_invoice(row: dict[str, str]) -> bool:
+    amount = row.get("amount_with_tax", "").strip().replace(",", "")
+    if amount.startswith("-"):
+        return False
+    note = " ".join(str(row.get(key, "")) for key in ["note", "coding_reference", "invoice_status", "invoice_direction"])
+    if any(marker in note for marker in ["红字", "红冲", "作废"]):
+        return False
+    return True
+
 
 
 def _profile_rows(*, company_name: str = "", buyer: BuyerInfo | None = None) -> list[dict[str, str]]:
