@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import time
 from dataclasses import dataclass, field
 
 from .llm_adapter import (
@@ -19,6 +21,7 @@ class ExtractionOutcome:
     strategy: str = "rules_only"
     llm_provider: str = ""
     warnings: list[str] = field(default_factory=list)
+    llm_metrics: list[dict] = field(default_factory=list)
 
 
 def compose_parse_source(raw_text: str, document_text: str, ocr_text: str) -> str:
@@ -53,9 +56,22 @@ def extract_invoice_structured_data(
         return outcome
 
     llm_errors: list[str] = []
-    for attempt in range(1, adapter.max_retries + 1):
+    llm_metrics: list[dict] = []
+    for attempt in range(1, min(adapter.max_retries, 1) + 1):
+        started_at = time.monotonic()
         try:
             response = adapter.extract_invoice_info(f"{parse_source}\n\n备注：{note}".strip())
+            elapsed_seconds = round(time.monotonic() - started_at, 3)
+            llm_metrics.append(
+                {
+                    "task_type": "extract_invoice",
+                    "provider": response.provider,
+                    "model": response.model,
+                    "status": "success",
+                    "elapsed_seconds": elapsed_seconds,
+                    "attempt": attempt,
+                }
+            )
             validation_errors = validate_extract_invoice_payload(response.parsed_json)
             if validation_errors:
                 llm_errors.append(f"第 {attempt} 次 LLM 返回结构无效: {'; '.join(validation_errors)}")
@@ -71,11 +87,25 @@ def extract_invoice_structured_data(
                 parse_source=parse_source,
                 strategy="rules_plus_llm",
                 llm_provider=response.provider,
-                warnings=[*llm_errors, *conflict_warnings],
+                warnings=[*llm_errors, f"LLM 结构化识别耗时 {elapsed_seconds:.1f} 秒。", *conflict_warnings],
+                llm_metrics=llm_metrics,
             )
         except LLMAdapterError as exc:
-            llm_errors.append(f"第 {attempt} 次 LLM 调用失败: {exc}")
+            elapsed_seconds = round(time.monotonic() - started_at, 3)
+            llm_metrics.append(
+                {
+                    "task_type": "extract_invoice",
+                    "provider": getattr(adapter, "provider_name", ""),
+                    "model": getattr(adapter, "model", ""),
+                    "status": "failed",
+                    "elapsed_seconds": elapsed_seconds,
+                    "attempt": attempt,
+                    "error": str(exc),
+                }
+            )
+            llm_errors.append(f"第 {attempt} 次 LLM 调用失败，耗时 {elapsed_seconds:.1f} 秒: {exc}")
     outcome.warnings = llm_errors
+    outcome.llm_metrics = llm_metrics
     return outcome
 
 
@@ -90,7 +120,15 @@ def _should_try_llm(
 ) -> bool:
     if not parse_source.strip():
         return False
-    # 上传附件、OCR、长文本最容易出现“规则错得很自信”，需要让 LLM 做复核候选。
+    if (
+        not document_text.strip()
+        and not ocr_text.strip()
+        and _rules_are_strong_enough_for_fast_draft(buyer, lines)
+        and os.environ.get("TAX_INVOICE_LLM_BLOCKING_REVIEW", "fast").strip().lower()
+        in {"", "0", "fast", "off", "false", "disabled"}
+    ):
+        return False
+    # 上传附件、OCR、长文本最容易出现“规则错得很自信”；如未进入 fast 草稿保护，则让 LLM 做复核候选。
     if document_text.strip() or ocr_text.strip() or len(raw_text.strip()) >= 120:
         return True
     if not buyer.name.strip() or not buyer.tax_id.strip():
@@ -102,6 +140,13 @@ def _should_try_llm(
     if sum(1 for line in lines if line.project_name.strip()) == 0:
         return True
     return False
+
+
+def _rules_are_strong_enough_for_fast_draft(buyer: BuyerInfo, lines: list[InvoiceLine]) -> bool:
+    if not buyer.name.strip() or not buyer.tax_id.strip() or not lines:
+        return False
+    return all(line.project_name.strip() and line.resolved_amount_with_tax() for line in lines)
+
 
 
 def _build_extraction_conflict_warnings(

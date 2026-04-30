@@ -72,6 +72,7 @@ class TextInputParsingTest(unittest.TestCase):
         self.old_event_root = case_events_module.EVENT_ROOT
         self.old_learned_rules_path = tax_rule_engine_module.LEARNED_RULES_PATH
         self.old_tenant_rules_path = tax_rule_engine_module.TENANT_RULES_PATH
+        self.old_llm_tax_code_cache_path = tax_rule_engine_module.LLM_TAX_CODE_CACHE_PATH
         self.old_sync_endpoint = os.environ.get("TAX_INVOICE_SYNC_ENDPOINT")
         self.old_sync_token = os.environ.get("TAX_INVOICE_SYNC_TOKEN")
         self.old_sync_enabled = os.environ.get("TAX_INVOICE_SYNC_ENABLED")
@@ -88,6 +89,7 @@ class TextInputParsingTest(unittest.TestCase):
         case_events_module.EVENT_ROOT = self.temp_path / "events"
         tax_rule_engine_module.LEARNED_RULES_PATH = self.temp_path / "ledger" / "本地即时学习赋码规则.csv"
         tax_rule_engine_module.TENANT_RULES_PATH = self.temp_path / "ledger" / "客户同步赋码规则.csv"
+        tax_rule_engine_module.LLM_TAX_CODE_CACHE_PATH = self.temp_path / "ledger" / "智能税码推荐缓存.json"
         tax_rule_engine_module.load_tenant_coding_library.cache_clear()
         tax_rule_engine_module.load_learned_coding_library.cache_clear()
         os.environ.pop("TAX_INVOICE_SYNC_ENDPOINT", None)
@@ -111,6 +113,7 @@ class TextInputParsingTest(unittest.TestCase):
         case_events_module.EVENT_ROOT = self.old_event_root
         tax_rule_engine_module.LEARNED_RULES_PATH = self.old_learned_rules_path
         tax_rule_engine_module.TENANT_RULES_PATH = self.old_tenant_rules_path
+        tax_rule_engine_module.LLM_TAX_CODE_CACHE_PATH = self.old_llm_tax_code_cache_path
         tax_rule_engine_module.load_tenant_coding_library.cache_clear()
         tax_rule_engine_module.load_learned_coding_library.cache_clear()
         if self.old_sync_endpoint is None:
@@ -230,7 +233,14 @@ class TextInputParsingTest(unittest.TestCase):
         self.assertEqual([line.tax_code for line in draft.lines], ["1090245030000000000", "1090245030000000000"])
         self.assertTrue(all(line.coding_reference.startswith("智能推荐，需人工复核") for line in draft.lines))
         self.assertEqual(fake_adapter.call_count, 1)
+        self.assertTrue(tax_rule_engine_module.LLM_TAX_CODE_CACHE_PATH.exists())
 
+        cached_fake_adapter = _FakeTaxCodeLLMAdapter()
+        with patch.object(tax_rule_engine_module, "get_llm_adapter", return_value=cached_fake_adapter):
+            cached_draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", text, "", [])
+
+        self.assertEqual(cached_fake_adapter.call_count, 0)
+        self.assertEqual([line.tax_code for line in cached_draft.lines], ["1090245030000000000", "1090245030000000000"])
 
     def test_simple_text_input_is_enriched_by_backend_coding_library(self):
         draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", SIMPLE_TEXT_INPUT, "", [])

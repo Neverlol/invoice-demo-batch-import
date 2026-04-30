@@ -129,6 +129,7 @@ def create_draft_from_workbench(company_name: str, raw_text: str, note: str, upl
             "attachment_count": len(attachments),
             "source_doc_status": document_result.status,
             "ocr_status": ocr_result.status,
+            "llm_metrics": extraction.llm_metrics,
         },
     )
     return draft
@@ -154,6 +155,7 @@ def update_draft_from_form(
     manual_input_lines = bool(lines)
     has_new_uploads = any((getattr(file, "filename", "") or "").strip() for file in uploaded_files)
     learned_rule_rows = []
+    llm_metrics = []
 
     if manual_input_lines and not has_new_uploads:
         # 保存草稿上的人工编辑时，不重新解析原材料/OCR/调用 LLM；否则“保存修改”会被材料识别链路拖慢。
@@ -241,6 +243,7 @@ def update_draft_from_form(
         extract_strategy = extraction.strategy
         llm_provider = extraction.llm_provider
         extract_warnings = extraction.warnings
+        llm_metrics = extraction.llm_metrics
     issues = _build_draft_issues(
         company_name=company_name,
         raw_text=raw_text,
@@ -289,6 +292,7 @@ def update_draft_from_form(
         payload={
             **draft_snapshot(draft),
             "diff_count": len(edit_diffs),
+            "llm_metrics": llm_metrics,
         },
     )
     if edit_diffs:

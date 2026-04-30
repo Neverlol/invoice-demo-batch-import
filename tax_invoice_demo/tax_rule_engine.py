@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import json
 import os
 import re
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ from .taxonomy_master import TaxonomyEntry, load_taxonomy_master, suggest_taxono
 
 LEARNED_RULES_PATH = Path(__file__).resolve().parent.parent / "output" / "workbench" / "tax_invoice_demo" / "本地即时学习赋码规则.csv"
 TENANT_RULES_PATH = Path(__file__).resolve().parent.parent / "output" / "workbench" / "tax_invoice_demo" / "客户同步赋码规则.csv"
+LLM_TAX_CODE_CACHE_PATH = Path(__file__).resolve().parent.parent / "output" / "workbench" / "tax_invoice_demo" / "智能税码推荐缓存.json"
 
 LEARNED_RULE_HEADERS = [
     "rule_id",
@@ -676,6 +678,10 @@ def _suggest_taxonomy_with_llm(line: InvoiceLine, *, cache: dict[str, TaxonomyEn
     key = _smart_coding_cache_key(line)
     if key in cache:
         return cache[key]
+    persistent_entry = _load_cached_llm_taxonomy_choice(key)
+    if persistent_entry is not None:
+        cache[key] = persistent_entry
+        return persistent_entry
     cache[key] = None
     candidates = _llm_taxonomy_candidates(line)
     if not candidates:
@@ -703,7 +709,47 @@ def _suggest_taxonomy_with_llm(line: InvoiceLine, *, cache: dict[str, TaxonomyEn
         return None
     entry = _resolve_llm_taxonomy_choice(response.parsed_json, candidates)
     cache[key] = entry
+    if entry is not None:
+        _save_cached_llm_taxonomy_choice(key, entry)
     return entry
+
+
+def _load_cached_llm_taxonomy_choice(key: str) -> TaxonomyEntry | None:
+    cached = _read_llm_tax_code_cache().get(key)
+    if not isinstance(cached, dict):
+        return None
+    code = str(cached.get("official_code") or "").strip()
+    if not code:
+        return None
+    for entry in load_taxonomy_master():
+        if entry.official_code == code:
+            return entry
+    return None
+
+
+
+def _save_cached_llm_taxonomy_choice(key: str, entry: TaxonomyEntry) -> None:
+    payload = _read_llm_tax_code_cache()
+    payload[key] = {
+        "official_code": entry.official_code,
+        "official_name": entry.official_name,
+        "category_short_name": entry.category_short_name,
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    LLM_TAX_CODE_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    LLM_TAX_CODE_CACHE_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+
+def _read_llm_tax_code_cache() -> dict:
+    if not LLM_TAX_CODE_CACHE_PATH.exists():
+        return {}
+    try:
+        payload = json.loads(LLM_TAX_CODE_CACHE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
 
 
 def _smart_coding_cache_key(line: InvoiceLine) -> str:

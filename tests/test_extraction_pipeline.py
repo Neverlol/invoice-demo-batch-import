@@ -39,6 +39,10 @@ class ExtractionPipelineTest(unittest.TestCase):
         self.old_timeout = os.environ.get("TAX_INVOICE_LLM_TIMEOUT")
         self.old_max_retries = os.environ.get("TAX_INVOICE_LLM_MAX_RETRIES")
         self.old_config = os.environ.get("TAX_INVOICE_LLM_CONFIG")
+        self.old_blocking_review = os.environ.get("TAX_INVOICE_LLM_BLOCKING_REVIEW")
+        self.old_extract_timeout = os.environ.get("TAX_INVOICE_LLM_EXTRACT_TIMEOUT")
+        self.old_tax_code_timeout = os.environ.get("TAX_INVOICE_LLM_TAX_CODE_TIMEOUT")
+        self.old_image_ocr_timeout = os.environ.get("TAX_INVOICE_LLM_IMAGE_OCR_TIMEOUT")
         llm_adapter_module._repo_root = lambda: self.temp_path
         os.environ["TAX_INVOICE_LLM_PROVIDER"] = "off"
         os.environ.pop("TAX_INVOICE_LLM_ENABLED", None)
@@ -52,6 +56,10 @@ class ExtractionPipelineTest(unittest.TestCase):
         os.environ.pop("TAX_INVOICE_LLM_TIMEOUT", None)
         os.environ.pop("TAX_INVOICE_LLM_MAX_RETRIES", None)
         os.environ.pop("TAX_INVOICE_LLM_CONFIG", None)
+        os.environ.pop("TAX_INVOICE_LLM_BLOCKING_REVIEW", None)
+        os.environ.pop("TAX_INVOICE_LLM_EXTRACT_TIMEOUT", None)
+        os.environ.pop("TAX_INVOICE_LLM_TAX_CODE_TIMEOUT", None)
+        os.environ.pop("TAX_INVOICE_LLM_IMAGE_OCR_TIMEOUT", None)
 
     def tearDown(self):
         llm_adapter_module._repo_root = self.old_repo_root
@@ -67,6 +75,10 @@ class ExtractionPipelineTest(unittest.TestCase):
         self._restore_env("TAX_INVOICE_LLM_TIMEOUT", self.old_timeout)
         self._restore_env("TAX_INVOICE_LLM_MAX_RETRIES", self.old_max_retries)
         self._restore_env("TAX_INVOICE_LLM_CONFIG", self.old_config)
+        self._restore_env("TAX_INVOICE_LLM_BLOCKING_REVIEW", self.old_blocking_review)
+        self._restore_env("TAX_INVOICE_LLM_EXTRACT_TIMEOUT", self.old_extract_timeout)
+        self._restore_env("TAX_INVOICE_LLM_TAX_CODE_TIMEOUT", self.old_tax_code_timeout)
+        self._restore_env("TAX_INVOICE_LLM_IMAGE_OCR_TIMEOUT", self.old_image_ocr_timeout)
         self.tempdir.cleanup()
 
     def _restore_env(self, name: str, value: Optional[str]) -> None:
@@ -296,6 +308,65 @@ class ExtractionPipelineTest(unittest.TestCase):
         self.assertEqual(outcome.strategy, "rules_plus_llm")
         self.assertEqual(outcome.lines[0].normalized_tax_rate(), "13%")
         self.assertTrue(any("识别差异需确认：第 1 行税率" in warning for warning in outcome.warnings))
+
+    def test_fast_draft_skips_blocking_llm_when_rules_are_strong(self):
+        os.environ["TAX_INVOICE_LLM_PROVIDER"] = "minimax"
+        os.environ["TAX_INVOICE_LLM_API_KEY"] = "fake-key"
+
+        with patch.object(llm_adapter_module, "urlopen") as fake_urlopen:
+            outcome = extract_invoice_structured_data(
+                raw_text=(
+                    "麻烦开个普票哈\n\n辽宁恒润电力科技有限公司\n91210102MABWM3X12T\n\n"
+                    "这次是办公室用的一些东西，明细大概这样：\n"
+                    "A4复印纸 10包 240元\n蓝色文件夹 20个 160元\n桌面文件架 5个 100元\n\n"
+                    "总共500，按1个点开就行\n备注不用写，电子票发我微信\n"
+                ),
+                note="",
+                document_text="",
+                ocr_text="",
+            )
+
+        fake_urlopen.assert_not_called()
+        self.assertEqual(outcome.strategy, "rules_only")
+        self.assertEqual(len(outcome.lines), 3)
+        self.assertEqual(outcome.llm_metrics, [])
+
+    def test_llm_extract_uses_short_foreground_timeout_and_records_metric(self):
+        os.environ["TAX_INVOICE_LLM_PROVIDER"] = "minimax"
+        os.environ["TAX_INVOICE_LLM_API_KEY"] = "fake-key"
+        os.environ["TAX_INVOICE_LLM_EXTRACT_TIMEOUT"] = "6"
+        captured_timeouts = []
+        content = json.dumps(
+            {
+                "客户名称": "辽宁恒润电力科技有限公司",
+                "纳税人识别号": "91210102MABWM3X12T",
+                "地址电话": "",
+                "开户行及账号": "",
+                "项目列表": [
+                    {"项目名称": "服务费", "规格型号": "", "单位": "项", "数量": "1", "单价": "500", "金额": "500", "税率": "3%"}
+                ],
+                "价税合计": "500",
+                "备注": "",
+            },
+            ensure_ascii=False,
+        )
+
+        def fake_urlopen(request, timeout=None):
+            captured_timeouts.append(timeout)
+            return _FakeHTTPResponse({"choices": [{"message": {"content": content}}]})
+
+        with patch.object(llm_adapter_module, "urlopen", side_effect=fake_urlopen):
+            outcome = extract_invoice_structured_data(
+                raw_text="给客户开服务费，金额不清楚",
+                note="",
+                document_text="",
+                ocr_text="",
+            )
+
+        self.assertEqual(captured_timeouts, [6])
+        self.assertEqual(outcome.strategy, "rules_plus_llm")
+        self.assertEqual(outcome.llm_metrics[0]["task_type"], "extract_invoice")
+        self.assertEqual(outcome.llm_metrics[0]["status"], "success")
 
     def test_invalid_llm_payload_falls_back_to_rules(self):
         os.environ["TAX_INVOICE_LLM_PROVIDER"] = "minimax"

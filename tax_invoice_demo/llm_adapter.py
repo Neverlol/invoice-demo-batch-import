@@ -126,7 +126,7 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
             "材料如下：\n"
             f"{text}"
         )
-        return self._chat_json(prompt, timeout_seconds=self.timeout_seconds)
+        return self._chat_json(prompt, timeout_seconds=_task_timeout_seconds("TAX_INVOICE_LLM_EXTRACT_TIMEOUT", self.timeout_seconds, 8))
 
     def classify_tax_code(self, item_name: str, candidates: list[str]) -> LLMResponse:
         prompt = (
@@ -137,7 +137,7 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
             f"项目名称：{item_name}\n"
             f"候选：{json.dumps(candidates, ensure_ascii=False)}"
         )
-        return self._chat_json(prompt, timeout_seconds=min(self.timeout_seconds, 8))
+        return self._chat_json(prompt, timeout_seconds=_task_timeout_seconds("TAX_INVOICE_LLM_TAX_CODE_TIMEOUT", self.timeout_seconds, 5))
 
     def extract_text_from_image(self, image_path: Path) -> LLMResponse:
         mime_type = mimetypes.guess_type(str(image_path))[0] or "image/png"
@@ -158,7 +158,7 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
                     ],
                 },
             ],
-            timeout_seconds=min(self.timeout_seconds, 20),
+            timeout_seconds=_task_timeout_seconds("TAX_INVOICE_LLM_IMAGE_OCR_TIMEOUT", self.timeout_seconds, 12),
         )
 
     def ping_json(self) -> LLMResponse:
@@ -226,6 +226,17 @@ class MiMoOpenAICompatibleAdapter(MiniMaxOpenAICompatibleAdapter):
             "api-key": self.api_key,
             "Content-Type": "application/json",
         }
+
+
+def _task_timeout_seconds(env_name: str, configured_timeout: int, default_cap: int) -> int:
+    raw = os.environ.get(env_name, "").strip()
+    try:
+        cap = int(raw) if raw else default_cap
+    except ValueError:
+        cap = default_cap
+    cap = max(1, cap)
+    return min(configured_timeout, cap)
+
 
 
 def get_llm_adapter() -> BaseLLMAdapter:
