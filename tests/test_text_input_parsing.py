@@ -1,4 +1,5 @@
 import csv
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +13,7 @@ import tax_invoice_demo.coding_library as coding_library_module
 import tax_invoice_demo.ledger as ledger_module
 import tax_invoice_demo.tax_rule_engine as tax_rule_engine_module
 import tax_invoice_demo.workbench as workbench_module
+import tax_invoice_demo.customer_profiles as customer_profiles_module
 import tax_invoice_batch_demo.lean_workbench as lean_workbench_module
 from openpyxl import Workbook, load_workbook
 from werkzeug.datastructures import FileStorage
@@ -74,6 +76,7 @@ class TextInputParsingTest(unittest.TestCase):
         self.old_learned_rules_path = tax_rule_engine_module.LEARNED_RULES_PATH
         self.old_tenant_rules_path = tax_rule_engine_module.TENANT_RULES_PATH
         self.old_llm_tax_code_cache_path = tax_rule_engine_module.LLM_TAX_CODE_CACHE_PATH
+        self.old_profile_cache_path = customer_profiles_module.PROFILE_CACHE_PATH
         self.old_sync_endpoint = os.environ.get("TAX_INVOICE_SYNC_ENDPOINT")
         self.old_sync_token = os.environ.get("TAX_INVOICE_SYNC_TOKEN")
         self.old_sync_enabled = os.environ.get("TAX_INVOICE_SYNC_ENABLED")
@@ -91,6 +94,7 @@ class TextInputParsingTest(unittest.TestCase):
         tax_rule_engine_module.LEARNED_RULES_PATH = self.temp_path / "ledger" / "本地即时学习赋码规则.csv"
         tax_rule_engine_module.TENANT_RULES_PATH = self.temp_path / "ledger" / "客户同步赋码规则.csv"
         tax_rule_engine_module.LLM_TAX_CODE_CACHE_PATH = self.temp_path / "ledger" / "智能税码推荐缓存.json"
+        customer_profiles_module.PROFILE_CACHE_PATH = self.temp_path / "workbench" / "客户档案缓存.json"
         tax_rule_engine_module.load_tenant_coding_library.cache_clear()
         tax_rule_engine_module.load_learned_coding_library.cache_clear()
         os.environ.pop("TAX_INVOICE_SYNC_ENDPOINT", None)
@@ -115,6 +119,7 @@ class TextInputParsingTest(unittest.TestCase):
         tax_rule_engine_module.LEARNED_RULES_PATH = self.old_learned_rules_path
         tax_rule_engine_module.TENANT_RULES_PATH = self.old_tenant_rules_path
         tax_rule_engine_module.LLM_TAX_CODE_CACHE_PATH = self.old_llm_tax_code_cache_path
+        customer_profiles_module.PROFILE_CACHE_PATH = self.old_profile_cache_path
         tax_rule_engine_module.load_tenant_coding_library.cache_clear()
         tax_rule_engine_module.load_learned_coding_library.cache_clear()
         if self.old_sync_endpoint is None:
@@ -681,6 +686,47 @@ A4复印纸 10包 240元
         self.assertIn("命中 客户规则", next_draft.lines[0].coding_reference)
 
 
+    def test_cloud_profile_cache_supplies_seller_project_profile(self):
+        customer_profiles_module.PROFILE_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        customer_profiles_module.PROFILE_CACHE_PATH.write_text(
+            json.dumps(
+                [
+                    {
+                        "seller_name": "沈阳瑞渡酒店管理有限公司",
+                        "seller_tax_id": "91210103MAEFNBQW91",
+                        "project_profiles": [
+                            {
+                                "project_name": "管理服务费",
+                                "tax_category": "企业管理服务",
+                                "tax_code": "3040801990000000000",
+                                "tax_rate": "1%",
+                                "unit": "项",
+                                "line_count": 6,
+                            }
+                        ],
+                        "buyer_profiles": [
+                            {"buyer_name": "沈阳测试购买方有限公司", "buyer_tax_id": "91210100TEST000001", "line_count": 3}
+                        ],
+                    }
+                ],
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        profile = customer_profiles_module.seller_default_line_profile("沈阳瑞渡酒店管理有限公司")
+        buyer = customer_profiles_module.resolve_buyer_from_history("测试购买方给开管理费", company_name="沈阳瑞渡酒店管理有限公司")
+
+        self.assertIsNotNone(profile)
+        self.assertEqual(profile.project_name, "管理服务费")
+        self.assertEqual(profile.tax_code, "3040801990000000000")
+        self.assertIsNotNone(buyer)
+        self.assertEqual(buyer.buyer.tax_id, "91210100TEST000001")
+        summary = customer_profiles_module.profile_cache_summary()
+        self.assertEqual(summary["seller_count"], 1)
+        self.assertEqual(summary["project_profile_count"], 1)
+
+
 def _seed_history_profile_row(
     *,
     company_name: str,
@@ -725,6 +771,8 @@ def _seed_history_profile_row(
 def _read_csv_rows(path: Path) -> list[dict[str, str]]:
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         return list(csv.DictReader(handle))
+
+
 
 def _form_from_draft(draft, *, tax_category: str, tax_code: str, tax_rate: str):
     from werkzeug.datastructures import MultiDict
@@ -782,6 +830,8 @@ class _FakeTaxCodeLLMAdapter:
         self.last_candidates = candidates
         assert any("1090245030000000000" in candidate for candidate in candidates)
         return _FakeTaxCodeLLMResponse()
+
+
 
 
 if __name__ == "__main__":

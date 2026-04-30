@@ -28,7 +28,8 @@ from tax_invoice_batch_demo.lean_workbench import (
     save_lean_draft_from_form,
 )
 from tax_invoice_demo.case_events import record_case_event
-from tax_invoice_demo.sync_service import schedule_background_rule_pull
+from tax_invoice_demo.customer_profiles import profile_cache_summary
+from tax_invoice_demo.sync_service import schedule_background_customer_profile_pull, schedule_background_rule_pull
 from tax_invoice_demo.taxonomy_search import search_taxonomy
 
 
@@ -46,7 +47,13 @@ RUN_LOCK = Lock()
 @app.get("/")
 def index():
     schedule_background_rule_pull()
-    return render_template("lean_index.html", form=default_form(), errors=[])
+    schedule_background_customer_profile_pull()
+    return render_template(
+        "lean_index.html",
+        form=default_form(),
+        errors=[],
+        profile_summary=profile_cache_summary(),
+    )
 
 
 @app.post("/drafts")
@@ -58,6 +65,7 @@ def create_draft():
             "lean_index.html",
             form=request.form,
             errors=["请粘贴开票信息，或上传客户提供的图片 / Excel / PDF。"],
+            profile_summary=profile_cache_summary(),
         ), 400
 
     result = create_lean_draft(

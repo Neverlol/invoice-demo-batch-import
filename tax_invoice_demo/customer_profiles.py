@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import csv
+import json
 import re
 from collections import Counter
+from pathlib import Path
 from dataclasses import dataclass
 
 from . import ledger
 from .models import BuyerInfo, InvoiceLine
+
+
+PROFILE_CACHE_PATH = Path(__file__).resolve().parent.parent / "output" / "workbench" / "tax_invoice_demo" / "客户档案缓存.json"
 
 
 @dataclass(frozen=True)
@@ -210,7 +215,24 @@ def _row_is_positive_normal_invoice(row: dict[str, str]) -> bool:
 
 
 
+def profile_cache_summary() -> dict[str, str | int]:
+    sellers = _load_cached_sellers()
+    return {
+        "cache_path": str(PROFILE_CACHE_PATH),
+        "exists": PROFILE_CACHE_PATH.exists(),
+        "seller_count": len(sellers),
+        "buyer_count": sum(len(seller.get("buyer_profiles") or []) for seller in sellers if isinstance(seller, dict)),
+        "project_profile_count": sum(len(seller.get("project_profiles") or []) for seller in sellers if isinstance(seller, dict)),
+    }
+
+
 def _profile_rows(*, company_name: str = "", buyer: BuyerInfo | None = None) -> list[dict[str, str]]:
+    cached_rows = _cached_profile_rows(company_name=company_name, buyer=buyer)
+    ledger_rows = _ledger_profile_rows(company_name=company_name, buyer=buyer)
+    return cached_rows + ledger_rows
+
+
+def _ledger_profile_rows(*, company_name: str = "", buyer: BuyerInfo | None = None) -> list[dict[str, str]]:
     path = ledger.LEDGER_CSV_PATH
     if not path.exists():
         return []
@@ -232,6 +254,85 @@ def _profile_rows(*, company_name: str = "", buyer: BuyerInfo | None = None) -> 
             continue
         filtered.append(row)
     return filtered
+
+
+def _cached_profile_rows(*, company_name: str = "", buyer: BuyerInfo | None = None) -> list[dict[str, str]]:
+    seller_query = company_name.strip()
+    buyer_name = (buyer.name if buyer else "").strip()
+    buyer_tax_id = (buyer.tax_id if buyer else "").strip()
+    rows: list[dict[str, str]] = []
+    for seller in _load_cached_sellers():
+        if not isinstance(seller, dict):
+            continue
+        seller_name = str(seller.get("seller_name") or "").strip()
+        seller_tax_id = str(seller.get("seller_tax_id") or "").strip()
+        if seller_query and seller_query not in {seller_name, seller_tax_id}:
+            continue
+        buyer_profiles = [item for item in (seller.get("buyer_profiles") or []) if isinstance(item, dict)]
+        matching_buyers = _matching_cached_buyers(buyer_profiles, buyer_name=buyer_name, buyer_tax_id=buyer_tax_id)
+        if buyer is not None and (buyer_name or buyer_tax_id) and matching_buyers:
+            target_buyers = matching_buyers
+        elif buyer is not None and (buyer_name or buyer_tax_id):
+            # 云端 P0 的 seller_project_profiles 是销售主体级常用项目，不一定绑定购买方。
+            # 找不到 buyer 专属项目时仍允许使用销售主体常用项目兜底。
+            target_buyers = [{"buyer_name": buyer_name, "buyer_tax_id": buyer_tax_id}]
+        else:
+            target_buyers = buyer_profiles or [{"buyer_name": "", "buyer_tax_id": ""}]
+
+        for line in seller.get("project_profiles") or []:
+            if not isinstance(line, dict):
+                continue
+            for buyer_profile in target_buyers:
+                rows.append(_cached_line_to_row(seller_name, seller_tax_id, buyer_profile, line))
+
+        # 让 resolve_buyer_from_history 即使没有项目行也能从云端 buyer_profiles 召回购买方。
+        for buyer_profile in matching_buyers if buyer is not None else buyer_profiles:
+            rows.append(_cached_line_to_row(seller_name, seller_tax_id, buyer_profile, {}))
+    return rows
+
+
+def _load_cached_sellers() -> list[dict]:
+    if not PROFILE_CACHE_PATH.exists():
+        return []
+    try:
+        payload = json.loads(PROFILE_CACHE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    return payload if isinstance(payload, list) else []
+
+
+def _matching_cached_buyers(buyers: list[dict], *, buyer_name: str, buyer_tax_id: str) -> list[dict]:
+    if not buyer_name and not buyer_tax_id:
+        return buyers
+    matched = []
+    for buyer in buyers:
+        cached_name = str(buyer.get("buyer_name") or "").strip()
+        cached_tax_id = str(buyer.get("buyer_tax_id") or "").strip()
+        if buyer_tax_id and cached_tax_id and cached_tax_id == buyer_tax_id:
+            matched.append(buyer)
+        elif not buyer_tax_id and buyer_name and cached_name == buyer_name:
+            matched.append(buyer)
+    return matched
+
+
+def _cached_line_to_row(seller_name: str, seller_tax_id: str, buyer_profile: dict, line: dict) -> dict[str, str]:
+    return {
+        "company_name": seller_name,
+        "seller_tax_id": seller_tax_id,
+        "buyer_name": str(buyer_profile.get("buyer_name") or "").strip(),
+        "buyer_tax_id": str(buyer_profile.get("buyer_tax_id") or "").strip(),
+        "project_name": str(line.get("project_name") or "").strip(),
+        "tax_category": str(line.get("tax_category") or "").strip(),
+        "tax_code": str(line.get("tax_code") or "").strip(),
+        "tax_rate": str(line.get("tax_rate") or line.get("tax_treatment_or_rate") or "").strip(),
+        "unit": str(line.get("unit") or "项").strip(),
+        "specification": str(line.get("specification") or "").strip(),
+        "quantity": str(line.get("quantity") or "1").strip(),
+        "amount_with_tax": str(line.get("amount_with_tax") or "").strip(),
+        "invoice_status": "正常",
+        "invoice_direction": "蓝字",
+        "coding_reference": "云端客户档案推荐，需人工复核",
+    }
 
 
 def _buyer_aliases(buyer_name: str) -> set[str]:

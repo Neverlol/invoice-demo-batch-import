@@ -50,6 +50,9 @@ _FLUSH_ACTIVE = False
 _RULE_PULL_LOCK = Lock()
 _RULE_PULL_ACTIVE = False
 _RULE_PULL_SCHEDULED = False
+_CUSTOMER_PROFILE_PULL_LOCK = Lock()
+_CUSTOMER_PROFILE_PULL_ACTIVE = False
+_CUSTOMER_PROFILE_PULL_SCHEDULED = False
 
 
 def load_sync_config() -> dict[str, str]:
@@ -100,6 +103,24 @@ def schedule_background_rule_pull(*, force: bool = False) -> bool:
         _RULE_PULL_ACTIVE = True
         _RULE_PULL_SCHEDULED = True
     thread = Thread(target=_pull_rules_in_background, daemon=True)
+    thread.start()
+    return True
+
+
+def schedule_background_customer_profile_pull(*, force: bool = False) -> bool:
+    config = load_sync_config()
+    if config["enabled"] != "1" or not _resolve_customer_profiles_endpoint(config):
+        return False
+
+    global _CUSTOMER_PROFILE_PULL_ACTIVE, _CUSTOMER_PROFILE_PULL_SCHEDULED
+    with _CUSTOMER_PROFILE_PULL_LOCK:
+        if _CUSTOMER_PROFILE_PULL_ACTIVE:
+            return False
+        if _CUSTOMER_PROFILE_PULL_SCHEDULED and not force:
+            return False
+        _CUSTOMER_PROFILE_PULL_ACTIVE = True
+        _CUSTOMER_PROFILE_PULL_SCHEDULED = True
+    thread = Thread(target=_pull_customer_profiles_in_background, daemon=True)
     thread.start()
     return True
 
@@ -285,6 +306,15 @@ def _pull_rules_in_background() -> None:
     finally:
         with _RULE_PULL_LOCK:
             _RULE_PULL_ACTIVE = False
+
+
+def _pull_customer_profiles_in_background() -> None:
+    global _CUSTOMER_PROFILE_PULL_ACTIVE
+    try:
+        pull_latest_customer_profiles()
+    finally:
+        with _CUSTOMER_PROFILE_PULL_LOCK:
+            _CUSTOMER_PROFILE_PULL_ACTIVE = False
 
 
 def _post_events(endpoint: str, payload: dict[str, Any], *, token: str, timeout_seconds: int) -> dict[str, Any]:

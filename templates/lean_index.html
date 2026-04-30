@@ -68,6 +68,14 @@
           </ol>
         </section>
 
+        <section class="banner profile-status">
+          {% if profile_summary and profile_summary.exists %}
+            <p>客户档案：已加载 {{ profile_summary.seller_count }} 个销售主体 / {{ profile_summary.project_profile_count }} 个常用项目 / {{ profile_summary.buyer_count }} 个购买方。生成草稿时会优先使用云端档案缓存，所有推荐仍需人工复核。</p>
+          {% else %}
+            <p>客户档案：本机暂无缓存；如已配置同步，工作台会在后台尝试从云端拉取。</p>
+          {% endif %}
+        </section>
+
         {% if errors %}
           <section class="banner alert">
             {% for error in errors %}<p>{{ error }}</p>{% endfor %}
