@@ -413,7 +413,16 @@ A4复印纸 10包 240元
         self.assertEqual(draft.lines[2].tax_code, "1070508010000000000")
         self.assertTrue(all("需人工复核" in line.coding_reference for line in draft.lines))
 
-    def test_weak_chat_text_with_alias_and_chinese_amount_creates_one_line_draft(self):
+    def test_weak_chat_text_uses_history_profile_for_buyer_and_project(self):
+        _seed_history_profile_row(
+            company_name="吉林省风生水起商贸有限公司",
+            buyer_name="辽宁恒润电力科技有限公司",
+            buyer_tax_id="91210102MABWM3X12T",
+            project_name="代理记账和税务申报",
+            tax_category="纳税申报代理",
+            tax_code="3040802050000000000",
+            tax_rate="3%",
+        )
         text = "帮开个票，辽宁恒润那个公司，代理服务，五百，普票"
 
         draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", text, "", [])
@@ -422,12 +431,13 @@ A4复印纸 10包 240元
         self.assertEqual(draft.buyer.name, "辽宁恒润电力科技有限公司")
         self.assertEqual(draft.buyer.tax_id, "91210102MABWM3X12T")
         self.assertEqual(len(draft.lines), 1)
-        self.assertEqual(draft.lines[0].project_name, "代理服务")
+        self.assertEqual(draft.lines[0].project_name, "代理记账和税务申报")
         self.assertEqual(draft.lines[0].amount_with_tax, "500")
         self.assertEqual(draft.lines[0].unit, "项")
         self.assertEqual(draft.lines[0].quantity, "1")
-        self.assertEqual(draft.lines[0].tax_code, "")
-        self.assertTrue(any("还没命中正式赋码库" in issue for issue in draft.issues))
+        self.assertEqual(draft.lines[0].tax_category, "纳税申报代理")
+        self.assertEqual(draft.lines[0].tax_code, "3040802050000000000")
+        self.assertIn("历史开票档案推荐", draft.lines[0].coding_reference)
 
     def test_minimal_inline_text_input_extracts_buyer_and_detail_line(self):
         buyer = extract_buyer_info_from_text(MINIMAL_INLINE_TEXT_INPUT)
@@ -615,6 +625,47 @@ A4复印纸 10包 240元
         self.assertEqual(next_draft.lines[0].tax_category, "云端审核分类")
         self.assertEqual(next_draft.lines[0].tax_code, "3040802050000000000")
         self.assertIn("命中 客户规则", next_draft.lines[0].coding_reference)
+
+
+def _seed_history_profile_row(
+    *,
+    company_name: str,
+    buyer_name: str,
+    buyer_tax_id: str,
+    project_name: str,
+    tax_category: str,
+    tax_code: str,
+    tax_rate: str,
+) -> None:
+    ledger_module.LEDGER_CSV_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with ledger_module.LEDGER_CSV_PATH.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=ledger_module.LEDGER_HEADERS)
+        writer.writeheader()
+        writer.writerow(
+            {
+                "case_id": "history-case",
+                "draft_id": "history-draft",
+                "line_no": "1",
+                "saved_at": "2026-04-30T09:30:00",
+                "company_name": company_name,
+                "buyer_name": buyer_name,
+                "buyer_tax_id": buyer_tax_id,
+                "project_name": project_name,
+                "tax_category": tax_category,
+                "tax_code": tax_code,
+                "source_item_code": "",
+                "specification": "",
+                "unit": "项",
+                "quantity": "1",
+                "unit_price": "500.00",
+                "amount_with_tax": "500.00",
+                "tax_rate": tax_rate,
+                "coding_reference": "历史已确认记录",
+                "coding_state": "manual_correction",
+                "note": "",
+            }
+        )
+
 
 
 def _read_csv_rows(path: Path) -> list[dict[str, str]]:

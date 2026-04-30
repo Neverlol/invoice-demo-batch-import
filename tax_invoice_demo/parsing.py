@@ -85,11 +85,6 @@ BUYER_ACCOUNT_PATTERNS = [
     re.compile(r"(?:购买方银行账号|银行账号|账号)[：:]\s*([0-9A-Za-z ]{6,})"),
 ]
 
-KNOWN_BUYER_ALIASES = {
-    "辽宁恒润": ("辽宁恒润电力科技有限公司", "91210102MABWM3X12T"),
-    "恒润": ("辽宁恒润电力科技有限公司", "91210102MABWM3X12T"),
-}
-
 LINE_FIELD_HEADERS = {
     **DETAIL_HEADERS,
     "项目": "project_name",
@@ -375,12 +370,6 @@ def extract_buyer_info_from_text(raw_text: str) -> BuyerInfo:
             buyer.name = inline_buyer.name
         if inline_buyer.tax_id and not buyer.tax_id:
             buyer.tax_id = inline_buyer.tax_id
-    if not buyer.name or not buyer.tax_id:
-        alias_buyer = _extract_buyer_info_from_known_alias(raw_text)
-        if alias_buyer.name and (not buyer.name or any(alias in buyer.name for alias in KNOWN_BUYER_ALIASES)):
-            buyer.name = alias_buyer.name
-        if alias_buyer.tax_id and not buyer.tax_id:
-            buyer.tax_id = alias_buyer.tax_id
     return buyer
 
 
@@ -976,15 +965,6 @@ def _extract_buyer_info_from_minimal_lines(lines: list[str]) -> BuyerInfo:
                 buyer.name = cleaned
                 break
     return buyer
-
-
-def _extract_buyer_info_from_known_alias(raw_text: str) -> BuyerInfo:
-    compact = raw_text.replace(" ", "")
-    for alias, (name, tax_id) in KNOWN_BUYER_ALIASES.items():
-        if alias in compact:
-            return BuyerInfo(name=name, tax_id=tax_id)
-    return BuyerInfo(name="", tax_id="")
-
 
 
 def _extract_buyer_info_from_inline_text(raw_text: str) -> BuyerInfo:

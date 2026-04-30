@@ -14,6 +14,7 @@ from werkzeug.datastructures import FileStorage
 
 from .case_events import batch_snapshot, diff_drafts, draft_snapshot, record_case_event
 from .coding_library import enrich_invoice_lines, load_formal_coding_library
+from .customer_profiles import apply_line_history_hints, resolve_buyer_from_history
 from .extraction_pipeline import compose_parse_source, extract_invoice_structured_data
 from .ledger import sync_draft_to_ledger
 from .models import BuyerInfo, DraftAttachment, DraftBatch, DraftBatchItem, InvoiceDraft, InvoiceLine
@@ -49,7 +50,13 @@ def create_draft_from_workbench(company_name: str, raw_text: str, note: str, upl
     parse_source = extraction.parse_source
     buyer = extraction.buyer
     buyer = _enrich_buyer_from_sheet_context(company_name, buyer, parse_source)
-    lines = extraction.lines
+    buyer = _enrich_buyer_from_history_profile(company_name, buyer, parse_source)
+    lines = _apply_history_profile_to_lines(
+        extraction.lines,
+        company_name=company_name,
+        buyer=buyer,
+        parse_source=parse_source,
+    )
     invoice_profile = _infer_invoice_profile(parse_source, note=note)
     split_lines = _build_amount_split_lines(
         company_name=company_name,
@@ -206,7 +213,13 @@ def update_draft_from_form(
         parse_source = extraction.parse_source
         inferred_buyer = extraction.buyer
         inferred_buyer = _enrich_buyer_from_sheet_context(company_name, inferred_buyer, parse_source)
-        inferred_lines = extraction.lines
+        inferred_buyer = _enrich_buyer_from_history_profile(company_name, inferred_buyer, parse_source)
+        inferred_lines = _apply_history_profile_to_lines(
+            extraction.lines,
+            company_name=company_name,
+            buyer=inferred_buyer,
+            parse_source=parse_source,
+        )
         inferred_profile = _infer_invoice_profile(parse_source, note=note)
         resolved_buyer = BuyerInfo(
             name=buyer.name or inferred_buyer.name,
@@ -1000,6 +1013,40 @@ def _enrich_buyer_from_sheet_context(company_name: str, buyer: BuyerInfo, parse_
             resolved.bank_account = value
 
     return resolved
+
+
+
+def _enrich_buyer_from_history_profile(company_name: str, buyer: BuyerInfo, parse_source: str) -> BuyerInfo:
+    history_match = resolve_buyer_from_history(parse_source, company_name=company_name)
+    if history_match is None:
+        return buyer
+    if buyer.name and buyer.tax_id and buyer.tax_id == history_match.buyer.tax_id:
+        return buyer
+    if buyer.name and not buyer.tax_id:
+        normalized_name = buyer.name.replace(" ", "")
+        normalized_history = history_match.buyer.name.replace(" ", "")
+        if history_match.matched_alias not in normalized_name and normalized_name not in normalized_history:
+            return buyer
+    return BuyerInfo(
+        name=history_match.buyer.name if not buyer.name or not buyer.tax_id else buyer.name,
+        tax_id=buyer.tax_id or history_match.buyer.tax_id,
+        address=buyer.address,
+        phone=buyer.phone,
+        bank_name=buyer.bank_name,
+        bank_account=buyer.bank_account,
+    )
+
+
+
+def _apply_history_profile_to_lines(
+    lines: list[InvoiceLine],
+    *,
+    company_name: str,
+    buyer: BuyerInfo,
+    parse_source: str,
+) -> list[InvoiceLine]:
+    return apply_line_history_hints(lines, company_name=company_name, buyer=buyer, raw_text=parse_source)
+
 
 
 def _split_possible_key_value(line: str) -> tuple[str, str]:
