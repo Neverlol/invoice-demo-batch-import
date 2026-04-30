@@ -281,107 +281,37 @@ def is_trusted_history_row(row: HistoryRow) -> bool:
 
 
 def ingest_pending_files(root: Path, *, dry_run: bool = False) -> dict[str, int]:
+    """Process inbox entries.
+
+    Important convention: one subfolder under _收件箱/待处理 is treated as one
+    customer material bundle. If the bundle contains a tax-bureau history Excel,
+    that Excel identifies the seller, and all screenshots/notes in the same
+    bundle are archived under that seller's 客户沟通材料 directory.
+    """
+
     pending = root / INBOX_DIR / PENDING_DIR
     manifest = load_manifest(root)
     counters = Counter()
     today = datetime.now().strftime("%Y%m%d")
     review_rows: list[dict[str, str]] = []
 
-    for path in sorted(p for p in pending.rglob("*") if p.is_file() and p.name != ".DS_Store"):
-        counters["seen"] += 1
-        file_hash = sha256_file(path)
-        if file_hash in manifest:
-            counters["duplicate"] += 1
-            if not dry_run:
-                moved = move_file(path, root / INBOX_DIR / DUPLICATE_DIR / today / path.name)
-                manifest[file_hash]["processed_path"] = str(moved.relative_to(root))
-            continue
-
-        suffix = path.suffix.lower()
-        try:
-            if suffix in EXCEL_EXTS:
-                rows = parse_history_excel(path, source_root=root)
-                seller_name = rows[0].seller_name
-                target = root / seller_name / "历史开票明细" / path.name
-                if dry_run:
-                    canonical = target
-                    processed = root / INBOX_DIR / PROCESSED_DIR / today / path.name
-                else:
-                    canonical = copy_file(path, target)
-                    processed = move_file(path, root / INBOX_DIR / PROCESSED_DIR / today / path.name)
-                manifest[file_hash] = {
-                    "sha256": file_hash,
-                    "original_name": path.name,
-                    "file_type": "tax_bureau_history_excel",
-                    "status": "imported",
-                    "seller_name": seller_name,
-                    "canonical_path": str(canonical.relative_to(root)),
-                    "processed_path": str(processed.relative_to(root)),
-                    "message": f"解析 {len(rows)} 行历史明细",
-                    "ingested_at": datetime.now().isoformat(timespec="seconds"),
-                }
-                counters["history_excel_imported"] += 1
-            elif suffix in IMAGE_EXTS:
-                counters["image_candidate"] += 1
-                review_rows.append(
-                    {
-                        "sha256": file_hash,
-                        "original_name": path.name,
-                        "relative_path": str(path.relative_to(root)),
-                        "candidate_type": "image_material",
-                        "status": "pending_review",
-                        "note": "图片候选材料：待 OCR/人工归类；默认不进入 active 档案。",
-                    }
-                )
-                if dry_run:
-                    processed = root / INBOX_DIR / PROCESSED_DIR / today / "图片材料" / path.name
-                else:
-                    processed = move_file(path, root / INBOX_DIR / PROCESSED_DIR / today / "图片材料" / path.name)
-                manifest[file_hash] = {
-                    "sha256": file_hash,
-                    "original_name": path.name,
-                    "file_type": "image_candidate",
-                    "status": "candidate_only",
-                    "seller_name": "",
-                    "canonical_path": "",
-                    "processed_path": str(processed.relative_to(root)),
-                    "message": "图片候选材料，未进入 active 档案",
-                    "ingested_at": datetime.now().isoformat(timespec="seconds"),
-                }
-            else:
-                counters["unsupported"] += 1
-                if dry_run:
-                    failed = root / INBOX_DIR / FAILED_DIR / today / path.name
-                else:
-                    failed = move_file(path, root / INBOX_DIR / FAILED_DIR / today / path.name)
-                manifest[file_hash] = {
-                    "sha256": file_hash,
-                    "original_name": path.name,
-                    "file_type": suffix or "unknown",
-                    "status": "unsupported",
-                    "seller_name": "",
-                    "canonical_path": "",
-                    "processed_path": str(failed.relative_to(root)),
-                    "message": "暂不支持的文件类型",
-                    "ingested_at": datetime.now().isoformat(timespec="seconds"),
-                }
-        except Exception as exc:  # noqa: BLE001
-            counters["failed"] += 1
-            if dry_run:
-                failed = root / INBOX_DIR / FAILED_DIR / today / path.name
-            else:
-                failed = move_file(path, root / INBOX_DIR / FAILED_DIR / today / path.name)
-            manifest[file_hash] = {
-                "sha256": file_hash,
-                "original_name": path.name,
-                "file_type": suffix or "unknown",
-                "status": "failed",
-                "seller_name": "",
-                "canonical_path": "",
-                "processed_path": str(failed.relative_to(root)),
-                "message": f"解析失败：{type(exc).__name__}: {exc}",
-                "ingested_at": datetime.now().isoformat(timespec="seconds"),
-            }
+    entries = sorted([entry for entry in pending.iterdir() if entry.name != ".DS_Store"], key=lambda item: item.name)
+    for entry in entries:
+        if entry.is_dir():
+            _ingest_pending_bundle(root, entry, manifest, counters, review_rows, today=today, dry_run=dry_run)
+        elif entry.is_file():
+            _ingest_pending_file(
+                root,
+                entry,
+                manifest,
+                counters,
+                review_rows,
+                today=today,
+                dry_run=dry_run,
+                bundle_root=None,
+                bundle_seller_name="",
+                bundle_name="",
+            )
 
     if not dry_run:
         write_manifest(root, manifest)
@@ -390,9 +320,221 @@ def ingest_pending_files(root: Path, *, dry_run: bool = False) -> dict[str, int]
     return dict(counters)
 
 
+
+def _ingest_pending_bundle(
+    root: Path,
+    bundle_dir: Path,
+    manifest: dict[str, dict[str, str]],
+    counters: Counter,
+    review_rows: list[dict[str, str]],
+    *,
+    today: str,
+    dry_run: bool,
+) -> None:
+    files = sorted([item for item in bundle_dir.rglob("*") if item.is_file() and item.name != ".DS_Store"])
+    if not files:
+        return
+    counters["bundles_seen"] += 1
+
+    seller_candidates: Counter[str] = Counter()
+    for file_path in files:
+        if file_path.suffix.lower() not in EXCEL_EXTS:
+            continue
+        file_hash = sha256_file(file_path)
+        if file_hash in manifest and manifest[file_hash].get("seller_name"):
+            seller_candidates[manifest[file_hash]["seller_name"]] += 1
+            continue
+        try:
+            rows = parse_history_excel(file_path, source_root=root)
+            seller_candidates[rows[0].seller_name] += 1
+        except Exception:
+            continue
+
+    bundle_seller_name = seller_candidates.most_common(1)[0][0] if seller_candidates else ""
+    if bundle_seller_name:
+        counters["bundles_with_seller"] += 1
+    else:
+        counters["bundles_without_seller"] += 1
+
+    for file_path in files:
+        _ingest_pending_file(
+            root,
+            file_path,
+            manifest,
+            counters,
+            review_rows,
+            today=today,
+            dry_run=dry_run,
+            bundle_root=bundle_dir,
+            bundle_seller_name=bundle_seller_name,
+            bundle_name=bundle_dir.name,
+        )
+
+    if not dry_run:
+        try:
+            bundle_dir.rmdir()
+        except OSError:
+            # Nested empty directories may remain; remove best-effort.
+            shutil.rmtree(bundle_dir, ignore_errors=True)
+
+
+
+def _ingest_pending_file(
+    root: Path,
+    path: Path,
+    manifest: dict[str, dict[str, str]],
+    counters: Counter,
+    review_rows: list[dict[str, str]],
+    *,
+    today: str,
+    dry_run: bool,
+    bundle_root: Path | None,
+    bundle_seller_name: str,
+    bundle_name: str,
+) -> None:
+    counters["seen"] += 1
+    file_hash = sha256_file(path)
+    rel_in_bundle = path.relative_to(bundle_root) if bundle_root else Path(path.name)
+    processed_base = root / INBOX_DIR / PROCESSED_DIR / today / (safe_filename(bundle_name) if bundle_name else "")
+    duplicate_base = root / INBOX_DIR / DUPLICATE_DIR / today / (safe_filename(bundle_name) if bundle_name else "")
+    failed_base = root / INBOX_DIR / FAILED_DIR / today / (safe_filename(bundle_name) if bundle_name else "")
+
+    if file_hash in manifest:
+        counters["duplicate"] += 1
+        if not dry_run:
+            moved = move_file(path, duplicate_base / rel_in_bundle)
+            manifest[file_hash]["processed_path"] = str(moved.relative_to(root))
+        return
+
+    suffix = path.suffix.lower()
+    try:
+        if suffix in EXCEL_EXTS:
+            rows = parse_history_excel(path, source_root=root)
+            seller_name = rows[0].seller_name
+            target = root / seller_name / "历史开票明细" / path.name
+            if dry_run:
+                canonical = target
+                processed = processed_base / rel_in_bundle
+            else:
+                canonical = copy_file(path, target)
+                processed = move_file(path, processed_base / rel_in_bundle)
+            manifest[file_hash] = {
+                "sha256": file_hash,
+                "original_name": path.name,
+                "file_type": "tax_bureau_history_excel",
+                "status": "imported",
+                "seller_name": seller_name,
+                "canonical_path": str(canonical.relative_to(root)),
+                "processed_path": str(processed.relative_to(root)),
+                "message": f"解析 {len(rows)} 行历史明细" + (f"；所属资料包：{bundle_name}" if bundle_name else ""),
+                "ingested_at": datetime.now().isoformat(timespec="seconds"),
+            }
+            counters["history_excel_imported"] += 1
+            return
+
+        if bundle_seller_name:
+            material_dir = root / bundle_seller_name / "客户沟通材料" / f"{today}_{safe_filename(bundle_name)}"
+            canonical = material_dir / rel_in_bundle
+            if dry_run:
+                processed = processed_base / rel_in_bundle
+            else:
+                canonical = copy_file(path, canonical)
+                processed = move_file(path, processed_base / rel_in_bundle)
+            file_type = "image_candidate" if suffix in IMAGE_EXTS else "bundle_material_candidate"
+            manifest[file_hash] = {
+                "sha256": file_hash,
+                "original_name": path.name,
+                "file_type": file_type,
+                "status": "candidate_only",
+                "seller_name": bundle_seller_name,
+                "canonical_path": str(canonical.relative_to(root)),
+                "processed_path": str(processed.relative_to(root)),
+                "message": f"同资料包归档到客户沟通材料；不进入 active 档案；资料包：{bundle_name}",
+                "ingested_at": datetime.now().isoformat(timespec="seconds"),
+            }
+            counters["bundle_material_archived"] += 1
+            review_rows.append(
+                {
+                    "sha256": file_hash,
+                    "original_name": path.name,
+                    "seller_name": bundle_seller_name,
+                    "relative_path": str(canonical.relative_to(root)),
+                    "candidate_type": file_type,
+                    "status": "pending_review",
+                    "note": f"来自同一资料包：{bundle_name}；默认不进入 active 档案。",
+                }
+            )
+            return
+
+        if suffix in IMAGE_EXTS:
+            counters["image_candidate"] += 1
+            review_rows.append(
+                {
+                    "sha256": file_hash,
+                    "original_name": path.name,
+                    "seller_name": "",
+                    "relative_path": str(path.relative_to(root)),
+                    "candidate_type": "image_material",
+                    "status": "pending_review",
+                    "note": "图片候选材料：待 OCR/人工归类；默认不进入 active 档案。若需关联客户，请和该客户历史明细放入同一个资料包文件夹。",
+                }
+            )
+            if dry_run:
+                processed = processed_base / "图片材料" / rel_in_bundle
+            else:
+                processed = move_file(path, processed_base / "图片材料" / rel_in_bundle)
+            manifest[file_hash] = {
+                "sha256": file_hash,
+                "original_name": path.name,
+                "file_type": "image_candidate",
+                "status": "candidate_only",
+                "seller_name": "",
+                "canonical_path": "",
+                "processed_path": str(processed.relative_to(root)),
+                "message": "图片候选材料，未关联销售主体，未进入 active 档案",
+                "ingested_at": datetime.now().isoformat(timespec="seconds"),
+            }
+            return
+
+        counters["unsupported"] += 1
+        if dry_run:
+            failed = failed_base / rel_in_bundle
+        else:
+            failed = move_file(path, failed_base / rel_in_bundle)
+        manifest[file_hash] = {
+            "sha256": file_hash,
+            "original_name": path.name,
+            "file_type": suffix or "unknown",
+            "status": "unsupported",
+            "seller_name": "",
+            "canonical_path": "",
+            "processed_path": str(failed.relative_to(root)),
+            "message": "暂不支持的文件类型；如需关联客户，请和该客户历史明细放入同一个资料包文件夹。",
+            "ingested_at": datetime.now().isoformat(timespec="seconds"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        counters["failed"] += 1
+        if dry_run:
+            failed = failed_base / rel_in_bundle
+        else:
+            failed = move_file(path, failed_base / rel_in_bundle)
+        manifest[file_hash] = {
+            "sha256": file_hash,
+            "original_name": path.name,
+            "file_type": suffix or "unknown",
+            "status": "failed",
+            "seller_name": bundle_seller_name,
+            "canonical_path": "",
+            "processed_path": str(failed.relative_to(root)),
+            "message": f"解析失败：{type(exc).__name__}: {exc}",
+            "ingested_at": datetime.now().isoformat(timespec="seconds"),
+        }
+
+
+
 def append_review_rows(path: Path, rows: list[dict[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fields = ["sha256", "original_name", "relative_path", "candidate_type", "status", "note"]
+    fields = ["sha256", "original_name", "seller_name", "relative_path", "candidate_type", "status", "note"]
     existing_hashes = set()
     if path.exists():
         with path.open("r", newline="", encoding="utf-8-sig") as f:
