@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -62,9 +63,12 @@ class BatchImportRunner:
             try:
                 page = self._select_tax_page(browser)
                 self._log("attach", f"已连接税局页面: {page.title()} | {page.url}")
+                subject = _extract_tax_subject(page)
+                if subject:
+                    self._log("subject", f"当前税局页面识别主体: {subject}")
                 if self.expected_serials:
                     self._log("template", "本次模板流水号: " + "、".join(self.expected_serials))
-                self._open_batch_import_page(page)
+                page = self._open_batch_import_page(page)
                 self._upload_template(page, PlaywrightTimeoutError)
                 import_state = self._wait_for_import_result(page)
                 if import_state == "failed":
@@ -96,18 +100,39 @@ class BatchImportRunner:
 
     def _select_tax_page(self, browser):
         pages = [page for context in browser.contexts for page in context.pages]
-        for page in pages:
-            if "chinatax.gov.cn" in page.url or "电子税务局" in _safe_title(page):
-                return page
-        if pages:
-            return pages[0]
-        raise RuntimeError("未找到可附着的 Edge 标签页。请先用 CDP Edge 登录电子税务局。")
+        if not pages:
+            raise RuntimeError("未找到可附着的 Edge 标签页。请先用 CDP Edge 登录电子税务局。")
 
-    def _open_batch_import_page(self, page) -> None:
+        scored_pages = []
+        for page in pages:
+            title = _safe_title(page)
+            text = _safe_body_text(page)
+            score = _tax_page_score(page.url, title, text)
+            scored_pages.append((score, page, title))
+        scored_pages.sort(key=lambda item: item[0], reverse=True)
+        best_score, best_page, best_title = scored_pages[0]
+        if best_score > 0:
+            self._log("attach", f"已发现 {len(scored_pages)} 个浏览器页面，优先选择税局业务页: score={best_score} title={best_title}")
+            return best_page
+        return pages[0]
+
+    def _open_batch_import_page(self, page):
         self._log("navigate", "准备进入批量开票页面。")
         if _is_batch_import_page(page):
             self._log("navigate", "当前页面已是批量导入页。")
-            return
+            return page
+
+        if _looks_like_tax_portal_home(page):
+            business_page = self._open_invoice_business_from_portal(page)
+            if business_page is not page:
+                page = business_page
+                self._log("navigate", f"已切换到发票业务新窗口: {page.title()} | {page.url}")
+                subject = _extract_tax_subject(page)
+                if subject:
+                    self._log("subject", f"发票业务页识别主体: {subject}")
+                if _is_batch_import_page(page):
+                    self._log("navigate", "发票业务新窗口已在批量导入页。")
+                    return page
 
         origin = _origin_from_url(page.url)
         direct_url = f"{origin}/blue-invoice-makeout/invoice-batch"
@@ -116,7 +141,7 @@ class BatchImportRunner:
         page.wait_for_timeout(2500)
         if _is_batch_import_page(page):
             self._log("navigate", "已进入批量导入页。")
-            return
+            return page
 
         # Some tax-bureau deployments block direct routing until the makeout page
         # initializes. Fall back to the visible menu entry, but do not treat the
@@ -132,13 +157,40 @@ class BatchImportRunner:
             page.wait_for_timeout(2500)
             if _is_batch_import_page(page):
                 self._log("navigate", "已确认进入批量导入页。")
-                return
+                return page
 
         raise RuntimeError(
             "未进入税局批量导入页。请手动打开“批量开票/批量导入”页面，"
             "确认地址包含 /blue-invoice-makeout/invoice-batch 后再重试。"
             f" 当前地址: {page.url}"
         )
+
+    def _open_invoice_business_from_portal(self, page):
+        before_pages = set(page.context.pages)
+        self._log("navigate", "当前在税局首页，尝试点击“热门服务 / 发票业务”打开发票业务新窗口。")
+        try:
+            with page.expect_popup(timeout=8000) as popup_info:
+                clicked = _click_first_visible_text(page, ("发票业务",), timeout=5000)
+                if not clicked:
+                    raise RuntimeError("未找到首页“发票业务”入口。")
+            popup = popup_info.value
+            popup.wait_for_load_state("domcontentloaded", timeout=30000)
+            popup.wait_for_timeout(2500)
+            return popup
+        except Exception as exc:  # noqa: BLE001
+            self._log("navigate", f"未通过 popup 事件捕获发票业务窗口，改为扫描浏览器页面: {type(exc).__name__}: {exc}")
+            try:
+                page.wait_for_timeout(2500)
+            except Exception:  # noqa: BLE001
+                pass
+            candidates = [candidate for candidate in page.context.pages if candidate not in before_pages]
+            candidates.extend(page.context.pages)
+            scored = [(_tax_page_score(candidate.url, _safe_title(candidate), _safe_body_text(candidate)), candidate) for candidate in candidates]
+            scored.sort(key=lambda item: item[0], reverse=True)
+            for score, candidate in scored:
+                if score >= 60:
+                    return candidate
+            return page
 
     def _upload_template(self, page, timeout_error_cls) -> None:
         if not _is_batch_import_page(page):
@@ -295,6 +347,77 @@ def _safe_body_text(page) -> str:
         return page.locator("body").inner_text(timeout=2000)
     except Exception:  # noqa: BLE001
         return ""
+
+
+def _tax_page_score(url: str, title: str = "", text: str = "") -> int:
+    combined = f"{title}\n{text}"
+    score = 0
+    if "chinatax.gov.cn" in url:
+        score += 20
+    if "电子税务局" in title or "全国统一规范电子税务局" in combined:
+        score += 15
+    path = urlparse(url).path.rstrip("/")
+    if path.endswith("/blue-invoice-makeout/invoice-batch"):
+        score += 170
+    elif "/blue-invoice-makeout" in path:
+        score += 80
+    if "发票业务" in combined:
+        score += 25
+    if "蓝字发票开具" in combined or "开票信息维护" in combined:
+        score += 30
+    if "热门服务" in combined and "我的待办" in combined:
+        score += 20
+    if "发票查询统计" in combined or "批量导入" in combined or "批量开票" in combined:
+        score += 25
+    if _is_tax_login_page_text(combined):
+        score -= 40
+    return score
+
+
+
+def _looks_like_tax_portal_home(page) -> bool:
+    text = _safe_body_text(page)
+    title = _safe_title(page)
+    return _tax_page_score(page.url, title, text) > 0 and "热门服务" in text and "发票业务" in text and "/blue-invoice-makeout" not in urlparse(page.url).path
+
+
+
+def _is_tax_login_page_text(text: str) -> bool:
+    return "登录" in text and ("密码" in text or "验证码" in text) and "热门服务" not in text
+
+
+
+def _extract_tax_subject(page) -> str:
+    text = _safe_body_text(page)
+    if not text:
+        return ""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    tax_id_pattern = re.compile(r"[0-9A-Z]{15,20}")
+    for index, line in enumerate(lines):
+        compact = line.replace(" ", "").upper()
+        if tax_id_pattern.fullmatch(compact) or tax_id_pattern.search(compact):
+            tax_id = tax_id_pattern.search(compact).group(0)
+            name = ""
+            for candidate in reversed(lines[max(0, index - 3):index]):
+                if _looks_like_taxpayer_name(candidate):
+                    name = candidate
+                    break
+            return f"{name} / {tax_id}" if name else tax_id
+    for line in lines[:80]:
+        if _looks_like_taxpayer_name(line):
+            return line
+    return ""
+
+
+
+def _looks_like_taxpayer_name(value: str) -> bool:
+    cleaned = value.strip()
+    if not cleaned or len(cleaned) < 4:
+        return False
+    if any(token in cleaned for token in ["全国统一", "电子税务局", "发票业务", "热门服务", "我的待办", "请输入", "操作指引"]):
+        return False
+    return bool(re.search(r"(有限|公司|个体工商户|商贸|科技|餐饮|饭店|工作室|学院|传媒)", cleaned))
+
 
 
 def _origin_from_url(url: str) -> str:
