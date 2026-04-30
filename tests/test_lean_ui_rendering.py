@@ -13,6 +13,7 @@ import tax_invoice_demo.case_events as case_events_module
 import tax_invoice_demo.ledger as ledger_module
 import tax_invoice_demo.tax_rule_engine as tax_rule_engine_module
 import tax_invoice_demo.workbench as workbench_module
+from tax_invoice_demo.models import BuyerInfo, InvoiceDraft, InvoiceLine
 
 
 MINIMAL_TEXT_INPUT = """辽宁恒润电力科技有限公司
@@ -145,6 +146,57 @@ class LeanUIRenderingTest(unittest.TestCase):
         self.assertNotIn("草稿摘要", html)
         self.assertNotIn("识别提醒", html)
         self.assertNotIn("CDP 端口", html)
+
+    def test_batch_page_guides_operator_to_submit_whole_batch_not_single_draft(self):
+        seller = "哈尔滨市道里区庆成记隆江猪脚饭店（个体工商户）"
+        ledger_module.sync_draft_to_ledger(
+            InvoiceDraft(
+                draft_id="history-food-ui",
+                case_id="history-food-ui",
+                company_name=seller,
+                buyer=BuyerInfo(name="历史购买方", tax_id="91230102MAEMEM2G2M"),
+                lines=[
+                    InvoiceLine(
+                        project_name="餐费",
+                        amount_with_tax="86.20",
+                        tax_rate="1%",
+                        tax_category="餐饮服务",
+                        tax_code="3070401000000000000",
+                        unit="项",
+                        quantity="1",
+                        coding_reference="税局历史明细导入，需人工复核",
+                    )
+                ],
+                created_at="2026-04-30T10:00:00",
+            )
+        )
+        batch = workbench_module.create_draft_from_workbench(
+            seller,
+            """[01.jpg]
+发票详情
+抬头 黑龙江源速商贸有限公司
+税号 91230102MA1CDKE47Y
+建议开票金额 13.80
+
+[02.jpg]
+发票详情
+税号 91230102MAEMEM2G2M
+建议开票金额 14.80
+""",
+            "平台截图批量测试",
+            [],
+        )
+
+        response = app.test_client().get(f"/batches/{batch.batch_id}")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn("批量草稿：2 张发票", html)
+        self.assertIn("这不是单张开票页面", html)
+        self.assertIn("下载本批税局 Excel", html)
+        self.assertIn("发起本批开票 / 上传税局", html)
+        self.assertIn("编辑修补", html)
+        self.assertIn("应当与上传截图数量一致", html)
 
     def test_taxonomy_search_api_returns_official_code_options(self):
         response = app.test_client().get("/api/taxonomy/search?q=医疗")

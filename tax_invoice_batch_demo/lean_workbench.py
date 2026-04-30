@@ -143,9 +143,10 @@ def export_draft_template(draft: InvoiceDraft) -> dict[str, Any]:
 
 def export_batch_template(batch_id: str) -> dict[str, Any]:
     from .workbench_bridge import export_saved_workbench_items
+    from tax_invoice_demo import workbench as workbench_module
 
     output_path = BATCH_OUTPUT_ROOT / f"{batch_id}_batch_import.xlsx"
-    export_saved_workbench_items([batch_id], output_path)
+    export_saved_workbench_items([batch_id], output_path, workbench_root=workbench_module.WORKBENCH_ROOT)
     issues = validate_batch_workbook(output_path)
     result = {
         "output_path": output_path,

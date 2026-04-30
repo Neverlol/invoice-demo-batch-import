@@ -63,6 +63,10 @@ def resolve_buyer_from_history(raw_text: str, *, company_name: str = "") -> Buye
 
 
 def seller_default_line_profile(company_name: str) -> LineHistoryMatch | None:
+    # 销售主体级常用项目必须绑定明确销售方；不能在销售方为空时从所有客户档案里取“全局最高频”，
+    # 否则餐饮平台截图可能被其它主体的商品/服务项目污染。
+    if not company_name.strip():
+        return None
     rows = _profile_rows(company_name=company_name)
     if not rows:
         return None

@@ -4,55 +4,117 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>批量草稿 {{ batch.batch_id }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260423-v15') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260430-v25') }}">
   </head>
-  <body>
-    <main class="shell wide">
-      <nav class="topbar">
-        <a href="{{ url_for('index') }}">新建草稿</a>
-        <a href="{{ url_for('download_batch_template', batch_id=batch.batch_id) }}">下载税局文件</a>
-      </nav>
-      <section class="hero compact-hero">
-        <p class="eyebrow">Batch {{ batch.batch_id }}</p>
-        <h1>批量草稿</h1>
-        <p>系统识别为一份输入拆多张发票。请先逐张复核，确认后再发起开票。</p>
-      </section>
+  <body class="operator-body">
+    <main class="dashboard-shell single-stage">
+      <section class="main-stage">
+        <nav class="topbar">
+          <a href="{{ url_for('index') }}">新建草稿</a>
+          <a href="{{ url_for('download_batch_template', batch_id=batch.batch_id) }}">下载本批税局文件</a>
+        </nav>
 
-      {% if export.error_count %}
-        <section class="alert">
-          {% for issue in export.validation_issues %}
-            <p>{{ issue.sheet }} 第 {{ issue.row }} 行 {{ issue.header }}：{{ issue.message }}</p>
-          {% endfor %}
+        <section class="work-card workflow-strip workflow-strip-primary">
+          <div class="workflow-head">
+            <div>
+              <span class="rail-badge">Batch {{ batch.batch_id }}</span>
+              <h2>批量草稿：{{ batch.items|length }} 张发票</h2>
+            </div>
+            <p>这不是单张开票页面。本页会把所有子草稿合并进同一个税局批量导入模板，然后一次上传。</p>
+          </div>
+          <ol class="workflow-steps">
+            <li class="active"><span>1</span><div><strong>批量识别</strong><small>每张截图生成一张子草稿</small></div></li>
+            <li class="active"><span>2</span><div><strong>集中复核</strong><small>只修错误或缺失项</small></div></li>
+            <li><span>3</span><div><strong>生成同一模板</strong><small>所有发票进入一个 Excel</small></div></li>
+            <li><span>4</span><div><strong>批量上传税局</strong><small>一次提交整批</small></div></li>
+            <li><span>5</span><div><strong>预览确认</strong><small>只到预览，不最终开具</small></div></li>
+          </ol>
         </section>
-      {% endif %}
 
-      <section class="card">
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>草稿</th>
-                <th>购买方</th>
-                <th>票种</th>
-                <th>金额</th>
-                <th>项目</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for item in batch.items %}
+        {% if run_blocked %}
+          <section class="banner alert">
+            <p>当前批量模板还有错误，已阻止上传税局。请先修复下方标红/提示的子草稿，再回到本页批量提交。</p>
+          </section>
+        {% endif %}
+
+        {% if export.error_count %}
+          <section class="banner alert">
+            <strong>模板校验未通过：{{ export.error_count }} 个错误</strong>
+            {% for issue in export.validation_issues %}
+              {% if issue.level == 'error' %}<p>{{ issue.sheet }} 第 {{ issue.row }} 行 {{ issue.header }}：{{ issue.message }}</p>{% endif %}
+            {% endfor %}
+          </section>
+        {% elif export.warning_count %}
+          <section class="banner notice">
+            <strong>模板可生成，但有 {{ export.warning_count }} 个提醒，请复核后再上传。</strong>
+          </section>
+        {% else %}
+          <section class="banner ok">
+            <p>本批模板校验通过。可以下载税局文件，或直接点击“发起本批开票”。</p>
+          </section>
+        {% endif %}
+
+        <section class="work-card action-panel">
+          <header class="card-head">
+            <div class="card-title">
+              <span class="card-icon">批</span>
+              <div>
+                <h2>下一步：整批处理</h2>
+                <p>主流程是整批下载/整批上传；“编辑单张”只用于修补某一张识别错误。</p>
+              </div>
+            </div>
+          </header>
+          <div class="action-row">
+            <a class="primary button-like" href="{{ url_for('download_batch_template', batch_id=batch.batch_id) }}">下载本批税局 Excel</a>
+            <form method="post" action="{{ url_for('execute_batch', batch_id=batch.batch_id) }}">
+              <input type="hidden" name="cdp_endpoint" value="http://127.0.0.1:9222">
+              <button class="primary" type="submit" {% if export.error_count %}disabled{% endif %}>发起本批开票 / 上传税局</button>
+            </form>
+          </div>
+          <p class="muted">如果按钮不可点，说明税局模板缺必填项。请在下表找到有问题的草稿，点击“编辑修补”，保存后回到本页。</p>
+        </section>
+
+        <section class="work-card">
+          <header class="card-head">
+            <div class="card-title">
+              <span class="card-icon">表</span>
+              <div>
+                <h2>本批发票清单</h2>
+                <p>应当与上传截图数量一致；例如 19 张截图应生成 19 张子草稿。</p>
+              </div>
+            </div>
+          </header>
+          <div class="table-wrap">
+            <table>
+              <thead>
                 <tr>
-                  <td>{{ item.draft_id }}</td>
-                  <td>{{ item.buyer_name }}</td>
-                  <td>{{ item.invoice_kind }}</td>
-                  <td>{{ item.amount_total }}</td>
-                  <td>{{ item.project_summary }}</td>
-                  <td><a href="{{ url_for('draft_detail', draft_id=item.draft_id) }}">编辑</a></td>
+                  <th>#</th>
+                  <th>草稿</th>
+                  <th>购买方</th>
+                  <th>票种</th>
+                  <th>金额</th>
+                  <th>项目</th>
+                  <th>状态</th>
+                  <th>操作</th>
                 </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {% for item in batch.items %}
+                  <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ item.draft_id }}</td>
+                    <td>{{ item.buyer_name or '待补全购买方名称' }}</td>
+                    <td>{{ item.invoice_kind }}</td>
+                    <td>{{ item.amount_total or '待补全金额' }}</td>
+                    <td>{{ item.project_summary }}</td>
+                    <td>{% if item.issue_summary %}<span class="status-pill warn">待修补</span><small>{{ item.issue_summary }}</small>{% else %}<span class="status-pill ok">可入模板</span>{% endif %}</td>
+                    <td><a href="{{ url_for('draft_detail', draft_id=item.draft_id) }}">编辑修补</a></td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </section>
     </main>
   </body>

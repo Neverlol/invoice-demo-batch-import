@@ -593,7 +593,11 @@ def _create_platform_screenshot_draft_batch(
             ocr_note=ocr_result.note,
         )
         if not buyer.name.strip():
-            child_issues.append(f"{request.source_name} 已识别税号 {buyer.tax_id}，但截图抬头不完整；请人工补全购买方名称。")
+            child_issues.append(f"{request.source_name} 截图抬头不完整；请人工补全购买方名称。")
+        if not buyer.tax_id.strip():
+            child_issues.append(f"{request.source_name} 未可靠识别购买方税号；请人工补全。")
+        if not request.amount_with_tax.strip():
+            child_issues.append(f"{request.source_name} 未可靠识别开票金额；请人工补全。")
         child_draft = InvoiceDraft(
             draft_id=child_draft_id,
             case_id=case_id,
@@ -631,7 +635,7 @@ def _create_platform_screenshot_draft_batch(
         items.append(
             DraftBatchItem(
                 draft_id=child_draft_id,
-                buyer_name=buyer.name or buyer.tax_id,
+                buyer_name=buyer.name or "待补全购买方名称",
                 invoice_kind=invoice_profile["invoice_kind"],
                 amount_total=line.resolved_amount_with_tax(),
                 project_summary=line.project_name,

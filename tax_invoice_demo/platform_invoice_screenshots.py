@@ -20,18 +20,18 @@ def extract_platform_invoice_requests(parse_source: str) -> list[PlatformInvoice
     blocks = _split_image_blocks(parse_source)
     if len(blocks) < 2:
         return []
+    if not any(_looks_like_platform_invoice_block(text) for _source_name, text in blocks):
+        return []
     requests: list[PlatformInvoiceRequest] = []
     for source_name, text in blocks:
-        amount = _extract_amount(text)
-        tax_id = _extract_tax_id(text)
-        if not amount or not tax_id:
-            continue
+        # 批量平台截图的业务单元是“图片”，不是“识别出的购买方”。
+        # 即使某张图 OCR 没识别出税号/金额，也要生成待补全草稿，避免 19 张图只剩 4 张。
         buyer_name = _extract_buyer_name(text)
         requests.append(
             PlatformInvoiceRequest(
                 source_name=source_name,
-                buyer=BuyerInfo(name=buyer_name, tax_id=tax_id),
-                amount_with_tax=amount,
+                buyer=BuyerInfo(name=buyer_name, tax_id=_extract_tax_id(text)),
+                amount_with_tax=_extract_amount(text),
                 email=_extract_email(text),
                 order_no=_extract_order_no(text),
                 source_excerpt=_compact_excerpt(text),
@@ -50,6 +50,11 @@ def _split_image_blocks(parse_source: str) -> list[tuple[str, str]]:
         end = matches[index + 1].start() if index + 1 < len(matches) else len(parse_source)
         blocks.append((matched.group("name").strip(), parse_source[start:end].strip()))
     return blocks
+
+
+def _looks_like_platform_invoice_block(text: str) -> bool:
+    tokens = ("发票详情", "建议开票金额", "开票金额", "税号", "抬头", "订单号", "联系人邮箱", "邮箱")
+    return sum(1 for token in tokens if token in text) >= 2
 
 
 def _extract_amount(text: str) -> str:
@@ -115,7 +120,9 @@ def _normalize_amount_candidate(value: str) -> str:
 def _extract_tax_id(text: str) -> str:
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     prioritized = [line for line in lines if re.search(r"税\s*[号写]|公司税号|纳税人", line)]
-    for line in [*prioritized, *lines]:
+    # 平台截图里订单号也常是 18 位数字，不能把订单号误当税号。
+    # P0 只从明确含“税号/纳税人”等标签的行提取税号；识别不到则进入待补全。
+    for line in prioritized:
         compact = re.sub(r"\s+", "", line.upper())
         compact = compact.replace("Ｏ", "O").replace("Ｉ", "I")
         for matched in re.finditer(r"[0-9][0-9A-Z]{17}", compact):
@@ -147,7 +154,9 @@ def _extract_buyer_name(text: str) -> str:
     for line in lines:
         matched = re.search(r"([\u4e00-\u9fffA-Za-z0-9（）()·]{4,60}(?:有限公司|公司|工作室|个体工商户|商贸|学院|传媒|科技))", line)
         if matched:
-            return _cleanup_buyer_name_line(matched.group(1))
+            cleaned = _cleanup_buyer_name_line(matched.group(1))
+            if _looks_like_company_name(cleaned):
+                return cleaned
     return ""
 
 
@@ -161,6 +170,8 @@ def _cleanup_buyer_name_line(line: str) -> str:
 
 def _looks_like_company_name(value: str) -> bool:
     if not value or "税号" in value or "邮箱" in value or len(value) < 4:
+        return False
+    if any(marker in value for marker in ["...", "…", "截断"]):
         return False
     return bool(re.search(r"(有限公司|公司|工作室|个体工商户|学院|商贸|传媒|科技)", value))
 

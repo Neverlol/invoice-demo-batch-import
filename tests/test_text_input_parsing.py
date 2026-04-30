@@ -456,14 +456,22 @@ A4复印纸 10包 240元
 联系人邮箱 jsls7@163.com
 建议开票金额 13.80
 订单号: 8011766126836281741
+
+[03.jpg]
+发票详情
+公司抬头 被平台截断的公司...
+联系人邮箱 missing@example.com
+建议开票金额 15.80
+订单号: 8011766126836281742
 """
 
         batch = workbench_module.create_draft_from_workbench(seller, text, "平台截图批量测试", [])
 
         self.assertEqual(batch.__class__.__name__, "DraftBatch")
-        self.assertEqual(len(batch.items), 2)
+        self.assertEqual(len(batch.items), 3)
         first = workbench_module.load_draft(batch.items[0].draft_id)
         second = workbench_module.load_draft(batch.items[1].draft_id)
+        third = workbench_module.load_draft(batch.items[2].draft_id)
         self.assertEqual(first.lines[0].project_name, "餐费")
         self.assertEqual(first.lines[0].tax_category, "餐饮服务")
         self.assertEqual(first.lines[0].tax_code, "3070401000000000000")
@@ -471,6 +479,11 @@ A4复印纸 10包 240元
         self.assertTrue(any("购买方名称" in issue for issue in first.issues))
         self.assertEqual(second.buyer.name, "黑龙江源速商贸有限公司")
         self.assertEqual(second.lines[0].amount_with_tax, "13.80")
+        self.assertEqual(third.lines[0].project_name, "餐费")
+        self.assertEqual(third.lines[0].tax_code, "3070401000000000000")
+        self.assertEqual(third.lines[0].amount_with_tax, "15.80")
+        self.assertTrue(any("购买方税号" in issue for issue in third.issues))
+        self.assertEqual(batch.items[2].buyer_name, "待补全购买方名称")
 
     def test_weak_chat_text_uses_history_profile_for_buyer_and_project(self):
         _seed_history_profile_row(

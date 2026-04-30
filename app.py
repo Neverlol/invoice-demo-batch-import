@@ -284,6 +284,33 @@ def download_batch_template(batch_id: str):
     return send_file(export["output_path"], as_attachment=True)
 
 
+@app.post("/batches/<batch_id>/execute")
+def execute_batch(batch_id: str):
+    batch = load_draft_batch(batch_id)
+    if batch is None:
+        abort(404)
+    export = export_batch_template(batch_id)
+    if export["error_count"]:
+        return render_template("lean_batch.html", batch=batch, export=export, run_blocked=True), 400
+    run_id = _queue_batch_run(
+        export["output_path"],
+        request.form.get("cdp_endpoint", "http://127.0.0.1:9222"),
+        draft_id=batch.batch_id,
+    )
+    record_case_event(
+        case_id=batch.case_id,
+        batch_id=batch.batch_id,
+        event_type="batch_run_queued",
+        payload={
+            "run_id": run_id,
+            "template_path": str(export["output_path"]),
+            "cdp_endpoint": request.form.get("cdp_endpoint", "http://127.0.0.1:9222"),
+            "invoice_count": len(batch.items),
+        },
+    )
+    return redirect(url_for("run_detail", run_id=run_id))
+
+
 @app.get("/ledger/success")
 def success_ledger():
     if not SUCCESS_LEDGER_XLSX.exists():

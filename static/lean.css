@@ -2095,3 +2095,41 @@ th {
   border-color: rgba(59, 130, 246, 0.18);
   color: var(--text-main);
 }
+
+.single-stage {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.button-like {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  margin-right: 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.status-pill.ok {
+  color: #dff9ef;
+  background: rgba(26, 163, 119, 0.18);
+}
+
+.status-pill.warn {
+  color: #ffefc8;
+  background: rgba(233, 183, 58, 0.18);
+}
