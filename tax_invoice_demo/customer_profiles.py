@@ -226,6 +226,31 @@ def profile_cache_summary() -> dict[str, str | int]:
     }
 
 
+def profile_counts_for_seller(seller_query: str) -> dict[str, str | int | bool]:
+    query = seller_query.strip()
+    for seller in _load_cached_sellers():
+        if not isinstance(seller, dict):
+            continue
+        seller_name = str(seller.get("seller_name") or "").strip()
+        seller_tax_id = str(seller.get("seller_tax_id") or "").strip()
+        if query and query not in {seller_name, seller_tax_id}:
+            continue
+        return {
+            "matched": True,
+            "seller_name": seller_name,
+            "seller_tax_id": seller_tax_id,
+            "buyer_count": len(seller.get("buyer_profiles") or []),
+            "project_profile_count": len(seller.get("project_profiles") or []),
+        }
+    return {
+        "matched": False,
+        "seller_name": "",
+        "seller_tax_id": "",
+        "buyer_count": 0,
+        "project_profile_count": 0,
+    }
+
+
 def _profile_rows(*, company_name: str = "", buyer: BuyerInfo | None = None) -> list[dict[str, str]]:
     cached_rows = _cached_profile_rows(company_name=company_name, buyer=buyer)
     ledger_rows = _ledger_profile_rows(company_name=company_name, buyer=buyer)

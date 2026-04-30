@@ -2078,3 +2078,20 @@ th {
     justify-content: center;
   }
 }
+
+.tax-console {
+  display: grid;
+  gap: 14px;
+}
+
+.tax-console-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.profile-status {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.18);
+  color: var(--text-main);
+}

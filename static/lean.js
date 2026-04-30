@@ -393,3 +393,71 @@ if (tbody) {
     }
   });
 }
+
+const taxConsole = document.querySelector("[data-tax-console]");
+if (taxConsole) {
+  const statusBox = taxConsole.querySelector("[data-tax-status]");
+  const companyInput = document.querySelector('input[name="company_name"]');
+
+  function setTaxStatus(message, kind = "") {
+    if (!statusBox) {
+      return;
+    }
+    statusBox.classList.remove("ok", "alert", "notice");
+    if (kind) {
+      statusBox.classList.add(kind);
+    }
+    statusBox.innerHTML = `<p>${escapeHtml(message)}</p>`;
+  }
+
+  function renderTaxStatus(data) {
+    if (!data || data.status !== "ok") {
+      setTaxStatus(`识别失败：${data && data.error ? data.error : "未连接到 CDP Edge"}`, "alert");
+      return;
+    }
+    const subject = data.subject || "未识别到主体";
+    const page = data.best_page || {};
+    const profile = data.profile || {};
+    if (companyInput && subject && subject !== "未识别到主体") {
+      companyInput.value = (profile.seller_name || subject.split("/")[0] || "").trim();
+    }
+    const profileText = profile.matched
+      ? `已匹配档案：${profile.seller_name || "当前主体"}，${profile.project_profile_count || 0} 个常用项目 / ${profile.buyer_count || 0} 个购买方。`
+      : "云端缓存中暂未匹配到该主体档案。";
+    setTaxStatus(`当前税局主体：${subject}。${profileText} 当前页面：${page.title || "无标题"}`, profile.matched ? "ok" : "notice");
+  }
+
+  async function identifyTaxSubject() {
+    setTaxStatus("正在识别 CDP Edge 中的税局主体，并匹配客户档案…", "notice");
+    try {
+      const response = await fetch("/tax/status");
+      const data = await response.json();
+      renderTaxStatus(data);
+    } catch (error) {
+      setTaxStatus(`识别失败：${error}`, "alert");
+    }
+  }
+
+  taxConsole.querySelectorAll("[data-tax-identify]").forEach((button) => {
+    button.addEventListener("click", identifyTaxSubject);
+  });
+
+  taxConsole.querySelectorAll("[data-tax-open]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      setTaxStatus("正在通过 CDP Edge 打开税局网站…", "notice");
+      const body = new URLSearchParams();
+      body.set("province", button.dataset.province || "liaoning");
+      try {
+        const response = await fetch("/tax/open", { method: "POST", body });
+        const data = await response.json();
+        if (data.status === "ok") {
+          setTaxStatus(`已在 CDP Edge 打开税局网站：${data.title || data.url || "请在浏览器中继续登录"}。登录后点击“识别当前税局主体 / 加载档案”。`, "ok");
+        } else {
+          setTaxStatus(`打开失败：${data.error || "请确认 CDP Edge 已启动"}`, "alert");
+        }
+      } catch (error) {
+        setTaxStatus(`打开失败：${error}`, "alert");
+      }
+    });
+  });
+}

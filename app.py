@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from threading import Lock, Thread
 from uuid import uuid4
 
 from flask import Flask, abort, jsonify, redirect, render_template, request, send_file, url_for
 
-from tax_invoice_batch_demo.batch_runner import BatchImportRunner, BatchRunResult
+from tax_invoice_batch_demo.batch_runner import (
+    BatchImportRunner,
+    BatchRunResult,
+    inspect_tax_browser,
+    open_tax_portal,
+)
 from tax_invoice_batch_demo.lean_workbench import (
     BATCH_OUTPUT_ROOT,
     SUCCESS_LEDGER_XLSX,
@@ -28,7 +34,7 @@ from tax_invoice_batch_demo.lean_workbench import (
     save_lean_draft_from_form,
 )
 from tax_invoice_demo.case_events import record_case_event
-from tax_invoice_demo.customer_profiles import profile_cache_summary
+from tax_invoice_demo.customer_profiles import profile_cache_summary, profile_counts_for_seller
 from tax_invoice_demo.sync_service import schedule_background_customer_profile_pull, schedule_background_rule_pull
 from tax_invoice_demo.taxonomy_search import search_taxonomy
 
@@ -77,6 +83,31 @@ def create_draft():
     if hasattr(result, "batch_id"):
         return redirect(url_for("batch_detail", batch_id=result.batch_id))
     return redirect(url_for("draft_detail", draft_id=result.draft_id))
+
+
+@app.post("/tax/open")
+def tax_open():
+    result = open_tax_portal(
+        request.form.get("cdp_endpoint") or "http://127.0.0.1:9222",
+        province=request.form.get("province") or "liaoning",
+        url=request.form.get("url") or "",
+    )
+    return jsonify(result), 200 if result.get("status") == "ok" else 400
+
+
+@app.get("/tax/status")
+def tax_status():
+    result = inspect_tax_browser(request.args.get("cdp_endpoint") or "http://127.0.0.1:9222")
+    subject = str(result.get("subject") or "")
+    seller_query = _seller_query_from_subject(subject)
+    result["profile"] = profile_counts_for_seller(seller_query) if seller_query else {
+        "matched": False,
+        "seller_name": "",
+        "seller_tax_id": "",
+        "buyer_count": 0,
+        "project_profile_count": 0,
+    }
+    return jsonify(result), 200 if result.get("status") == "ok" else 400
 
 
 @app.get("/drafts/<draft_id>")
@@ -372,6 +403,13 @@ def _record_batch_run_finished_event(run_id: str, result: BatchRunResult, templa
         },
     )
 
+
+
+def _seller_query_from_subject(subject: str) -> str:
+    match = re.search(r"[0-9A-Z]{15,20}", subject.upper())
+    if match:
+        return match.group(0)
+    return subject.split("/", 1)[0].strip()
 
 
 def _draft_id_from_template_path(template_path: Path) -> str:

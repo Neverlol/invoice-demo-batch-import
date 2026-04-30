@@ -1,6 +1,6 @@
 import unittest
 
-from tax_invoice_batch_demo.batch_runner import _tax_page_score
+from tax_invoice_batch_demo.batch_runner import _page_label, _tax_page_score
 
 
 class BatchRunnerPageSelectionTest(unittest.TestCase):
@@ -23,6 +23,18 @@ class BatchRunnerPageSelectionTest(unittest.TestCase):
 
         self.assertGreater(invoice_score, portal_score)
         self.assertGreater(batch_score, invoice_score)
+
+    def test_page_label_does_not_raise_when_navigation_destroys_title_context(self):
+        class NavigatingPage:
+            url = "https://dppt.jilin.chinatax.gov.cn:8443/blue-invoice-makeout"
+
+            def title(self):
+                raise RuntimeError("Execution context was destroyed, most likely because of a navigation")
+
+        self.assertEqual(
+            _page_label(NavigatingPage()),
+            "无标题 | https://dppt.jilin.chinatax.gov.cn:8443/blue-invoice-makeout",
+        )
 
     def test_login_page_is_deprioritized(self):
         login_score = _tax_page_score(

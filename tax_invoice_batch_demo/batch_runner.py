@@ -27,6 +27,81 @@ class BatchRunResult:
     preview_clicked: bool = False
 
 
+TAX_PORTAL_URLS = {
+    "liaoning": "https://dppt.liaoning.chinatax.gov.cn:8443/",
+    "jilin": "https://dppt.jilin.chinatax.gov.cn:8443/",
+    "beijing": "https://dppt.beijing.chinatax.gov.cn:8443/",
+}
+
+
+def inspect_tax_browser(cdp_endpoint: str = "http://127.0.0.1:9222") -> dict:
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "error": f"Playwright 不可用: {type(exc).__name__}: {exc}", "pages": []}
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.connect_over_cdp(cdp_endpoint)
+            try:
+                pages = [page for context in browser.contexts for page in context.pages]
+                inspected = []
+                for page in pages:
+                    title = _safe_title(page)
+                    text = _safe_body_text(page)
+                    inspected.append(
+                        {
+                            "url": page.url,
+                            "title": title,
+                            "score": _tax_page_score(page.url, title, text),
+                            "subject": _extract_tax_subject(page),
+                            "is_batch_import_page": _is_batch_import_page(page),
+                            "is_tax_portal_home": _looks_like_tax_portal_home(page),
+                        }
+                    )
+                inspected.sort(key=lambda item: item.get("score", 0), reverse=True)
+                best = inspected[0] if inspected else {}
+                return {
+                    "status": "ok",
+                    "cdp_endpoint": cdp_endpoint,
+                    "page_count": len(inspected),
+                    "best_page": best,
+                    "subject": best.get("subject", ""),
+                    "pages": inspected[:8],
+                }
+            finally:
+                browser.close()
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "cdp_endpoint": cdp_endpoint, "error": f"{type(exc).__name__}: {exc}", "pages": []}
+
+
+def open_tax_portal(
+    cdp_endpoint: str = "http://127.0.0.1:9222",
+    *,
+    province: str = "liaoning",
+    url: str = "",
+) -> dict:
+    target_url = (url or TAX_PORTAL_URLS.get(province) or TAX_PORTAL_URLS["liaoning"]).strip()
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "url": target_url, "error": f"Playwright 不可用: {type(exc).__name__}: {exc}"}
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.connect_over_cdp(cdp_endpoint)
+            try:
+                context = browser.contexts[0] if browser.contexts else browser.new_context()
+                page = context.new_page()
+                page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(1000)
+                return {"status": "ok", "url": page.url, "title": _safe_title(page)}
+            finally:
+                browser.close()
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "url": target_url, "error": f"{type(exc).__name__}: {exc}"}
+
+
 class BatchImportRunner:
     """Best-effort CDP runner for the tax bureau batch-import page.
 
@@ -62,7 +137,7 @@ class BatchImportRunner:
             browser = p.chromium.connect_over_cdp(self.cdp_endpoint)
             try:
                 page = self._select_tax_page(browser)
-                self._log("attach", f"已连接税局页面: {page.title()} | {page.url}")
+                self._log("attach", f"已连接税局页面: {_page_label(page)}")
                 subject = _extract_tax_subject(page)
                 if subject:
                     self._log("subject", f"当前税局页面识别主体: {subject}")
@@ -126,7 +201,7 @@ class BatchImportRunner:
             business_page = self._open_invoice_business_from_portal(page)
             if business_page is not page:
                 page = business_page
-                self._log("navigate", f"已切换到发票业务新窗口: {page.title()} | {page.url}")
+                self._log("navigate", f"已切换到发票业务新窗口: {_page_label(page)}")
                 subject = _extract_tax_subject(page)
                 if subject:
                     self._log("subject", f"发票业务页识别主体: {subject}")
@@ -333,6 +408,10 @@ class BatchImportRunner:
         if not self.expected_serials:
             return True
         return any(serial and serial in page_text for serial in self.expected_serials)
+
+
+def _page_label(page) -> str:
+    return f"{_safe_title(page) or '无标题'} | {getattr(page, 'url', '')}"
 
 
 def _safe_title(page) -> str:
