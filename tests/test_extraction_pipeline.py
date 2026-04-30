@@ -214,6 +214,7 @@ class ExtractionPipelineTest(unittest.TestCase):
     def test_llm_extracts_when_rules_are_weak(self):
         os.environ["TAX_INVOICE_LLM_PROVIDER"] = "minimax"
         os.environ["TAX_INVOICE_LLM_API_KEY"] = "fake-key"
+        os.environ["TAX_INVOICE_LLM_BLOCKING_REVIEW"] = "1"
         response_payload = {
             "choices": [
                 {
@@ -264,6 +265,7 @@ class ExtractionPipelineTest(unittest.TestCase):
     def test_document_extraction_uses_llm_as_reviewer_and_flags_conflicts(self):
         os.environ["TAX_INVOICE_LLM_PROVIDER"] = "minimax"
         os.environ["TAX_INVOICE_LLM_API_KEY"] = "fake-key"
+        os.environ["TAX_INVOICE_LLM_BLOCKING_REVIEW"] = "1"
         document_text = """物料名称\t规格型号\t数量\t开票金额\t税率
 一次性使用微针电极\tJ25BM\t3282\t1061785.36\t0.13
 公司名称\t河北雅之颜医药有限公司
@@ -388,6 +390,7 @@ class ExtractionPipelineTest(unittest.TestCase):
     def test_llm_adapter_accepts_json_inside_markdown_fence(self):
         os.environ["TAX_INVOICE_LLM_PROVIDER"] = "minimax"
         os.environ["TAX_INVOICE_LLM_API_KEY"] = "fake-key"
+        os.environ["TAX_INVOICE_LLM_BLOCKING_REVIEW"] = "1"
         content = """```json
 {
   "客户名称": "辽宁恒润电力科技有限公司",

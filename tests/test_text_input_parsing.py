@@ -413,6 +413,22 @@ A4复印纸 10包 240元
         self.assertEqual(draft.lines[2].tax_code, "1070508010000000000")
         self.assertTrue(all("需人工复核" in line.coding_reference for line in draft.lines))
 
+    def test_weak_chat_text_with_alias_and_chinese_amount_creates_one_line_draft(self):
+        text = "帮开个票，辽宁恒润那个公司，代理服务，五百，普票"
+
+        draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", text, "", [])
+
+        self.assertEqual(draft.invoice_kind, "普通发票")
+        self.assertEqual(draft.buyer.name, "辽宁恒润电力科技有限公司")
+        self.assertEqual(draft.buyer.tax_id, "91210102MABWM3X12T")
+        self.assertEqual(len(draft.lines), 1)
+        self.assertEqual(draft.lines[0].project_name, "代理服务")
+        self.assertEqual(draft.lines[0].amount_with_tax, "500")
+        self.assertEqual(draft.lines[0].unit, "项")
+        self.assertEqual(draft.lines[0].quantity, "1")
+        self.assertEqual(draft.lines[0].tax_code, "")
+        self.assertTrue(any("还没命中正式赋码库" in issue for issue in draft.issues))
+
     def test_minimal_inline_text_input_extracts_buyer_and_detail_line(self):
         buyer = extract_buyer_info_from_text(MINIMAL_INLINE_TEXT_INPUT)
         lines = extract_invoice_lines_from_text(MINIMAL_INLINE_TEXT_INPUT)

@@ -83,7 +83,9 @@ class TaxRuleEngine:
             suggestion = self.suggest_line(line, context_text=context_text)
             if suggestion is None:
                 _apply_local_safe_coding_hint(line)
-                taxonomy_suggestion = suggest_taxonomy(line.project_name)
+                taxonomy_suggestion = None
+                if not _should_skip_taxonomy_auto_coding(line.project_name):
+                    taxonomy_suggestion = suggest_taxonomy(line.project_name)
                 if taxonomy_suggestion is not None and taxonomy_suggestion.score >= 84:
                     if not line.tax_category and taxonomy_suggestion.entry.category_short_name:
                         line.tax_category = taxonomy_suggestion.entry.category_short_name
@@ -627,6 +629,12 @@ def _looks_like_low_confidence_project_name(value: str) -> bool:
     return len(alnum) <= 6
 
 
+def _should_skip_taxonomy_auto_coding(value: str) -> bool:
+    compact = re.sub(r"\s+", "", value)
+    return compact in {"代理服务", "服务", "服务费", "业务服务"}
+
+
+
 def _looks_like_generic_project_name(value: str) -> bool:
     compact = re.sub(r"\s+", "", value)
     return compact in {
@@ -861,6 +869,8 @@ def _resolve_taxonomy_for_line(line: InvoiceLine) -> TaxonomyEntry | None:
 def _match_taxonomy_by_query(query: str, *, preferred_short_name: str = "") -> TaxonomyEntry | None:
     normalized_query = _normalize(query)
     normalized_preferred = _normalize(preferred_short_name)
+    if not normalized_preferred and _should_skip_taxonomy_auto_coding(query):
+        return None
     best: tuple[int, TaxonomyEntry] | None = None
     for entry in load_taxonomy_master():
         official_norm = _normalize(entry.official_name)

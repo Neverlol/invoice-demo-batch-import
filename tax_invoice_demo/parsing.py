@@ -85,6 +85,11 @@ BUYER_ACCOUNT_PATTERNS = [
     re.compile(r"(?:购买方银行账号|银行账号|账号)[：:]\s*([0-9A-Za-z ]{6,})"),
 ]
 
+KNOWN_BUYER_ALIASES = {
+    "辽宁恒润": ("辽宁恒润电力科技有限公司", "91210102MABWM3X12T"),
+    "恒润": ("辽宁恒润电力科技有限公司", "91210102MABWM3X12T"),
+}
+
 LINE_FIELD_HEADERS = {
     **DETAIL_HEADERS,
     "项目": "project_name",
@@ -370,6 +375,12 @@ def extract_buyer_info_from_text(raw_text: str) -> BuyerInfo:
             buyer.name = inline_buyer.name
         if inline_buyer.tax_id and not buyer.tax_id:
             buyer.tax_id = inline_buyer.tax_id
+    if not buyer.name or not buyer.tax_id:
+        alias_buyer = _extract_buyer_info_from_known_alias(raw_text)
+        if alias_buyer.name and (not buyer.name or any(alias in buyer.name for alias in KNOWN_BUYER_ALIASES)):
+            buyer.name = alias_buyer.name
+        if alias_buyer.tax_id and not buyer.tax_id:
+            buyer.tax_id = alias_buyer.tax_id
     return buyer
 
 
@@ -967,6 +978,15 @@ def _extract_buyer_info_from_minimal_lines(lines: list[str]) -> BuyerInfo:
     return buyer
 
 
+def _extract_buyer_info_from_known_alias(raw_text: str) -> BuyerInfo:
+    compact = raw_text.replace(" ", "")
+    for alias, (name, tax_id) in KNOWN_BUYER_ALIASES.items():
+        if alias in compact:
+            return BuyerInfo(name=name, tax_id=tax_id)
+    return BuyerInfo(name="", tax_id="")
+
+
+
 def _extract_buyer_info_from_inline_text(raw_text: str) -> BuyerInfo:
     buyer = BuyerInfo(name="", tax_id="")
     text = _normalize_inline_request_text(raw_text)
@@ -1013,6 +1033,14 @@ def _extract_inline_amount(text: str) -> str:
     )
     if labeled_match:
         return _normalize_minimal_amount_line(labeled_match.group(1))
+    labeled_words_match = re.search(
+        r"(?:价税合计|含税金额|开票金额|金额|合计|总共|总计)[：:]?\s*([零〇一二三四五六七八九十百千万亿壹贰叁肆伍陆柒捌玖拾佰仟两]+)\s*(?:元|块)?",
+        text,
+    )
+    if labeled_words_match:
+        amount = _normalize_chinese_amount(labeled_words_match.group(1))
+        if amount:
+            return amount
 
     scrubbed = re.sub(r"[0-9A-Z]{15,20}", " ", text.upper())
     scrubbed = re.sub(r"\d+(?:\.\d+)?\s*%", " ", scrubbed)
@@ -1022,7 +1050,17 @@ def _extract_inline_amount(text: str) -> str:
         amount = _normalize_minimal_amount_line(matched.group(1))
         if _looks_like_minimal_amount_line(amount):
             candidates.append(amount)
-    return candidates[-1] if candidates else ""
+    if candidates:
+        return candidates[-1]
+    word_amount_matches = list(
+        re.finditer(r"([零〇一二三四五六七八九十百千万亿壹贰叁肆伍陆柒捌玖拾佰仟两]{1,12})\s*(?:元|块)?", scrubbed)
+    )
+    word_candidates = []
+    for matched in word_amount_matches:
+        amount = _normalize_chinese_amount(matched.group(1))
+        if amount:
+            word_candidates.append(amount)
+    return word_candidates[-1] if word_candidates else ""
 
 
 def _extract_inline_tax_rate(text: str) -> str:
@@ -1047,7 +1085,8 @@ def _extract_inline_project_name(text: str, amount: str) -> str:
 
     scrubbed = text
     scrubbed = re.sub(r"[0-9A-Z]{15,20}", " ", scrubbed.upper())
-    scrubbed = re.sub(rf"[¥￥]?\s*{re.escape(amount)}\s*元?", " ", scrubbed)
+    scrubbed = re.sub(rf"[¥￥]?\s*{re.escape(amount)}\s*(?:元|块)?", " ", scrubbed)
+    scrubbed = re.sub(r"[零〇一二三四五六七八九十百千万亿壹贰叁肆伍陆柒捌玖拾佰仟两]+\s*(?:元|块)?", " ", scrubbed)
     scrubbed = re.sub(
         r"[\d.]+%|[一二三四五六七八九十0-9]+个点|增值税专用发票|增值税普通发票|普通发票|专用发票|普票|专票|电子发票|发票",
         " ",
@@ -1058,7 +1097,7 @@ def _extract_inline_project_name(text: str, amount: str) -> str:
         scrubbed,
     ):
         scrubbed = scrubbed.replace(match.group(0), " ")
-    scrubbed = re.sub(r"(?:税号|统一社会信用代码|纳税人识别号|客户名称|购买方名称|给|请|麻烦|帮忙|帮我|开|开具|需要|客户)", " ", scrubbed)
+    scrubbed = re.sub(r"(?:税号|统一社会信用代码|纳税人识别号|客户名称|购买方名称|给|请|麻烦|帮忙|帮我|开个票|开票|开|开具|需要|客户|那个公司|那个|这个公司|这个)", " ", scrubbed)
     candidates = [
         _cleanup_inline_project_name(part)
         for part in re.split(r"[，,；;。\s]+", scrubbed)
@@ -1071,7 +1110,13 @@ def _cleanup_inline_project_name(value: str) -> str:
     cleaned = value.strip(" -*，,。；;：:")
     cleaned = re.sub(r"^(?:开|开具|需要|项目|服务|品名|为|是)", "", cleaned)
     cleaned = re.sub(r"(?:金额|价税合计|含税金额|税率).*$", "", cleaned)
-    if not cleaned or _looks_like_non_detail_label(cleaned) or _looks_like_daily_chat_non_detail_line(cleaned) or _looks_like_company_name(cleaned):
+    if (
+        not cleaned
+        or _looks_like_non_detail_label(cleaned)
+        or _looks_like_daily_chat_non_detail_line(cleaned)
+        or _looks_like_company_name(cleaned)
+        or _looks_like_amount_in_words(cleaned)
+    ):
         return ""
     if not re.search(r"[\u4e00-\u9fff]", cleaned):
         return ""
@@ -1126,6 +1171,49 @@ def _normalize_chinese_number(value: str) -> str:
         "十": "10",
     }
     return mapping.get(value, value)
+
+
+
+def _normalize_chinese_amount(value: str) -> str:
+    compact = value.strip().replace("两", "二")
+    compact = compact.replace("壹", "一").replace("贰", "二").replace("叁", "三").replace("肆", "四").replace("伍", "五")
+    compact = compact.replace("陆", "六").replace("柒", "七").replace("捌", "八").replace("玖", "九")
+    compact = compact.replace("拾", "十").replace("佰", "百").replace("仟", "千").replace("〇", "零")
+    if not compact or not re.fullmatch(r"[零一二三四五六七八九十百千万亿]+", compact):
+        return ""
+    digit_map = {"零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+    if all(char in digit_map for char in compact):
+        return str(int("".join(str(digit_map[char]) for char in compact)))
+    total = 0
+    section = 0
+    number = 0
+    last_unit = 1
+    unit_map = {"十": 10, "百": 100, "千": 1000, "万": 10000, "亿": 100000000}
+    for char in compact:
+        if char in digit_map:
+            number = digit_map[char]
+            continue
+        unit = unit_map.get(char)
+        if not unit:
+            return ""
+        if unit in {10000, 100000000}:
+            section = (section + number) * unit
+            total += section
+            section = 0
+            number = 0
+            last_unit = unit
+            continue
+        section += (number or 1) * unit
+        number = 0
+        last_unit = unit
+    # 口语“一千二”通常表示 1200，“一万三”表示 13000。
+    if number and last_unit in {1000, 10000, 100000000}:
+        section += number * (last_unit // 10)
+    else:
+        section += number
+    amount = total + section
+    return str(amount) if amount > 0 else ""
+
 
 
 def _looks_like_order_code(value: str) -> bool:

@@ -120,15 +120,19 @@ def _should_try_llm(
 ) -> bool:
     if not parse_source.strip():
         return False
-    if (
-        not document_text.strip()
-        and not ocr_text.strip()
-        and _rules_are_strong_enough_for_fast_draft(buyer, lines)
-        and os.environ.get("TAX_INVOICE_LLM_BLOCKING_REVIEW", "fast").strip().lower()
-        in {"", "0", "fast", "off", "false", "disabled"}
-    ):
+    blocking_review_mode = os.environ.get("TAX_INVOICE_LLM_BLOCKING_REVIEW", "fast").strip().lower()
+    if _rules_are_strong_enough_for_fast_draft(buyer, lines) and blocking_review_mode in {
+        "",
+        "0",
+        "fast",
+        "off",
+        "false",
+        "disabled",
+    }:
         return False
-    # 上传附件、OCR、长文本最容易出现“规则错得很自信”；如未进入 fast 草稿保护，则让 LLM 做复核候选。
+    if _rules_are_strong_enough_for_fast_draft(buyer, lines) and blocking_review_mode in {"1", "true", "on", "yes"}:
+        return True
+    # 规则未能形成完整草稿时，上传附件、OCR、长文本需要让 LLM 做识别补充。
     if document_text.strip() or ocr_text.strip() or len(raw_text.strip()) >= 120:
         return True
     if not buyer.name.strip() or not buyer.tax_id.strip():
