@@ -169,6 +169,62 @@ class SyncCenterAPITest(unittest.TestCase):
         self.assertEqual(candidates[0]["evidence_count"], 2)
         self.assertIn("case-001", candidates[0]["case_ids"])
 
+    def test_import_and_fetch_customer_profiles(self):
+        headers = {"Authorization": "Bearer center-secret"}
+        sellers = [
+            {
+                "seller_name": "哈尔滨市道里区庆成记隆江猪脚饭店（个体工商户）",
+                "seller_tax_id": "92230102MAECWNQX6M",
+                "source_confidence": "official_history_export",
+                "project_profiles": [
+                    {
+                        "project_name": "餐费",
+                        "tax_category": "餐饮服务",
+                        "tax_code": "3070401000000000000",
+                        "tax_rate": "1%",
+                        "unit": "项",
+                        "line_count": 2,
+                    }
+                ],
+                "buyer_profiles": [
+                    {"buyer_name": "北京测试有限公司", "buyer_tax_id": "91110101TEST000001", "line_count": 2}
+                ],
+            }
+        ]
+
+        response = self.client.post(
+            "/api/invoice/profile-imports",
+            json={
+                "tenant": "shenyang-seed",
+                "source": "invoice-demo-batch-import",
+                "source_confidence": "official_history_export",
+                "seller_profiles": sellers,
+            },
+            headers=headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertEqual(body["seller_count"], 1)
+        self.assertEqual(body["buyer_count"], 1)
+        self.assertEqual(body["line_profile_count"], 1)
+
+        latest = self.client.get(
+            "/api/invoice/tenants/shenyang-seed/customer-profiles/latest?seller_tax_id=92230102MAECWNQX6M",
+            headers=headers,
+        )
+        self.assertEqual(latest.status_code, 200)
+        latest_body = latest.get_json()
+        self.assertEqual(latest_body["seller_count"], 1)
+        seller = latest_body["sellers"][0]
+        self.assertEqual(seller["seller_tax_id"], "92230102MAECWNQX6M")
+        self.assertEqual(seller["project_profiles"][0]["tax_code"], "3070401000000000000")
+        self.assertEqual(seller["buyer_profiles"][0]["buyer_name"], "北京测试有限公司")
+
+        health = self.client.get("/api/invoice/events/health")
+        self.assertEqual(health.status_code, 200)
+        self.assertEqual(health.get_json()["total_seller_profiles"], 1)
+
+
 
 if __name__ == "__main__":
     unittest.main()

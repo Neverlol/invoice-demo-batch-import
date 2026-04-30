@@ -32,6 +32,16 @@ class RulePackageResult:
     published_at: str
 
 
+@dataclass(frozen=True)
+class ProfileImportResult:
+    batch_id: str
+    tenant: str
+    seller_count: int
+    buyer_count: int
+    line_profile_count: int
+    imported_at: str
+
+
 def initialize_store(db_path: Path | None = None) -> Path:
     target = db_path or DEFAULT_DB_PATH
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -80,6 +90,65 @@ def initialize_store(db_path: Path | None = None) -> Path:
 
             CREATE INDEX IF NOT EXISTS idx_rule_packages_tenant_latest
                 ON rule_packages (tenant, status, published_at);
+
+            CREATE TABLE IF NOT EXISTS profile_import_batches (
+                batch_id TEXT PRIMARY KEY,
+                tenant TEXT NOT NULL,
+                source TEXT NOT NULL,
+                source_confidence TEXT NOT NULL,
+                sent_at TEXT,
+                imported_at TEXT NOT NULL,
+                seller_count INTEGER NOT NULL,
+                buyer_count INTEGER NOT NULL,
+                line_profile_count INTEGER NOT NULL,
+                summary_json TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS seller_profiles (
+                tenant TEXT NOT NULL,
+                seller_tax_id TEXT NOT NULL,
+                seller_name TEXT NOT NULL,
+                status TEXT NOT NULL,
+                source_confidence TEXT NOT NULL,
+                profile_batch_id TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                PRIMARY KEY (tenant, seller_tax_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS buyer_profiles (
+                tenant TEXT NOT NULL,
+                seller_tax_id TEXT NOT NULL,
+                buyer_tax_id TEXT NOT NULL,
+                buyer_name TEXT NOT NULL,
+                status TEXT NOT NULL,
+                source_confidence TEXT NOT NULL,
+                line_count INTEGER NOT NULL,
+                profile_batch_id TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                PRIMARY KEY (tenant, seller_tax_id, buyer_tax_id, buyer_name)
+            );
+
+            CREATE TABLE IF NOT EXISTS invoice_line_profiles (
+                tenant TEXT NOT NULL,
+                seller_tax_id TEXT NOT NULL,
+                project_name TEXT NOT NULL,
+                tax_category TEXT NOT NULL,
+                tax_code TEXT NOT NULL,
+                tax_rate TEXT NOT NULL,
+                unit TEXT NOT NULL,
+                status TEXT NOT NULL,
+                source_confidence TEXT NOT NULL,
+                line_count INTEGER NOT NULL,
+                profile_batch_id TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                PRIMARY KEY (tenant, seller_tax_id, project_name, tax_category, tax_code, tax_rate, unit)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_customer_profiles_seller
+                ON seller_profiles (tenant, seller_name, seller_tax_id, status);
             """
         )
     return target
@@ -182,12 +251,18 @@ def get_store_stats(*, db_path: Path | None = None) -> dict:
         total_cases = connection.execute("SELECT COUNT(DISTINCT tenant || '::' || case_id) FROM case_events").fetchone()[0]
         total_tenants = connection.execute("SELECT COUNT(DISTINCT tenant) FROM case_events").fetchone()[0]
         total_rule_packages = connection.execute("SELECT COUNT(*) FROM rule_packages").fetchone()[0]
+        total_seller_profiles = connection.execute("SELECT COUNT(*) FROM seller_profiles WHERE status = 'active'").fetchone()[0]
+        total_buyer_profiles = connection.execute("SELECT COUNT(*) FROM buyer_profiles WHERE status = 'active'").fetchone()[0]
+        total_line_profiles = connection.execute("SELECT COUNT(*) FROM invoice_line_profiles WHERE status = 'active'").fetchone()[0]
     return {
         "db_path": str(target),
         "total_events": int(total_events),
         "total_cases": int(total_cases),
         "total_tenants": int(total_tenants),
         "total_rule_packages": int(total_rule_packages),
+        "total_seller_profiles": int(total_seller_profiles),
+        "total_buyer_profiles": int(total_buyer_profiles),
+        "total_line_profiles": int(total_line_profiles),
     }
 
 
@@ -252,6 +327,258 @@ def get_latest_rule_package(*, tenant: str, db_path: Path | None = None) -> dict
         "published_at": row["published_at"],
         "note": row["note"] or "",
         "rules": json.loads(row["rules_json"] or "[]"),
+    }
+
+
+def import_customer_profiles(
+    *,
+    tenant: str,
+    source: str,
+    sent_at: str,
+    seller_profiles: list[dict],
+    source_confidence: str = "official_history_export",
+    summary: dict | None = None,
+    db_path: Path | None = None,
+) -> ProfileImportResult:
+    target = initialize_store(db_path)
+    clean_tenant = tenant.strip() or "default"
+    imported_at = datetime.now().isoformat(timespec="seconds")
+    batch_id = f"profiles-{uuid4().hex[:12]}"
+    clean_source_confidence = source_confidence.strip() or "official_history_export"
+    seller_count = 0
+    buyer_count = 0
+    line_profile_count = 0
+
+    with _connect(target) as connection:
+        for seller in seller_profiles:
+            if not isinstance(seller, dict):
+                continue
+            seller_name = str(seller.get("seller_name") or "").strip()
+            seller_tax_id = str(seller.get("seller_tax_id") or "").strip()
+            if not seller_name or not seller_tax_id:
+                continue
+            seller_count += 1
+            payload = {
+                **seller,
+                "status": "active",
+                "source_confidence": str(seller.get("source_confidence") or clean_source_confidence),
+                "profile_batch_id": batch_id,
+                "updated_at": imported_at,
+            }
+            connection.execute(
+                """
+                INSERT INTO seller_profiles (
+                    tenant, seller_tax_id, seller_name, status, source_confidence,
+                    profile_batch_id, updated_at, payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(tenant, seller_tax_id) DO UPDATE SET
+                    seller_name=excluded.seller_name,
+                    status=excluded.status,
+                    source_confidence=excluded.source_confidence,
+                    profile_batch_id=excluded.profile_batch_id,
+                    updated_at=excluded.updated_at,
+                    payload_json=excluded.payload_json
+                """,
+                (
+                    clean_tenant,
+                    seller_tax_id,
+                    seller_name,
+                    "active",
+                    payload["source_confidence"],
+                    batch_id,
+                    imported_at,
+                    json.dumps(payload, ensure_ascii=False),
+                ),
+            )
+
+            for buyer in seller.get("buyer_profiles") or []:
+                if not isinstance(buyer, dict):
+                    continue
+                buyer_name = str(buyer.get("buyer_name") or "").strip()
+                buyer_tax_id = str(buyer.get("buyer_tax_id") or "").strip()
+                if not buyer_name and not buyer_tax_id:
+                    continue
+                buyer_count += 1
+                buyer_payload = {
+                    **buyer,
+                    "seller_name": seller_name,
+                    "seller_tax_id": seller_tax_id,
+                    "status": "active",
+                    "source_confidence": str(buyer.get("source_confidence") or clean_source_confidence),
+                    "profile_batch_id": batch_id,
+                    "updated_at": imported_at,
+                }
+                connection.execute(
+                    """
+                    INSERT INTO buyer_profiles (
+                        tenant, seller_tax_id, buyer_tax_id, buyer_name, status, source_confidence,
+                        line_count, profile_batch_id, updated_at, payload_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(tenant, seller_tax_id, buyer_tax_id, buyer_name) DO UPDATE SET
+                        status=excluded.status,
+                        source_confidence=excluded.source_confidence,
+                        line_count=excluded.line_count,
+                        profile_batch_id=excluded.profile_batch_id,
+                        updated_at=excluded.updated_at,
+                        payload_json=excluded.payload_json
+                    """,
+                    (
+                        clean_tenant,
+                        seller_tax_id,
+                        buyer_tax_id,
+                        buyer_name,
+                        "active",
+                        buyer_payload["source_confidence"],
+                        int(buyer.get("line_count") or 0),
+                        batch_id,
+                        imported_at,
+                        json.dumps(buyer_payload, ensure_ascii=False),
+                    ),
+                )
+
+            for line in seller.get("project_profiles") or seller.get("invoice_line_profiles") or []:
+                if not isinstance(line, dict):
+                    continue
+                project_name = str(line.get("project_name") or "").strip()
+                tax_category = str(line.get("tax_category") or "").strip()
+                tax_code = str(line.get("tax_code") or "").strip()
+                tax_rate = str(line.get("tax_rate") or line.get("tax_treatment_or_rate") or "").strip()
+                unit = str(line.get("unit") or "项").strip() or "项"
+                if not project_name and not tax_code:
+                    continue
+                line_profile_count += 1
+                line_payload = {
+                    **line,
+                    "seller_name": seller_name,
+                    "seller_tax_id": seller_tax_id,
+                    "status": "active",
+                    "source_confidence": str(line.get("source_confidence") or clean_source_confidence),
+                    "profile_batch_id": batch_id,
+                    "updated_at": imported_at,
+                }
+                connection.execute(
+                    """
+                    INSERT INTO invoice_line_profiles (
+                        tenant, seller_tax_id, project_name, tax_category, tax_code, tax_rate, unit,
+                        status, source_confidence, line_count, profile_batch_id, updated_at, payload_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(tenant, seller_tax_id, project_name, tax_category, tax_code, tax_rate, unit) DO UPDATE SET
+                        status=excluded.status,
+                        source_confidence=excluded.source_confidence,
+                        line_count=excluded.line_count,
+                        profile_batch_id=excluded.profile_batch_id,
+                        updated_at=excluded.updated_at,
+                        payload_json=excluded.payload_json
+                    """,
+                    (
+                        clean_tenant,
+                        seller_tax_id,
+                        project_name,
+                        tax_category,
+                        tax_code,
+                        tax_rate,
+                        unit,
+                        "active",
+                        line_payload["source_confidence"],
+                        int(line.get("line_count") or 0),
+                        batch_id,
+                        imported_at,
+                        json.dumps(line_payload, ensure_ascii=False),
+                    ),
+                )
+
+        import_summary = {
+            **(summary or {}),
+            "seller_count": seller_count,
+            "buyer_count": buyer_count,
+            "line_profile_count": line_profile_count,
+        }
+        connection.execute(
+            """
+            INSERT INTO profile_import_batches (
+                batch_id, tenant, source, source_confidence, sent_at, imported_at,
+                seller_count, buyer_count, line_profile_count, summary_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                batch_id,
+                clean_tenant,
+                source.strip() or "invoice-demo-batch-import",
+                clean_source_confidence,
+                sent_at,
+                imported_at,
+                seller_count,
+                buyer_count,
+                line_profile_count,
+                json.dumps(import_summary, ensure_ascii=False),
+            ),
+        )
+
+    return ProfileImportResult(
+        batch_id=batch_id,
+        tenant=clean_tenant,
+        seller_count=seller_count,
+        buyer_count=buyer_count,
+        line_profile_count=line_profile_count,
+        imported_at=imported_at,
+    )
+
+
+def get_latest_customer_profiles(
+    *,
+    tenant: str,
+    seller_tax_id: str = "",
+    seller_name: str = "",
+    db_path: Path | None = None,
+) -> dict:
+    target = initialize_store(db_path)
+    clean_tenant = tenant.strip() or "default"
+    conditions = ["tenant = ?", "status = 'active'"]
+    params: list[str] = [clean_tenant]
+    if seller_tax_id.strip():
+        conditions.append("seller_tax_id = ?")
+        params.append(seller_tax_id.strip())
+    if seller_name.strip():
+        conditions.append("seller_name LIKE ?")
+        params.append(f"%{seller_name.strip()}%")
+    where_clause = " AND ".join(conditions)
+    with _connect(target) as connection:
+        seller_rows = connection.execute(
+            f"""
+            SELECT seller_tax_id, seller_name, updated_at, payload_json
+            FROM seller_profiles
+            WHERE {where_clause}
+            ORDER BY updated_at DESC, seller_name ASC
+            """,
+            params,
+        ).fetchall()
+        sellers = []
+        for seller_row in seller_rows:
+            sid = seller_row["seller_tax_id"]
+            seller_payload = json.loads(seller_row["payload_json"] or "{}")
+            buyer_rows = connection.execute(
+                """
+                SELECT payload_json FROM buyer_profiles
+                WHERE tenant = ? AND seller_tax_id = ? AND status = 'active'
+                ORDER BY line_count DESC, buyer_name ASC
+                """,
+                (clean_tenant, sid),
+            ).fetchall()
+            line_rows = connection.execute(
+                """
+                SELECT payload_json FROM invoice_line_profiles
+                WHERE tenant = ? AND seller_tax_id = ? AND status = 'active'
+                ORDER BY line_count DESC, project_name ASC
+                """,
+                (clean_tenant, sid),
+            ).fetchall()
+            seller_payload["buyer_profiles"] = [json.loads(row["payload_json"] or "{}") for row in buyer_rows]
+            seller_payload["project_profiles"] = [json.loads(row["payload_json"] or "{}") for row in line_rows]
+            sellers.append(seller_payload)
+    return {
+        "tenant": clean_tenant,
+        "seller_count": len(sellers),
+        "sellers": sellers,
     }
 
 

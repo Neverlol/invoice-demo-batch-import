@@ -38,6 +38,8 @@ class SyncServiceTest(unittest.TestCase):
         self.old_config = os.environ.get("TAX_INVOICE_SYNC_CONFIG")
         self.old_timeout = os.environ.get("TAX_INVOICE_SYNC_TIMEOUT")
         self.old_rules_endpoint = os.environ.get("TAX_INVOICE_RULES_ENDPOINT")
+        self.old_profile_import_endpoint = os.environ.get("TAX_INVOICE_PROFILE_IMPORT_ENDPOINT")
+        self.old_customer_profiles_endpoint = os.environ.get("TAX_INVOICE_CUSTOMER_PROFILES_ENDPOINT")
         self.old_tenant_rules_path = tax_rule_engine_module.TENANT_RULES_PATH
         self.old_learned_rules_path = tax_rule_engine_module.LEARNED_RULES_PATH
         case_events_module.EVENT_ROOT = self.temp_path / "events"
@@ -53,6 +55,8 @@ class SyncServiceTest(unittest.TestCase):
         os.environ.pop("TAX_INVOICE_SYNC_CONFIG", None)
         os.environ.pop("TAX_INVOICE_SYNC_TIMEOUT", None)
         os.environ.pop("TAX_INVOICE_RULES_ENDPOINT", None)
+        os.environ.pop("TAX_INVOICE_PROFILE_IMPORT_ENDPOINT", None)
+        os.environ.pop("TAX_INVOICE_CUSTOMER_PROFILES_ENDPOINT", None)
 
     def tearDown(self):
         case_events_module.EVENT_ROOT = self.old_event_root
@@ -85,6 +89,14 @@ class SyncServiceTest(unittest.TestCase):
             os.environ.pop("TAX_INVOICE_RULES_ENDPOINT", None)
         else:
             os.environ["TAX_INVOICE_RULES_ENDPOINT"] = self.old_rules_endpoint
+        if self.old_profile_import_endpoint is None:
+            os.environ.pop("TAX_INVOICE_PROFILE_IMPORT_ENDPOINT", None)
+        else:
+            os.environ["TAX_INVOICE_PROFILE_IMPORT_ENDPOINT"] = self.old_profile_import_endpoint
+        if self.old_customer_profiles_endpoint is None:
+            os.environ.pop("TAX_INVOICE_CUSTOMER_PROFILES_ENDPOINT", None)
+        else:
+            os.environ["TAX_INVOICE_CUSTOMER_PROFILES_ENDPOINT"] = self.old_customer_profiles_endpoint
         tax_rule_engine_module.TENANT_RULES_PATH = self.old_tenant_rules_path
         tax_rule_engine_module.LEARNED_RULES_PATH = self.old_learned_rules_path
         tax_rule_engine_module.load_tenant_coding_library.cache_clear()
@@ -197,6 +209,67 @@ class SyncServiceTest(unittest.TestCase):
         state = json.loads(case_events_module.last_rule_sync_state_path().read_text(encoding="utf-8"))
         self.assertEqual(state["status"], "success")
         self.assertEqual(state["package_id"], "rules-001")
+
+    def test_sync_customer_profiles_posts_active_cache(self):
+        os.environ["TAX_INVOICE_SYNC_TENANT"] = "seed-tenant"
+        cache_path = self.temp_path / "output" / "workbench" / "tax_invoice_demo" / "客户档案缓存.json"
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(
+            json.dumps(
+                [
+                    {
+                        "seller_name": "沈阳瑞渡酒店管理有限公司",
+                        "seller_tax_id": "91210103MAEFNBQW91",
+                        "project_profiles": [
+                            {"project_name": "管理服务费", "tax_category": "企业管理服务", "tax_code": "3040801990000000000", "tax_rate": "1%"}
+                        ],
+                        "buyer_profiles": [{"buyer_name": "测试购买方", "buyer_tax_id": "91110000TEST000001"}],
+                    }
+                ],
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        with patch.object(
+            sync_service_module,
+            "urlopen",
+            return_value=_FakeHTTPResponse({"batch_id": "profiles-001", "seller_count": 1, "buyer_count": 1, "line_profile_count": 1}),
+        ) as mocked:
+            result = sync_service_module.sync_customer_profiles(cache_path)
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.batch_id, "profiles-001")
+        self.assertEqual(result.seller_count, 1)
+        self.assertIn("/api/invoice/profile-imports", result.endpoint)
+        self.assertTrue(mocked.called)
+
+    def test_pull_latest_customer_profiles_writes_cache(self):
+        os.environ["TAX_INVOICE_SYNC_TENANT"] = "seed-tenant"
+        payload = {
+            "tenant": "seed-tenant",
+            "seller_count": 1,
+            "sellers": [
+                {
+                    "seller_name": "沈阳瑞渡酒店管理有限公司",
+                    "seller_tax_id": "91210103MAEFNBQW91",
+                    "project_profiles": [],
+                    "buyer_profiles": [],
+                }
+            ],
+        }
+
+        with patch.object(sync_service_module, "urlopen", return_value=_FakeHTTPResponse(payload)) as mocked:
+            result = sync_service_module.pull_latest_customer_profiles(seller_tax_id="91210103MAEFNBQW91")
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.seller_count, 1)
+        self.assertIn("customer-profiles/latest", result.endpoint)
+        self.assertTrue(mocked.called)
+        cache_path = self.temp_path / "output" / "workbench" / "tax_invoice_demo" / "客户档案缓存.json"
+        self.assertTrue(cache_path.exists())
+        self.assertIn("沈阳瑞渡酒店管理有限公司", cache_path.read_text(encoding="utf-8"))
+
 
 
 if __name__ == "__main__":

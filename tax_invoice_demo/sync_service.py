@@ -34,6 +34,17 @@ class RulePullResult:
     error: str = ""
 
 
+@dataclass(frozen=True)
+class CustomerProfileSyncResult:
+    status: str
+    seller_count: int = 0
+    buyer_count: int = 0
+    line_profile_count: int = 0
+    endpoint: str = ""
+    batch_id: str = ""
+    error: str = ""
+
+
 _FLUSH_LOCK = Lock()
 _FLUSH_ACTIVE = False
 _RULE_PULL_LOCK = Lock()
@@ -52,6 +63,8 @@ def load_sync_config() -> dict[str, str]:
         "config_path": file_config.get("_config_path", ""),
         "endpoint": (os.getenv("TAX_INVOICE_SYNC_ENDPOINT") or file_config.get("endpoint") or "").strip(),
         "rules_endpoint": (os.getenv("TAX_INVOICE_RULES_ENDPOINT") or file_config.get("rules_endpoint") or "").strip(),
+        "profile_import_endpoint": (os.getenv("TAX_INVOICE_PROFILE_IMPORT_ENDPOINT") or file_config.get("profile_import_endpoint") or "").strip(),
+        "customer_profiles_endpoint": (os.getenv("TAX_INVOICE_CUSTOMER_PROFILES_ENDPOINT") or file_config.get("customer_profiles_endpoint") or "").strip(),
         "token": (os.getenv("TAX_INVOICE_SYNC_TOKEN") or file_config.get("token") or "").strip(),
         "tenant": (os.getenv("TAX_INVOICE_SYNC_TENANT") or file_config.get("tenant") or "").strip(),
         "timeout_seconds": (os.getenv("TAX_INVOICE_SYNC_TIMEOUT") or str(file_config.get("timeout_seconds") or "8")).strip(),
@@ -142,6 +155,78 @@ def flush_pending_events(limit: int = 50) -> SyncResult:
     return result
 
 
+def sync_customer_profiles(profile_cache_path: Path | None = None) -> CustomerProfileSyncResult:
+    config = load_sync_config()
+    endpoint = _resolve_profile_import_endpoint(config)
+    if config["enabled"] != "1" or not endpoint:
+        return CustomerProfileSyncResult(status="disabled", endpoint=endpoint or config.get("config_path") or "")
+    if not config["tenant"]:
+        return CustomerProfileSyncResult(status="failed", endpoint=endpoint, error="missing tenant")
+
+    profile_path = profile_cache_path or (_repo_root() / "output" / "workbench" / "tax_invoice_demo" / "客户档案缓存.json")
+    try:
+        sellers = json.loads(profile_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return CustomerProfileSyncResult(status="failed", endpoint=endpoint, error=f"profile cache not found: {profile_path}")
+    except json.JSONDecodeError as exc:
+        return CustomerProfileSyncResult(status="failed", endpoint=endpoint, error=f"profile cache is not valid JSON: {exc}")
+    if not isinstance(sellers, list):
+        return CustomerProfileSyncResult(status="failed", endpoint=endpoint, error="profile cache root must be an array")
+
+    buyer_count = sum(len(seller.get("buyer_profiles") or []) for seller in sellers if isinstance(seller, dict))
+    line_count = sum(len(seller.get("project_profiles") or []) for seller in sellers if isinstance(seller, dict))
+    payload = {
+        "tenant": config["tenant"],
+        "source": "invoice-demo-batch-import",
+        "sent_at": datetime.now().isoformat(timespec="seconds"),
+        "source_confidence": "official_history_export",
+        "seller_profiles": sellers,
+        "summary": {
+            "profile_cache_path": str(profile_path),
+            "seller_count": len(sellers),
+            "buyer_count": buyer_count,
+            "line_profile_count": line_count,
+        },
+    }
+    try:
+        response_payload = _post_json(endpoint, payload, token=config["token"], timeout_seconds=int(config["timeout_seconds"] or "8"))
+    except Exception as exc:
+        return CustomerProfileSyncResult(status="failed", endpoint=endpoint, error=str(exc))
+
+    return CustomerProfileSyncResult(
+        status="success",
+        seller_count=int(response_payload.get("seller_count", len(sellers))) if isinstance(response_payload, dict) else len(sellers),
+        buyer_count=int(response_payload.get("buyer_count", buyer_count)) if isinstance(response_payload, dict) else buyer_count,
+        line_profile_count=int(response_payload.get("line_profile_count", line_count)) if isinstance(response_payload, dict) else line_count,
+        endpoint=endpoint,
+        batch_id=str(response_payload.get("batch_id") or "") if isinstance(response_payload, dict) else "",
+    )
+
+
+def pull_latest_customer_profiles(*, seller_tax_id: str = "", seller_name: str = "") -> CustomerProfileSyncResult:
+    config = load_sync_config()
+    endpoint = _resolve_customer_profiles_endpoint(config, seller_tax_id=seller_tax_id, seller_name=seller_name)
+    if config["enabled"] != "1" or not endpoint:
+        return CustomerProfileSyncResult(status="disabled", endpoint=endpoint or config.get("config_path") or "")
+    try:
+        payload = _get_json(endpoint, token=config["token"], timeout_seconds=int(config["timeout_seconds"] or "8"))
+    except Exception as exc:
+        return CustomerProfileSyncResult(status="failed", endpoint=endpoint, error=str(exc))
+    sellers = payload.get("sellers") if isinstance(payload, dict) else None
+    if not isinstance(sellers, list):
+        return CustomerProfileSyncResult(status="failed", endpoint=endpoint, error="response missing sellers array")
+    cache_path = _repo_root() / "output" / "workbench" / "tax_invoice_demo" / "客户档案缓存.json"
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_text(json.dumps(sellers, ensure_ascii=False, indent=2), encoding="utf-8")
+    return CustomerProfileSyncResult(
+        status="success",
+        seller_count=len(sellers),
+        buyer_count=sum(len(seller.get("buyer_profiles") or []) for seller in sellers if isinstance(seller, dict)),
+        line_profile_count=sum(len(seller.get("project_profiles") or []) for seller in sellers if isinstance(seller, dict)),
+        endpoint=endpoint,
+    )
+
+
 def pull_latest_rule_package() -> RulePullResult:
     config = load_sync_config()
     endpoint = _resolve_rules_endpoint(config)
@@ -203,6 +288,13 @@ def _pull_rules_in_background() -> None:
 
 
 def _post_events(endpoint: str, payload: dict[str, Any], *, token: str, timeout_seconds: int) -> dict[str, Any]:
+    parsed = _post_json(endpoint, payload, token=token, timeout_seconds=timeout_seconds)
+    if not parsed:
+        return {"accepted": len(payload.get("events", []))}
+    return parsed if isinstance(parsed, dict) else {"accepted": len(payload.get("events", []))}
+
+
+def _post_json(endpoint: str, payload: dict[str, Any], *, token: str, timeout_seconds: int) -> dict[str, Any]:
     headers = {
         "Content-Type": "application/json",
     }
@@ -226,12 +318,12 @@ def _post_events(endpoint: str, payload: dict[str, Any], *, token: str, timeout_
         raise RuntimeError("request timed out") from exc
 
     if not body.strip():
-        return {"accepted": len(payload.get("events", []))}
+        return {}
     try:
         parsed = json.loads(body)
     except json.JSONDecodeError:
-        return {"accepted": len(payload.get("events", [])), "raw_body": body[:500]}
-    return parsed if isinstance(parsed, dict) else {"accepted": len(payload.get("events", []))}
+        return {"raw_body": body[:500]}
+    return parsed if isinstance(parsed, dict) else {"raw_body": body[:500]}
 
 
 def _get_json(endpoint: str, *, token: str, timeout_seconds: int) -> dict[str, Any]:
@@ -296,6 +388,37 @@ def _resolve_rules_endpoint(config: dict[str, str]) -> str:
     if endpoint.endswith(marker):
         return endpoint[: -len(marker)] + f"/api/invoice/tenants/{quote(tenant)}/rules/latest"
     return ""
+
+
+def _resolve_profile_import_endpoint(config: dict[str, str]) -> str:
+    if config.get("profile_import_endpoint"):
+        return config["profile_import_endpoint"]
+    endpoint = config.get("endpoint", "").strip()
+    marker = "/api/invoice/events"
+    if endpoint.endswith(marker):
+        return endpoint[: -len(marker)] + "/api/invoice/profile-imports"
+    return ""
+
+
+def _resolve_customer_profiles_endpoint(config: dict[str, str], *, seller_tax_id: str = "", seller_name: str = "") -> str:
+    if config.get("customer_profiles_endpoint"):
+        base = config["customer_profiles_endpoint"]
+    else:
+        endpoint = config.get("endpoint", "").strip()
+        marker = "/api/invoice/events"
+        tenant = config.get("tenant", "").strip()
+        if not endpoint or not tenant or not endpoint.endswith(marker):
+            return ""
+        base = endpoint[: -len(marker)] + f"/api/invoice/tenants/{quote(tenant)}/customer-profiles/latest"
+    params = []
+    if seller_tax_id.strip():
+        params.append(f"seller_tax_id={quote(seller_tax_id.strip())}")
+    if seller_name.strip():
+        params.append(f"seller_name={quote(seller_name.strip())}")
+    if params:
+        separator = "&" if "?" in base else "?"
+        return base + separator + "&".join(params)
+    return base
 
 
 def _repo_root() -> Path:

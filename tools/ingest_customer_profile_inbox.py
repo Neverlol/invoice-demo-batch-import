@@ -19,6 +19,7 @@ import hashlib
 import json
 import re
 import shutil
+import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime
@@ -813,7 +814,14 @@ def write_overview_md(path: Path, groups: dict[tuple[str, str], list[HistoryRow]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def write_run_report(root: Path, ingest_counts: dict[str, int], rebuild_counts: dict[str, int], *, dry_run: bool) -> Path:
+def write_run_report(
+    root: Path,
+    ingest_counts: dict[str, int],
+    rebuild_counts: dict[str, int],
+    *,
+    dry_run: bool,
+    cloud_sync: dict[str, str | int] | None = None,
+) -> Path:
     report_dir = root / PROFILE_DB_DIR / "处理报告"
     report_dir.mkdir(parents=True, exist_ok=True)
     path = report_dir / f"profile_ingest_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
@@ -834,6 +842,10 @@ def write_run_report(root: Path, ingest_counts: dict[str, int], rebuild_counts: 
     lines += ["", "## active 档案重建", ""]
     for key, value in sorted(rebuild_counts.items()):
         lines.append(f"- {key}: {value}")
+    if cloud_sync is not None:
+        lines += ["", "## 云端同步", ""]
+        for key, value in sorted(cloud_sync.items()):
+            lines.append(f"- {key}: {value}")
     lines += [
         "",
         "## 下一步",
@@ -846,12 +858,29 @@ def write_run_report(root: Path, ingest_counts: dict[str, int], rebuild_counts: 
     return path
 
 
+def sync_profiles_to_cloud() -> dict[str, str | int]:
+    sys.path.insert(0, str(PROJECT_ROOT))
+    from tax_invoice_demo.sync_service import sync_customer_profiles
+
+    result = sync_customer_profiles(PROJECT_ROOT / "output" / "workbench" / "tax_invoice_demo" / "客户档案缓存.json")
+    return {
+        "status": result.status,
+        "seller_count": result.seller_count,
+        "buyer_count": result.buyer_count,
+        "line_profile_count": result.line_profile_count,
+        "batch_id": result.batch_id,
+        "endpoint": result.endpoint,
+        "error": result.error,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="增量处理测试组客户档案收件箱")
     parser.add_argument("--root", default="", help="客户档案储备目录；默认使用项目同级的 测试组客户档案储备")
     parser.add_argument("--init-only", action="store_true", help="只创建目录结构，不处理文件")
     parser.add_argument("--rebuild-only", action="store_true", help="只重建 _档案库，不处理收件箱")
     parser.add_argument("--dry-run", action="store_true", help="只预演，不移动/写入收件箱处理状态")
+    parser.add_argument("--sync-cloud", action="store_true", help="处理完成后同步结构化 active 客户档案到阿里云 sync center")
     args = parser.parse_args()
 
     root = profile_root_from_args(args.root)
@@ -864,10 +893,11 @@ def main() -> int:
     if not args.rebuild_only:
         ingest_counts = ingest_pending_files(root, dry_run=args.dry_run)
     rebuild_counts = rebuild_profiles(root)
-    report = write_run_report(root, ingest_counts, rebuild_counts, dry_run=args.dry_run)
+    cloud_sync = sync_profiles_to_cloud() if args.sync_cloud and not args.dry_run else None
+    report = write_run_report(root, ingest_counts, rebuild_counts, dry_run=args.dry_run, cloud_sync=cloud_sync)
     print(f"客户档案处理完成：{root}")
     print(f"报告：{report}")
-    print(json.dumps({"ingest": ingest_counts, "rebuild": rebuild_counts}, ensure_ascii=False, indent=2))
+    print(json.dumps({"ingest": ingest_counts, "rebuild": rebuild_counts, "cloud_sync": cloud_sync}, ensure_ascii=False, indent=2))
     return 0
 
 

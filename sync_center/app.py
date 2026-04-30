@@ -9,7 +9,9 @@ from .store import (
     DEFAULT_DB_PATH,
     get_case_timeline,
     get_latest_rule_package,
+    get_latest_customer_profiles,
     get_store_stats,
+    import_customer_profiles,
     ingest_event_batch,
     initialize_store,
     list_rule_candidates,
@@ -136,6 +138,62 @@ def create_app(*, db_path: Path | None = None) -> Flask:
             }
         )
 
+    @app.post("/api/invoice/profile-imports")
+    def profile_imports():
+        _check_auth()
+        payload = request.get_json(silent=True) or {}
+        tenant = str(payload.get("tenant") or "default").strip() or "default"
+        sellers = payload.get("seller_profiles") or payload.get("sellers")
+        if not isinstance(sellers, list):
+            return jsonify({"error": "seller_profiles must be an array"}), 400
+        validation_error = _validate_customer_profiles(sellers)
+        if validation_error:
+            return jsonify({"error": validation_error}), 400
+        result = import_customer_profiles(
+            tenant=tenant,
+            source=str(payload.get("source") or "invoice-demo-batch-import"),
+            sent_at=str(payload.get("sent_at") or ""),
+            seller_profiles=sellers,
+            source_confidence=str(payload.get("source_confidence") or "official_history_export"),
+            summary=payload.get("summary") if isinstance(payload.get("summary"), dict) else {},
+            db_path=active_db_path,
+        )
+        return jsonify(
+            {
+                "batch_id": result.batch_id,
+                "tenant": result.tenant,
+                "seller_count": result.seller_count,
+                "buyer_count": result.buyer_count,
+                "line_profile_count": result.line_profile_count,
+                "imported_at": result.imported_at,
+            }
+        )
+
+    @app.get("/api/invoice/customer-profiles/latest")
+    def latest_customer_profiles():
+        _check_auth()
+        tenant = str(request.args.get("tenant") or "default").strip() or "default"
+        return jsonify(
+            get_latest_customer_profiles(
+                tenant=tenant,
+                seller_tax_id=str(request.args.get("seller_tax_id") or ""),
+                seller_name=str(request.args.get("seller_name") or ""),
+                db_path=active_db_path,
+            )
+        )
+
+    @app.get("/api/invoice/tenants/<tenant>/customer-profiles/latest")
+    def latest_tenant_customer_profiles(tenant: str):
+        _check_auth()
+        return jsonify(
+            get_latest_customer_profiles(
+                tenant=tenant,
+                seller_tax_id=str(request.args.get("seller_tax_id") or ""),
+                seller_name=str(request.args.get("seller_name") or ""),
+                db_path=active_db_path,
+            )
+        )
+
     return app
 
 
@@ -173,4 +231,23 @@ def _validate_rules(rules: list[dict]) -> str:
             return f"rule #{index} missing required field: raw_alias"
         if not tax_category:
             return f"rule #{index} missing required field: tax_category"
+    return ""
+
+
+def _validate_customer_profiles(sellers: list[dict]) -> str:
+    for index, seller in enumerate(sellers, start=1):
+        if not isinstance(seller, dict):
+            return f"seller_profile #{index} must be an object"
+        seller_name = str(seller.get("seller_name") or "").strip()
+        seller_tax_id = str(seller.get("seller_tax_id") or "").strip()
+        if not seller_name:
+            return f"seller_profile #{index} missing required field: seller_name"
+        if not seller_tax_id:
+            return f"seller_profile #{index} missing required field: seller_tax_id"
+        project_profiles = seller.get("project_profiles") or seller.get("invoice_line_profiles") or []
+        if not isinstance(project_profiles, list):
+            return f"seller_profile #{index} project_profiles must be an array"
+        buyer_profiles = seller.get("buyer_profiles") or []
+        if not isinstance(buyer_profiles, list):
+            return f"seller_profile #{index} buyer_profiles must be an array"
     return ""
