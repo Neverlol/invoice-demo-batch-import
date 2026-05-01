@@ -503,6 +503,37 @@ A4复印纸 10包 240元
         self.assertTrue(any("开票金额" in issue for issue in first.issues))
         self.assertEqual(first.lines[0].coding_reference, "批量模式待人工补全，需人工复核")
 
+    def test_force_batch_mode_keeps_uploaded_images_even_when_ocr_finds_only_some_blocks(self):
+        files = [
+            FileStorage(stream=io.BytesIO(f"fake image {index}".encode()), filename=f"0{index}.jpg", content_type="image/jpeg")
+            for index in range(1, 6)
+        ]
+        text = """
+[01.jpg]
+发票详情
+抬头 林甸县梁小环传媒工作室
+税号 92230623MAEMC84N31
+建议开票金额 14.80
+订单号: 8086410250960608559
+
+[02.jpg]
+发票详情
+抬头 中智关爱通（上海）科技
+建议开票金额 29.88
+订单号: 8011766126836281741
+"""
+
+        batch = workbench_module.create_draft_from_workbench("", text, "批量截图模式", files, force_batch=True)
+
+        self.assertEqual(batch.__class__.__name__, "DraftBatch")
+        self.assertEqual(len(batch.items), 5)
+        self.assertEqual(batch.source_images[0].original_name, "01.jpg")
+        sources = [workbench_module.load_draft(item.draft_id).note for item in batch.items]
+        self.assertTrue(any("来源图片：05.jpg" in note for note in sources))
+        fifth = workbench_module.load_draft(batch.items[4].draft_id)
+        self.assertTrue(any("05.jpg 未可靠识别购买方税号" in issue for issue in fifth.issues))
+        self.assertTrue(any("05.jpg 未可靠识别开票金额" in issue for issue in fifth.issues))
+
     def test_weak_chat_text_uses_history_profile_for_buyer_and_project(self):
         _seed_history_profile_row(
             company_name="吉林省风生水起商贸有限公司",

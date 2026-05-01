@@ -52,8 +52,8 @@ def create_draft_from_workbench(
     early_parse_source = _compose_parse_source(raw_text, document_result.combined_text, ocr_result.combined_text)
     invoice_profile = _infer_invoice_profile(early_parse_source, note=note)
     platform_requests = extract_platform_invoice_requests(early_parse_source)
-    if force_batch and not platform_requests:
-        platform_requests = _requests_from_uploaded_images(attachments)
+    if force_batch:
+        platform_requests = _ensure_requests_cover_uploaded_images(platform_requests, attachments)
     if platform_requests:
         line_profile = seller_default_line_profile(company_name) or _blank_batch_line_profile()
         return _create_platform_screenshot_draft_batch(
@@ -88,8 +88,8 @@ def create_draft_from_workbench(
     )
     invoice_profile = _infer_invoice_profile(parse_source, note=note)
     platform_requests = extract_platform_invoice_requests(parse_source)
-    if force_batch and not platform_requests:
-        platform_requests = _requests_from_uploaded_images(attachments)
+    if force_batch:
+        platform_requests = _ensure_requests_cover_uploaded_images(platform_requests, attachments)
     if platform_requests:
         line_profile = seller_default_line_profile(company_name) or _blank_batch_line_profile()
         return _create_platform_screenshot_draft_batch(
@@ -547,23 +547,57 @@ def draft_directory(draft_id: str) -> Path:
 
 
 def _requests_from_uploaded_images(attachments: list[DraftAttachment]) -> list[PlatformInvoiceRequest]:
+    image_attachments = _uploaded_image_attachments(attachments)
+    if len(image_attachments) < 2:
+        return []
+    return [_blank_request_from_attachment(attachment) for attachment in image_attachments]
+
+
+def _ensure_requests_cover_uploaded_images(
+    requests: list[PlatformInvoiceRequest],
+    attachments: list[DraftAttachment],
+) -> list[PlatformInvoiceRequest]:
+    """强制批量模式下，业务单元是上传图片，不是 OCR 成功块。
+
+    OCR/LLM 可能只给 5 张图里的 2 张返回结构化文本；这种情况下也必须保留另外 3 张，
+    让它们进入“待补全 / 异常项”，避免现场出现“5 张图只生成 2 张发票”。
+    """
+    image_attachments = _uploaded_image_attachments(attachments)
+    if len(image_attachments) < 2:
+        return requests
+    if not requests:
+        return [_blank_request_from_attachment(attachment) for attachment in image_attachments]
+
+    covered_names = {_normalize_source_name(request.source_name) for request in requests}
+    merged = list(requests)
+    for attachment in image_attachments:
+        source_name = attachment.original_name or attachment.stored_name
+        if _normalize_source_name(source_name) not in covered_names:
+            merged.append(_blank_request_from_attachment(attachment))
+    return merged
+
+
+def _uploaded_image_attachments(attachments: list[DraftAttachment]) -> list[DraftAttachment]:
     image_suffixes = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
-    image_attachments = [
+    return [
         attachment
         for attachment in attachments
         if Path(attachment.stored_name or attachment.original_name).suffix.lower() in image_suffixes
     ]
-    if len(image_attachments) < 2:
-        return []
-    return [
-        PlatformInvoiceRequest(
-            source_name=attachment.original_name or attachment.stored_name,
-            buyer=BuyerInfo(name="", tax_id=""),
-            amount_with_tax="",
-            source_excerpt=f"来源图片：{attachment.original_name or attachment.stored_name}",
-        )
-        for attachment in image_attachments
-    ]
+
+
+def _blank_request_from_attachment(attachment: DraftAttachment) -> PlatformInvoiceRequest:
+    source_name = attachment.original_name or attachment.stored_name
+    return PlatformInvoiceRequest(
+        source_name=source_name,
+        buyer=BuyerInfo(name="", tax_id=""),
+        amount_with_tax="",
+        source_excerpt=f"来源图片：{source_name}\nOCR 未可靠识别为完整发票信息，请在批量工作表中人工补全。",
+    )
+
+
+def _normalize_source_name(value: str) -> str:
+    return Path(value or "").name.strip().lower()
 
 
 def _blank_batch_line_profile() -> LineHistoryMatch:
