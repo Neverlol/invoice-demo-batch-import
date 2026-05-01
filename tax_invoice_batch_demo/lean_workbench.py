@@ -85,12 +85,20 @@ def default_form() -> dict[str, str]:
     }
 
 
-def create_lean_draft(*, company_name: str, raw_text: str, note: str, uploaded_files: list[FileStorage]) -> InvoiceDraft | DraftBatch:
+def create_lean_draft(
+    *,
+    company_name: str,
+    raw_text: str,
+    note: str,
+    uploaded_files: list[FileStorage],
+    force_batch: bool = False,
+) -> InvoiceDraft | DraftBatch:
     return create_draft_from_workbench(
         company_name=company_name,
         raw_text=raw_text,
         note=note,
         uploaded_files=uploaded_files,
+        force_batch=force_batch,
     )
 
 

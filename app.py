@@ -33,8 +33,10 @@ from tax_invoice_batch_demo.lean_workbench import (
     save_failure_report_for_draft,
     save_lean_draft_from_form,
 )
+from tax_invoice_demo import workbench as workbench_module
 from tax_invoice_demo.case_events import record_case_event
 from tax_invoice_demo.customer_profiles import profile_cache_summary, profile_counts_for_seller
+from tax_invoice_demo.models import BuyerInfo, DraftBatchItem, InvoiceLine
 from tax_invoice_demo.sync_service import schedule_background_customer_profile_pull, schedule_background_rule_pull
 from tax_invoice_demo.taxonomy_search import search_taxonomy
 
@@ -79,6 +81,7 @@ def create_draft():
         raw_text=raw_text,
         note=request.form.get("note", ""),
         uploaded_files=uploaded_files,
+        force_batch=request.form.get("batch_mode") == "on",
     )
     if hasattr(result, "batch_id"):
         return redirect(url_for("batch_detail", batch_id=result.batch_id))
@@ -272,7 +275,17 @@ def batch_detail(batch_id: str):
     if batch is None:
         abort(404)
     export = export_batch_template(batch_id)
-    return render_template("lean_batch.html", batch=batch, export=export)
+    return render_template("lean_batch.html", batch=batch, export=export, batch_rows=_batch_sheet_rows(batch))
+
+
+@app.post("/batches/<batch_id>/save")
+def save_batch_sheet(batch_id: str):
+    batch = load_draft_batch(batch_id)
+    if batch is None:
+        abort(404)
+    _save_batch_sheet_form(batch, request.form)
+    export = export_batch_template(batch_id)
+    return render_template("lean_batch.html", batch=batch, export=export, batch_rows=_batch_sheet_rows(batch), saved=True)
 
 
 @app.get("/batches/<batch_id>/download-template")
@@ -291,7 +304,7 @@ def execute_batch(batch_id: str):
         abort(404)
     export = export_batch_template(batch_id)
     if export["error_count"]:
-        return render_template("lean_batch.html", batch=batch, export=export, run_blocked=True), 400
+        return render_template("lean_batch.html", batch=batch, export=export, batch_rows=_batch_sheet_rows(batch), run_blocked=True), 400
     run_id = _queue_batch_run(
         export["output_path"],
         request.form.get("cdp_endpoint", "http://127.0.0.1:9222"),
@@ -309,6 +322,123 @@ def execute_batch(batch_id: str):
         },
     )
     return redirect(url_for("run_detail", run_id=run_id))
+
+
+def _batch_sheet_rows(batch):
+    rows = []
+    for index, item in enumerate(batch.items, start=1):
+        draft = load_draft(item.draft_id)
+        if draft is None:
+            continue
+        line = draft.lines[0] if draft.lines else InvoiceLine(project_name="", amount_with_tax="")
+        issue_map = _batch_field_issue_map(draft, line)
+        rows.append(
+            {
+                "index": index,
+                "draft_id": draft.draft_id,
+                "source_name": _source_name_from_note(draft.note),
+                "buyer_name": draft.buyer.name,
+                "buyer_tax_id": draft.buyer.tax_id,
+                "invoice_kind": draft.invoice_kind or batch.invoice_kind or "普通发票",
+                "project_name": line.project_name,
+                "tax_category": line.tax_category,
+                "tax_code": line.tax_code,
+                "amount_with_tax": line.resolved_amount_with_tax() or line.amount_with_tax,
+                "tax_rate": line.normalized_tax_rate() if line.tax_rate else "",
+                "unit": line.unit,
+                "quantity": line.quantity,
+                "coding_reference": line.coding_reference,
+                "issues": draft.issues,
+                "issue_map": issue_map,
+                "has_issues": bool(issue_map or draft.issues),
+            }
+        )
+    return rows
+
+
+def _source_name_from_note(note: str) -> str:
+    matched = re.search(r"来源图片：([^；]+)", note or "")
+    return matched.group(1).strip() if matched else ""
+
+
+def _batch_field_issue_map(draft, line: InvoiceLine) -> dict[str, str]:
+    issues: dict[str, str] = {}
+    if not draft.buyer.name.strip():
+        issues["buyer_name"] = "必填：请补全购买方名称"
+    if not draft.buyer.tax_id.strip():
+        issues["buyer_tax_id"] = "必填：请补全购买方税号"
+    if not line.project_name.strip():
+        issues["project_name"] = "必填：请补全项目名称"
+    if not line.resolved_amount_with_tax():
+        issues["amount_with_tax"] = "必填：请补全含税金额"
+    if not line.tax_rate.strip():
+        issues["tax_rate"] = "必填：请补全税率"
+    if not line.tax_code.strip():
+        issues["tax_code"] = "需复核：请确认税收编码"
+    return issues
+
+
+def _save_batch_sheet_form(batch, form):
+    draft_ids = form.getlist("draft_id")
+    batch_items: list[DraftBatchItem] = []
+    batch_issues: list[str] = []
+    for index, draft_id in enumerate(draft_ids):
+        draft = load_draft(draft_id)
+        if draft is None:
+            continue
+        draft.buyer = BuyerInfo(
+            name=_form_list_value(form, "buyer_name", index),
+            tax_id=_form_list_value(form, "buyer_tax_id", index),
+            address=draft.buyer.address,
+            phone=draft.buyer.phone,
+            bank_name=draft.buyer.bank_name,
+            bank_account=draft.buyer.bank_account,
+        )
+        draft.invoice_kind = _form_list_value(form, "invoice_kind", index) or draft.invoice_kind or "普通发票"
+        line = draft.lines[0] if draft.lines else InvoiceLine(project_name="", amount_with_tax="")
+        line.project_name = _form_list_value(form, "project_name", index)
+        line.tax_category = _form_list_value(form, "tax_category", index)
+        line.tax_code = _form_list_value(form, "tax_code", index)
+        line.amount_with_tax = _form_list_value(form, "amount_with_tax", index)
+        line.tax_rate = _form_list_value(form, "tax_rate", index) or line.tax_rate
+        line.unit = _form_list_value(form, "unit", index) or line.unit
+        line.quantity = _form_list_value(form, "quantity", index) or line.quantity
+        if draft.lines:
+            draft.lines[0] = line
+        else:
+            draft.lines = [line]
+        issue_map = _batch_field_issue_map(draft, line)
+        draft.issues = list(issue_map.values())
+        workbench_module.save_draft(draft)
+        issue_summary = next(iter(issue_map.values()), "")
+        batch_items.append(
+            DraftBatchItem(
+                draft_id=draft.draft_id,
+                buyer_name=draft.buyer.name or "待补全购买方名称",
+                invoice_kind=draft.invoice_kind,
+                amount_total=line.resolved_amount_with_tax(),
+                project_summary=line.project_name,
+                line_count=len(draft.lines),
+                issue_summary=issue_summary,
+            )
+        )
+        batch_issues.extend(issue_map.values())
+    batch.items = batch_items
+    batch.issues = batch_issues
+    workbench_module.save_draft_batch(batch)
+    record_case_event(
+        case_id=batch.case_id,
+        batch_id=batch.batch_id,
+        event_type="batch_sheet_saved",
+        payload={"invoice_count": len(batch.items), "issue_count": len(batch.issues)},
+    )
+
+
+def _form_list_value(form, name: str, index: int) -> str:
+    values = form.getlist(name)
+    if index >= len(values):
+        return ""
+    return (values[index] or "").strip()
 
 
 @app.get("/ledger/success")

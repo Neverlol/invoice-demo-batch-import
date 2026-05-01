@@ -1,4 +1,5 @@
 import csv
+import io
 import json
 import tempfile
 import unittest
@@ -484,6 +485,23 @@ A4复印纸 10包 240元
         self.assertEqual(third.lines[0].amount_with_tax, "15.80")
         self.assertTrue(any("购买方税号" in issue for issue in third.issues))
         self.assertEqual(batch.items[2].buyer_name, "待补全购买方名称")
+
+    def test_force_batch_mode_creates_one_child_draft_per_uploaded_image_even_without_ocr_fields(self):
+        files = [
+            FileStorage(stream=io.BytesIO(b"fake image one"), filename="01.png", content_type="image/png"),
+            FileStorage(stream=io.BytesIO(b"fake image two"), filename="02.png", content_type="image/png"),
+        ]
+
+        batch = workbench_module.create_draft_from_workbench("", "", "批量截图模式", files, force_batch=True)
+
+        self.assertEqual(batch.__class__.__name__, "DraftBatch")
+        self.assertEqual(len(batch.items), 2)
+        self.assertEqual(batch.items[0].buyer_name, "待补全购买方名称")
+        first = workbench_module.load_draft(batch.items[0].draft_id)
+        self.assertTrue(any("购买方名称" in issue for issue in first.issues))
+        self.assertTrue(any("购买方税号" in issue for issue in first.issues))
+        self.assertTrue(any("开票金额" in issue for issue in first.issues))
+        self.assertEqual(first.lines[0].coding_reference, "批量模式待人工补全，需人工复核")
 
     def test_weak_chat_text_uses_history_profile_for_buyer_and_project(self):
         _seed_history_profile_row(

@@ -14,7 +14,7 @@ from werkzeug.datastructures import FileStorage
 
 from .case_events import batch_snapshot, diff_drafts, draft_snapshot, record_case_event
 from .coding_library import enrich_invoice_lines, load_formal_coding_library
-from .customer_profiles import apply_line_history_hints, resolve_buyer_from_history, seller_default_line_profile
+from .customer_profiles import LineHistoryMatch, apply_line_history_hints, resolve_buyer_from_history, seller_default_line_profile
 from .extraction_pipeline import compose_parse_source, extract_invoice_structured_data
 from .ledger import sync_draft_to_ledger
 from .models import BuyerInfo, DraftAttachment, DraftBatch, DraftBatchItem, InvoiceDraft, InvoiceLine
@@ -34,7 +34,14 @@ def default_workbench_form() -> dict[str, str]:
     }
 
 
-def create_draft_from_workbench(company_name: str, raw_text: str, note: str, uploaded_files: list[FileStorage]) -> InvoiceDraft | DraftBatch:
+def create_draft_from_workbench(
+    company_name: str,
+    raw_text: str,
+    note: str,
+    uploaded_files: list[FileStorage],
+    *,
+    force_batch: bool = False,
+) -> InvoiceDraft | DraftBatch:
     draft_id = uuid4().hex[:10]
     case_id = draft_id
     draft_dir = draft_directory(draft_id)
@@ -45,23 +52,24 @@ def create_draft_from_workbench(company_name: str, raw_text: str, note: str, upl
     early_parse_source = _compose_parse_source(raw_text, document_result.combined_text, ocr_result.combined_text)
     invoice_profile = _infer_invoice_profile(early_parse_source, note=note)
     platform_requests = extract_platform_invoice_requests(early_parse_source)
+    if force_batch and not platform_requests:
+        platform_requests = _requests_from_uploaded_images(attachments)
     if platform_requests:
-        line_profile = seller_default_line_profile(company_name)
-        if line_profile is not None:
-            return _create_platform_screenshot_draft_batch(
-                batch_id=draft_id,
-                case_id=case_id,
-                draft_dir=draft_dir,
-                company_name=company_name,
-                raw_text=raw_text,
-                note=note,
-                attachments=attachments,
-                document_result=document_result,
-                ocr_result=ocr_result,
-                invoice_profile=invoice_profile,
-                requests=platform_requests,
-                line_profile=line_profile,
-            )
+        line_profile = seller_default_line_profile(company_name) or _blank_batch_line_profile()
+        return _create_platform_screenshot_draft_batch(
+            batch_id=draft_id,
+            case_id=case_id,
+            draft_dir=draft_dir,
+            company_name=company_name,
+            raw_text=raw_text,
+            note=note,
+            attachments=attachments,
+            document_result=document_result,
+            ocr_result=ocr_result,
+            invoice_profile=invoice_profile,
+            requests=platform_requests,
+            line_profile=line_profile,
+        )
     extraction = extract_invoice_structured_data(
         raw_text=raw_text,
         note=note,
@@ -80,26 +88,27 @@ def create_draft_from_workbench(company_name: str, raw_text: str, note: str, upl
     )
     invoice_profile = _infer_invoice_profile(parse_source, note=note)
     platform_requests = extract_platform_invoice_requests(parse_source)
+    if force_batch and not platform_requests:
+        platform_requests = _requests_from_uploaded_images(attachments)
     if platform_requests:
-        line_profile = seller_default_line_profile(company_name)
-        if line_profile is not None:
-            return _create_platform_screenshot_draft_batch(
-                batch_id=draft_id,
-                case_id=case_id,
-                draft_dir=draft_dir,
-                company_name=company_name,
-                raw_text=raw_text,
-                note=note,
-                attachments=attachments,
-                document_result=document_result,
-                ocr_result=ocr_result,
-                invoice_profile=invoice_profile,
-                requests=platform_requests,
-                line_profile=line_profile,
-                extract_strategy=extraction.strategy,
-                llm_provider=extraction.llm_provider,
-                extract_warnings=extraction.warnings,
-            )
+        line_profile = seller_default_line_profile(company_name) or _blank_batch_line_profile()
+        return _create_platform_screenshot_draft_batch(
+            batch_id=draft_id,
+            case_id=case_id,
+            draft_dir=draft_dir,
+            company_name=company_name,
+            raw_text=raw_text,
+            note=note,
+            attachments=attachments,
+            document_result=document_result,
+            ocr_result=ocr_result,
+            invoice_profile=invoice_profile,
+            requests=platform_requests,
+            line_profile=line_profile,
+            extract_strategy=extraction.strategy,
+            llm_provider=extraction.llm_provider,
+            extract_warnings=extraction.warnings,
+        )
     split_lines = _build_amount_split_lines(
         company_name=company_name,
         parse_source=parse_source,
@@ -537,6 +546,50 @@ def draft_directory(draft_id: str) -> Path:
     return WORKBENCH_ROOT / draft_id
 
 
+def _requests_from_uploaded_images(attachments: list[DraftAttachment]) -> list[PlatformInvoiceRequest]:
+    image_suffixes = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
+    image_attachments = [
+        attachment
+        for attachment in attachments
+        if Path(attachment.stored_name or attachment.original_name).suffix.lower() in image_suffixes
+    ]
+    if len(image_attachments) < 2:
+        return []
+    return [
+        PlatformInvoiceRequest(
+            source_name=attachment.original_name or attachment.stored_name,
+            buyer=BuyerInfo(name="", tax_id=""),
+            amount_with_tax="",
+            source_excerpt=f"来源图片：{attachment.original_name or attachment.stored_name}",
+        )
+        for attachment in image_attachments
+    ]
+
+
+def _blank_batch_line_profile() -> LineHistoryMatch:
+    return LineHistoryMatch(
+        project_name="",
+        tax_category="",
+        tax_code="",
+        tax_rate="",
+        specification="",
+        unit="项",
+        quantity="1",
+        matched_source="批量模式待人工补全",
+        confidence="pending_review",
+    )
+
+
+def _batch_line_coding_reference(line_profile: LineHistoryMatch) -> str:
+    if not line_profile.project_name and not line_profile.tax_code:
+        return "批量模式待人工补全，需人工复核"
+    return (
+        "销售主体历史开票档案推荐，需人工复核: "
+        f"{line_profile.matched_source} -> {line_profile.tax_category or '未记录大类'}"
+        f" / {line_profile.tax_code or '未记录编码'}"
+    )
+
+
 def _create_platform_screenshot_draft_batch(
     *,
     batch_id: str,
@@ -563,16 +616,12 @@ def _create_platform_screenshot_draft_batch(
         line = InvoiceLine(
             project_name=line_profile.project_name,
             amount_with_tax=request.amount_with_tax,
-            tax_rate=line_profile.tax_rate or "1%",
+            tax_rate=line_profile.tax_rate or ("1%" if line_profile.tax_code else ""),
             tax_category=line_profile.tax_category,
             tax_code=line_profile.tax_code,
             unit=line_profile.unit or "项",
             quantity="1",
-            coding_reference=(
-                "销售主体历史开票档案推荐，需人工复核: "
-                f"{line_profile.matched_source} -> {line_profile.tax_category or '未记录大类'}"
-                f" / {line_profile.tax_code or '未记录编码'}"
-            ),
+            coding_reference=_batch_line_coding_reference(line_profile),
         )
         child_note_parts = [note.strip(), f"来源图片：{request.source_name}"]
         if request.order_no:

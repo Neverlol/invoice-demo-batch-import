@@ -2133,3 +2133,113 @@ th {
   color: #ffefc8;
   background: rgba(233, 183, 58, 0.18);
 }
+
+.batch-mode-toggle {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 220px;
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.42);
+  cursor: pointer;
+}
+
+.batch-mode-toggle input {
+  width: auto;
+  margin-top: 3px;
+}
+
+.batch-mode-toggle span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.batch-mode-toggle small {
+  color: var(--muted, #94a3b8);
+  line-height: 1.35;
+}
+
+.sheet-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.sheet-tab {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  color: #dbeafe;
+  background: rgba(59, 130, 246, 0.18);
+  font-weight: 700;
+}
+
+.sheet-head p {
+  margin: 8px 0 0;
+  color: var(--muted, #94a3b8);
+}
+
+.sheet-table-wrap {
+  overflow-x: auto;
+}
+
+.sheet-table {
+  min-width: 1100px;
+}
+
+.sheet-table th {
+  white-space: nowrap;
+}
+
+.editable-cell {
+  min-width: 150px;
+  vertical-align: top;
+}
+
+.editable-cell input {
+  width: 100%;
+  min-width: 130px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 10px;
+  padding: 8px 10px 8px 28px;
+  color: #e5edf7;
+  background: rgba(15, 23, 42, 0.58);
+}
+
+.editable-cell small {
+  display: block;
+  margin-top: 4px;
+  color: #fecaca;
+  line-height: 1.35;
+}
+
+.edit-mark {
+  position: absolute;
+  margin: 8px 0 0 9px;
+  color: #93c5fd;
+  font-size: 12px;
+}
+
+.field-error input {
+  border-color: rgba(248, 113, 113, 0.8);
+  background: rgba(127, 29, 29, 0.22);
+}
+
+.field-warning input {
+  border-color: rgba(251, 191, 36, 0.7);
+  background: rgba(120, 53, 15, 0.18);
+}
+
+.row-needs-review {
+  background: rgba(251, 191, 36, 0.04);
+}
+
+.issue-line {
+  margin: 0 0 4px;
+  color: #fecaca;
+}
