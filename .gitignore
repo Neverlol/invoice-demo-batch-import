@@ -22,6 +22,9 @@ output/
 *.db
 sync_client.local.json
 llm_client.local.json
+_现场私密配置/
+onsite_secrets.json
+*.secret.json
 pending_events.jsonl
 pending_uploads/
 last_sync_state.json
