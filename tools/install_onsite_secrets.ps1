@@ -19,20 +19,20 @@ $secretDir = $SecretDir
 $secretPath = Join-Path $secretDir "onsite_secrets.json"
 
 if (-not (Test-Path $secretPath)) {
-  Write-Host "未找到私密配置文件：$secretPath" -ForegroundColor Red
+  Write-Host "Missing private config file: $secretPath" -ForegroundColor Red
   exit 1
 }
 
 try {
   $cfg = Get-Content -Path $secretPath -Raw -Encoding UTF8 | ConvertFrom-Json
 } catch {
-  Write-Host "私密配置 JSON 解析失败：$($_.Exception.Message)" -ForegroundColor Red
+  Write-Host "Failed to parse onsite_secrets.json: $($_.Exception.Message)" -ForegroundColor Red
   exit 1
 }
 
 function Require-Value([object]$value, [string]$name) {
   if ($null -eq $value -or [string]::IsNullOrWhiteSpace([string]$value)) {
-    throw "缺少必填配置：$name"
+    throw "Missing required config: $name"
   }
 }
 
@@ -75,18 +75,16 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($llmPath, ($llmConfig | ConvertTo-Json -Depth 8), $utf8NoBom)
 [System.IO.File]::WriteAllText($syncPath, ($syncConfig | ConvertTo-Json -Depth 8), $utf8NoBom)
 
-# Limit local secret file permissions to current user and administrators when possible.
 foreach ($path in @($llmPath, $syncPath)) {
   try {
     icacls $path /inheritance:r | Out-Null
-    $currentUserGrant = "${env:USERNAME}:(R,W)"
+    $currentUserGrant = $env:USERNAME + ':(R,W)'
     icacls $path /grant:r $currentUserGrant "Administrators:(F)" "SYSTEM:(F)" | Out-Null
   } catch {
-    Write-Host "权限收紧失败，但配置文件已写入：$path" -ForegroundColor Yellow
+    Write-Host "Warning: failed to tighten permissions for $path" -ForegroundColor Yellow
   }
 }
 
-# Store useful environment variables for future processes as a fallback.
 [Environment]::SetEnvironmentVariable("TAX_INVOICE_MIMO_API_KEY", [string]$cfg.mimo_api_key, "User")
 [Environment]::SetEnvironmentVariable("TAX_INVOICE_SYNC_TOKEN", [string]$cfg.sync_token, "User")
 [Environment]::SetEnvironmentVariable("TAX_INVOICE_SYNC_TENANT", [string]$cfg.sync_tenant, "User")
@@ -94,13 +92,13 @@ foreach ($path in @($llmPath, $syncPath)) {
 
 if ($cfg.delete_source_after_install -eq $true) {
   Remove-Item -Path $secretPath -Force
-  Write-Host "已删除源私密配置文件：$secretPath" -ForegroundColor Yellow
+  Write-Host "Deleted source private config file: $secretPath" -ForegroundColor Yellow
 } else {
-  Write-Host "源私密配置文件仍保留在：$secretPath" -ForegroundColor Yellow
-  Write-Host "现场安装确认无误后，建议删除 _现场私密配置 文件夹。" -ForegroundColor Yellow
+  Write-Host "Source private config file remains at: $secretPath" -ForegroundColor Yellow
+  Write-Host "After onsite installation is verified, delete the private config folder manually." -ForegroundColor Yellow
 }
 
-Write-Host "已写入：llm_client.local.json" -ForegroundColor Green
-Write-Host "已写入：sync_client.local.json" -ForegroundColor Green
-Write-Host "MiMo、阿里云同步、云端客户档案配置已安装。" -ForegroundColor Green
+Write-Host "Created: llm_client.local.json" -ForegroundColor Green
+Write-Host "Created: sync_client.local.json" -ForegroundColor Green
+Write-Host "MiMo, sync center, and customer profile config installed." -ForegroundColor Green
 exit 0

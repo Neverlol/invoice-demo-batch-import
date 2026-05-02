@@ -11,7 +11,7 @@ $ProjectRoot = (Resolve-Path $ProjectRoot).Path
 
 function Require-Value([object]$value, [string]$name) {
   if ($null -eq $value -or [string]::IsNullOrWhiteSpace([string]$value)) {
-    throw "缺少必填配置：$name"
+    throw "Missing required config: $name"
   }
 }
 
@@ -24,23 +24,23 @@ if ([string]::IsNullOrWhiteSpace($mimoApiKey)) {
 }
 
 try {
-  Require-Value $mimoApiKey "Windows 环境变量 TAX_INVOICE_MIMO_API_KEY"
+  Require-Value $mimoApiKey "Windows environment variable TAX_INVOICE_MIMO_API_KEY"
 } catch {
   Write-Host $_.Exception.Message -ForegroundColor Red
-  Write-Host "请先在这台电脑配置 MiMo Key，或从已可用的电脑导出。" -ForegroundColor Yellow
+  Write-Host "Please run this exporter on a PC where MiMo is already configured." -ForegroundColor Yellow
   exit 1
 }
 
 $syncPath = Join-Path $ProjectRoot "sync_client.local.json"
 if (-not (Test-Path $syncPath)) {
-  Write-Host "未找到 sync_client.local.json：$syncPath" -ForegroundColor Red
+  Write-Host "Missing sync_client.local.json: $syncPath" -ForegroundColor Red
   exit 1
 }
 
 try {
   $sync = Get-Content -Path $syncPath -Raw -Encoding UTF8 | ConvertFrom-Json
 } catch {
-  Write-Host "sync_client.local.json 解析失败：$($_.Exception.Message)" -ForegroundColor Red
+  Write-Host "Failed to parse sync_client.local.json: $($_.Exception.Message)" -ForegroundColor Red
   exit 1
 }
 
@@ -83,12 +83,12 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 try {
   icacls $secretPath /inheritance:r | Out-Null
-  $currentUserGrant = "${env:USERNAME}:(R,W)"
+  $currentUserGrant = $env:USERNAME + ':(R,W)'
   icacls $secretPath /grant:r $currentUserGrant "Administrators:(F)" "SYSTEM:(F)" | Out-Null
 } catch {
-  Write-Host "权限收紧失败，但私密配置文件已写入。" -ForegroundColor Yellow
+  Write-Host "Warning: failed to tighten file permissions, but the secret file was created." -ForegroundColor Yellow
 }
 
-Write-Host "已生成：$secretPath" -ForegroundColor Green
-Write-Host "请把 _onsite_private_config 文件夹单独保存，现场复制到新安装目录。" -ForegroundColor Green
+Write-Host "Created: $secretPath" -ForegroundColor Green
+Write-Host "Save the _onsite_private_config folder separately and copy it to the new PC install directory." -ForegroundColor Green
 exit 0
