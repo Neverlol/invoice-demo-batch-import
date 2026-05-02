@@ -1,5 +1,6 @@
 param(
-  [string]$ProjectRoot = ""
+  [string]$ProjectRoot = "",
+  [string]$SecretDir = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -8,7 +9,13 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
   $ProjectRoot = Split-Path -Parent $PSScriptRoot
 }
 $ProjectRoot = (Resolve-Path $ProjectRoot).Path
-$secretDir = Join-Path $ProjectRoot "_现场私密配置"
+if ([string]::IsNullOrWhiteSpace($SecretDir)) {
+  $SecretDir = Join-Path $ProjectRoot "_onsite_private_config"
+  if (-not (Test-Path (Join-Path $SecretDir "onsite_secrets.json"))) {
+    $SecretDir = Join-Path $ProjectRoot "_现场私密配置"
+  }
+}
+$secretDir = $SecretDir
 $secretPath = Join-Path $secretDir "onsite_secrets.json"
 
 if (-not (Test-Path $secretPath)) {
