@@ -799,3 +799,21 @@ input[name="line_amount_with_tax"] { text-align: right; font-variant-numeric: ta
   opacity: .5;
   pointer-events: none;
 }
+.profile-inline-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.banner details {
+  margin-top: 10px;
+}
+.banner pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(0,0,0,.06);
+  border-radius: 14px;
+  padding: 12px;
+  max-height: 240px;
+  overflow: auto;
+}

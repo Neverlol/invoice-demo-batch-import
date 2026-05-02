@@ -492,11 +492,11 @@ if (taxConsole) {
     }
   }
 
-  taxConsole.querySelectorAll("[data-tax-identify]").forEach((button) => {
+  document.querySelectorAll("[data-tax-identify]").forEach((button) => {
     button.addEventListener("click", identifyTaxSubject);
   });
 
-  taxConsole.querySelectorAll("[data-tax-open]").forEach((button) => {
+  document.querySelectorAll("[data-tax-open]").forEach((button) => {
     button.addEventListener("click", async () => {
       setTaxStatus("正在通过 CDP Edge 打开税局网站…", "notice");
       const body = new URLSearchParams();

@@ -3,6 +3,8 @@ from __future__ import annotations
 import csv
 import json
 import re
+import shutil
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from threading import Lock, Thread
@@ -16,6 +18,7 @@ from tax_invoice_batch_demo.batch_runner import (
     inspect_tax_browser,
     open_tax_portal,
 )
+from tax_invoice_batch_demo.history_downloader import TaxHistoryDownloader
 from tax_invoice_batch_demo.lean_workbench import (
     BATCH_OUTPUT_ROOT,
     SUCCESS_LEDGER_CSV,
@@ -213,6 +216,29 @@ def profiles_page():
     return _render_profiles_page()
 
 
+@app.post("/profiles/download-history")
+def download_profile_history():
+    months_raw = request.form.get("months") or "6"
+    try:
+        months = int(months_raw)
+    except ValueError:
+        months = 6
+    downloader = TaxHistoryDownloader(
+        cdp_endpoint=request.form.get("cdp_endpoint") or "http://127.0.0.1:9222",
+        months=months,
+    )
+    download_result = downloader.run().as_dict()
+    if download_result.get("status") != "success":
+        return _render_profiles_page(download_result=download_result), 500
+    try:
+        import_result = _import_profile_history_paths([Path(str(download_result.get("downloaded_path") or ""))])
+        result = {**download_result, "import_result": import_result}
+    except Exception as exc:  # noqa: BLE001
+        result = {**download_result, "status": "warning", "error": f"下载成功，但导入档案失败：{type(exc).__name__}: {exc}"}
+        return _render_profiles_page(download_result=result), 500
+    return _render_profiles_page(download_result=result)
+
+
 @app.post("/profiles/upload-history")
 def upload_profile_history():
     result: dict[str, object]
@@ -230,16 +256,12 @@ def upload_profile_history():
             target = _unique_path(bundle_dir / filename)
             file.save(target)
             saved_files.append(target.name)
-        ingest_counts = ingest_pending_files(DEFAULT_PROFILE_ROOT)
-        rebuild_counts = rebuild_profiles(DEFAULT_PROFILE_ROOT)
-        cloud_sync = sync_profiles_to_cloud()
+        import_result = _run_profile_ingest_pipeline()
         result = {
-            "status": "success" if cloud_sync.get("status") == "success" else "warning",
+            "status": "success" if import_result.get("cloud_sync", {}).get("status") == "success" else "warning",
             "message": "历史开票明细已导入，本地客户档案已重建，并已尝试同步到阿里云。",
             "saved_files": saved_files,
-            "ingest": ingest_counts,
-            "rebuild": rebuild_counts,
-            "cloud_sync": cloud_sync,
+            **import_result,
         }
     except Exception as exc:  # noqa: BLE001
         result = {"status": "error", "message": f"档案导入失败：{type(exc).__name__}: {exc}"}
@@ -554,7 +576,7 @@ def run_apply_failure_repairs(run_id: str):
     return redirect(url_for("draft_detail", draft_id=draft.draft_id))
 
 
-def _render_profiles_page(*, upload_result: dict[str, object] | None = None):
+def _render_profiles_page(*, upload_result: dict[str, object] | None = None, download_result: dict[str, object] | None = None):
     sellers = _cached_profile_sellers()
     summary = profile_cache_summary()
     return render_template(
@@ -562,10 +584,44 @@ def _render_profiles_page(*, upload_result: dict[str, object] | None = None):
         profile_summary=summary,
         sellers=sellers,
         upload_result=upload_result,
+        download_result=download_result,
         profile_cache_path=str(PROFILE_CACHE_PATH),
         profile_root=str(DEFAULT_PROFILE_ROOT),
         pending_event_count=0,
     )
+
+
+def _import_profile_history_paths(paths: list[Path]) -> dict[str, object]:
+    ensure_profile_dirs(DEFAULT_PROFILE_ROOT)
+    bundle_dir = DEFAULT_PROFILE_ROOT / "_收件箱" / "待处理" / f"tax_auto_download_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    copied_files: list[str] = []
+    for source in paths:
+        if not source.exists() or not source.is_file():
+            continue
+        if source.suffix.lower() == ".zip":
+            with zipfile.ZipFile(source) as archive:
+                for member in archive.infolist():
+                    if member.is_dir() or not member.filename.lower().endswith(".xlsx"):
+                        continue
+                    target = _unique_path(bundle_dir / _safe_upload_name(Path(member.filename).name))
+                    with archive.open(member) as src, target.open("wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    copied_files.append(target.name)
+        else:
+            target = _unique_path(bundle_dir / _safe_upload_name(source.name))
+            shutil.copy2(source, target)
+            copied_files.append(target.name)
+    if not copied_files:
+        raise RuntimeError("下载文件中未找到可导入的 .xlsx 历史明细。")
+    return {"copied_files": copied_files, **_run_profile_ingest_pipeline()}
+
+
+def _run_profile_ingest_pipeline() -> dict[str, object]:
+    ingest_counts = ingest_pending_files(DEFAULT_PROFILE_ROOT)
+    rebuild_counts = rebuild_profiles(DEFAULT_PROFILE_ROOT)
+    cloud_sync = sync_profiles_to_cloud()
+    return {"ingest": ingest_counts, "rebuild": rebuild_counts, "cloud_sync": cloud_sync}
 
 
 def _cached_profile_sellers() -> list[dict[str, object]]:

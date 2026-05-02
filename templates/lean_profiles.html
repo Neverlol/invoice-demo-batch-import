@@ -35,14 +35,21 @@
             <h1>主体与客户档案</h1>
             <p>集中管理当前税局主体、客户历史购买方、常用项目规则和云端同步状态。</p>
           </div>
-          <form class="actions profile-upload-actions" method="post" action="{{ url_for('upload_profile_history') }}" enctype="multipart/form-data">
-            <label class="btn primary profile-upload-button">
-              上传历史开票明细
-              <input type="file" name="history_files" accept=".xlsx" multiple data-file-input>
-            </label>
-            <button class="btn" type="submit">导入并同步阿里云</button>
+          <div class="actions profile-upload-actions">
+            <form class="profile-inline-form" method="post" action="{{ url_for('download_profile_history') }}">
+              <input type="hidden" name="cdp_endpoint" value="http://127.0.0.1:9222">
+              <input type="hidden" name="months" value="6">
+              <button class="btn primary" type="submit">自动下载近半年历史</button>
+            </form>
+            <form class="profile-inline-form" method="post" action="{{ url_for('upload_profile_history') }}" enctype="multipart/form-data">
+              <label class="btn profile-upload-button">
+                上传历史开票明细
+                <input type="file" name="history_files" accept=".xlsx,.zip" multiple data-file-input>
+              </label>
+              <button class="btn" type="submit">导入并同步阿里云</button>
+            </form>
             <button class="btn" type="button" data-tax-identify>识别当前税局主体</button>
-          </form>
+          </div>
         </div>
 
         <section class="account-strip" data-tax-console>
@@ -52,6 +59,18 @@
           <div class="account-card"><span>同步队列</span><strong>{{ pending_event_count }} 个待发送</strong><p>上传后会尝试同步到阿里云</p></div>
           <div class="notice profile-status" data-tax-status>主体识别状态：待识别。上传历史明细可新建或更新该主体客户档案。</div>
         </section>
+
+        {% if download_result %}
+          <section class="banner {% if download_result.status == 'success' %}ok{% elif download_result.status == 'warning' %}notice{% else %}alert{% endif %}">
+            <strong>{% if download_result.status == 'success' %}税局历史明细已自动下载并导入档案。{% else %}自动下载历史明细未完成。{% endif %}</strong>
+            <p>查询区间：{{ download_result.start_date or '-' }} 至 {{ download_result.end_date or '-' }}；主体：{{ download_result.subject or '未识别' }}</p>
+            {% if download_result.downloaded_path %}<p>下载文件：{{ download_result.downloaded_path }}</p>{% endif %}
+            {% if download_result.import_result and download_result.import_result.rebuild %}<p>本地档案：销售主体 {{ download_result.import_result.rebuild.seller_count }} 个 / 购买方 {{ download_result.import_result.rebuild.buyer_count }} 个 / 历史明细 {{ download_result.import_result.rebuild.trusted_history_rows }} 行。</p>{% endif %}
+            {% if download_result.import_result and download_result.import_result.cloud_sync %}<p>云端同步：{{ download_result.import_result.cloud_sync.status }}；batch_id={{ download_result.import_result.cloud_sync.batch_id or '-' }}；{{ download_result.import_result.cloud_sync.error or '' }}</p>{% endif %}
+            {% if download_result.error %}<p>{{ download_result.error }}</p>{% endif %}
+            {% if download_result.logs %}<details><summary>查看自动下载日志</summary><pre>{{ download_result.logs|join('\n') }}</pre></details>{% endif %}
+          </section>
+        {% endif %}
 
         {% if upload_result %}
           <section class="banner {% if upload_result.status == 'success' %}ok{% elif upload_result.status == 'warning' %}notice{% else %}alert{% endif %}">
@@ -85,7 +104,7 @@
                 <li class="active"><span>2</span><div><strong>上传历史开票明细</strong><small>右上角选择税局下载的 Excel，系统解析销方、购买方、项目、税码、税率。</small></div></li>
                 <li class="done"><span>3</span><div><strong>本地 active 档案重建</strong><small>已有主体增量更新；新主体自动建档。</small></div></li>
                 <li class="done"><span>4</span><div><strong>同步阿里云档案中心</strong><small>结构化档案上传云端，工作台生成草稿时优先使用云端缓存。</small></div></li>
-                <li><span>5</span><div><strong>自动下载历史记录</strong><small>下一步接真实税局“历史记录查询/下载”自动化，不做假按钮。</small></div></li>
+                <li class="active"><span>5</span><div><strong>自动下载历史记录</strong><small>已接入吉林税局路径：发票查询统计 → 全量发票查询 → 近半年 → 查询 → 全选 → 下载。</small></div></li>
               </ol>
             </div>
           </section>
@@ -102,7 +121,7 @@
             </div>
             <div class="card">
               <h2>上传要求</h2>
-              <p>请上传税局导出的历史开票明细 Excel，通常包含“信息汇总表”，且有销方名称、销方识别号、购买方名称、购方识别号、税收分类编码、货物或应税劳务名称、税率、价税合计等字段。</p>
+              <p>可点击“自动下载近半年历史”，也可上传税局导出的历史开票明细 Excel/ZIP。Excel 通常包含“信息汇总表”，且有销方名称、销方识别号、购买方名称、购方识别号、税收分类编码、货物或应税劳务名称、税率、价税合计等字段。</p>
             </div>
           </aside>
         </div>
