@@ -594,3 +594,192 @@ input[name="line_amount_with_tax"] { text-align: right; font-variant-numeric: ta
   .dashboard-form .status-rail { margin-top: 0; }
   .draft-card .draft-toolbar { grid-template-columns: 1fr; }
 }
+
+/* Draft page v4: prototype-like three-column review console */
+.draft-console-shell {
+  grid-template-columns: var(--sidebar) minmax(0, 1fr);
+}
+.nav-item.disabled {
+  opacity: .48;
+  cursor: default;
+}
+.draft-console {
+  min-width: 0;
+  padding: 30px;
+  display: grid;
+  gap: 22px;
+}
+.draft-console-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.draft-env-bar {
+  margin-bottom: 0;
+}
+.compact-flow {
+  padding: 20px;
+}
+.compact-flow .workflow-head {
+  margin-bottom: 14px;
+}
+.compact-flow .workflow-steps li {
+  min-height: 86px;
+}
+.draft-three-col {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr) 340px;
+  gap: 20px;
+  align-items: start;
+}
+.draft-left-rail,
+.draft-center-stage,
+.draft-action-rail {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+.draft-left-rail,
+.draft-action-rail {
+  position: sticky;
+  top: 24px;
+}
+.source-card,
+.compact-party-card,
+.invoice-review-card,
+.bulk-coding-card,
+.line-review-card,
+.action-panel-card,
+.audit-card,
+.failure-upload-card {
+  padding: 20px;
+}
+.source-card .card-head,
+.compact-party-card .card-head,
+.invoice-review-card .card-head,
+.bulk-coding-card .card-head,
+.line-review-card .card-head,
+.action-panel-card .card-head {
+  margin-bottom: 14px;
+}
+.review-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 10px;
+}
+.review-field > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+.review-field input,
+.review-field select,
+.invoice-chip-row select,
+.invoice-chip-row input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: rgba(255,253,250,.92);
+  padding: 11px 12px;
+  color: var(--ink);
+}
+.mini-details {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 10px 12px;
+  background: #fbf5eb;
+}
+.mini-details summary {
+  cursor: pointer;
+  font-weight: 900;
+  color: var(--ink-2);
+}
+.invoice-chip-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 140px 140px;
+  gap: 12px;
+  align-items: end;
+}
+.review-total {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 11px 13px;
+  background: #fbf5eb;
+}
+.review-total span {
+  display: block;
+  color: var(--faint);
+  font-size: 12px;
+  font-weight: 900;
+}
+.review-total strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 20px;
+  letter-spacing: -.04em;
+}
+.bulk-coding-card .bulk-fields {
+  margin-top: 12px;
+}
+.compact-line-table {
+  min-width: 1060px;
+}
+.compact-line-table th,
+.compact-line-table td {
+  padding: 10px 10px;
+}
+.compact-line-table input {
+  border-radius: 14px;
+  padding: 9px 10px;
+  background: #fffdfa;
+}
+.compact-line-table .coding-note {
+  max-width: 130px;
+}
+.action-panel-card .status-actions {
+  margin-top: 14px;
+  justify-content: stretch;
+}
+.action-panel-card .status-actions > * {
+  width: 100%;
+}
+.failure-upload-card .failure-upload {
+  margin: 12px 0;
+}
+.failure-upload-card .failure-upload input {
+  display: block;
+  margin-top: 8px;
+}
+@media (max-width: 1480px) {
+  .draft-three-col {
+    grid-template-columns: 280px minmax(0, 1fr) 320px;
+  }
+}
+@media (max-width: 1260px) {
+  .draft-three-col {
+    grid-template-columns: 1fr;
+  }
+  .draft-left-rail,
+  .draft-action-rail {
+    position: static;
+  }
+  .invoice-chip-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+@media (max-width: 720px) {
+  .draft-console {
+    padding: 18px;
+  }
+  .draft-console-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .invoice-chip-row {
+    grid-template-columns: 1fr;
+  }
+}

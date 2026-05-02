@@ -3,435 +3,178 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>开票草稿 {{ draft.draft_id }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260502-hybrid3') }}">
+    <title>发票草稿 {{ draft.draft_id }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260502-draft3col') }}">
     <script defer src="{{ url_for('static', filename='lean.js', v='20260429-v23') }}"></script>
   </head>
   <body class="operator-body">
-    <main class="dashboard-shell">
+    <div class="app-shell draft-console-shell">
       <aside class="sidebar">
-        <div class="brand-block">
-          <div class="brand-logo">AI</div>
-          <div>
-            <strong>智能开票助手</strong>
-            <small>发票草稿</small>
-          </div>
+        <div class="brand">
+          <div class="brand-mark">AI</div>
+          <div class="brand-title"><strong>智能开票助手</strong><span>Invoice Ops</span></div>
         </div>
-
-        <nav class="sidebar-nav">
-          <a class="nav-item" href="{{ url_for('index') }}">
-            <span class="nav-dot">＋</span>
-            <span>新建发票</span>
-          </a>
-          <a class="nav-item active" href="{{ url_for('draft_detail', draft_id=draft.draft_id) }}">
-            <span class="nav-dot">稿</span>
-            <span>发票草稿</span>
-          </a>
-          <a class="nav-item" href="{{ url_for('ledger_page') }}">
-            <span class="nav-dot">表</span>
-            <span>发票记录</span>
-          </a>
+        <nav class="nav">
+          <a href="{{ url_for('index') }}"><span class="nav-dot">台</span>开票工作台</a>
+          <a class="active" href="{{ url_for('draft_detail', draft_id=draft.draft_id) }}"><span class="nav-dot">稿</span>发票草稿</a>
+          <span class="nav-item disabled"><span class="nav-dot">批</span>批量复核</span>
+          <span class="nav-item disabled"><span class="nav-dot">跑</span>税局执行</span>
+          <a href="{{ url_for('ledger_page') }}"><span class="nav-dot">表</span>发票记录</a>
         </nav>
-
-        <section class="sidebar-panel">
+        <div class="sidebar-card">
           <h3>当前任务</h3>
-          <p>复核草稿、处理退回原因，确认后发起开票。</p>
-        </section>
+          <p>复核字段、处理退回原因，确认后发起开票。原始材料不再占用草稿主流程。</p>
+        </div>
       </aside>
 
-      <form class="dashboard-form" method="post" action="{{ url_for('save_draft', draft_id=draft.draft_id) }}" enctype="multipart/form-data" data-draft-form data-initial-action="{% if needs_rebuild %}save{% else %}invoice{% endif %}">
-        <section class="main-stage">
-          <header class="hy-topline hy-page-title">
-            <div>
-              <p class="hy-eyebrow">Draft {{ draft.draft_id }}</p>
-              <h1>发票草稿复核</h1>
-              <p>左侧保留材料输入和识别来源，中间复核发票字段，右侧查看智能审核、规则命中和下一步动作。</p>
-            </div>
-            <div class="hy-actions">
-              <a class="secondary button-like" href="{{ url_for('download_template', draft_id=draft.draft_id) }}">下载税局文件</a>
-              <button class="primary" data-invoice-action formaction="{{ url_for('execute_draft', draft_id=draft.draft_id) }}" type="submit">启动开票</button>
-            </div>
-          </header>
+      <form class="draft-console" method="post" action="{{ url_for('save_draft', draft_id=draft.draft_id) }}" enctype="multipart/form-data" data-draft-form data-initial-action="{% if needs_rebuild %}save{% else %}invoice{% endif %}">
+        <input type="hidden" name="raw_text" value="{{ draft.raw_text }}">
+        <input type="hidden" name="note" value="{{ draft.note }}">
 
-          <section class="hy-env-bar">
-            <div class="hy-env-item primary"><span>销售主体</span><strong>{{ draft.company_name or '未填写' }}</strong><small>提交税局前需与当前登录主体一致</small></div>
-            <div class="hy-env-item"><span>客户档案命中</span><strong>{% if draft.buyer.name %}{{ draft.buyer.name }}{% else %}待补全购买方{% endif %}</strong><small>购买方历史 / 材料抽取结果仍需人工复核</small></div>
-            <div class="hy-env-item"><span>预校验</span><strong>{{ export.error_count }} 个阻断 / {{ export.warning_count }} 个提醒</strong><small>{% if export.error_count %}请先修正阻断问题{% else %}当前可生成税局模板{% endif %}</small></div>
-            <div class="hy-env-item"><span>规则与学习</span><strong>{{ draft.lines|length }} 行明细</strong><small>人工修改赋码后可进入本地即时学习候选</small></div>
-          </section>
+        <header class="draft-console-head">
+          <div>
+            <div class="eyebrow">Draft {{ draft.draft_id }}</div>
+            <h1>发票草稿复核</h1>
+            <p>三列复核：左侧看来源与主体，中间改发票字段，右侧做审核与执行动作。</p>
+          </div>
+          <div class="actions">
+            <a class="btn" href="{{ url_for('download_template', draft_id=draft.draft_id) }}">下载税局文件</a>
+            <button class="btn primary" data-invoice-action formaction="{{ url_for('execute_draft', draft_id=draft.draft_id) }}" type="submit">启动开票</button>
+          </div>
+        </header>
 
-          <section class="work-card workflow-strip workflow-strip-primary">
-            <div class="workflow-head">
-              <div>
-                <span class="rail-badge">Service Flow</span>
-                <h2>智能开票服务流程</h2>
-              </div>
-              <p>{% if export.error_count %}当前停在复核赋码，请先修正阻断问题。{% else %}草稿已可发起开票，最终开具仍由人工确认。{% endif %}</p>
-            </div>
-            <ol class="workflow-steps">
-              <li class="done">
-                <span>1</span>
-                <div><strong>录入材料</strong><small>客户材料已进入工作台</small></div>
-              </li>
-              <li class="done">
-                <span>2</span>
-                <div><strong>生成草稿</strong><small>已生成 {{ draft.lines|length }} 行明细</small></div>
-              </li>
-              <li class="{% if export.error_count %}active{% else %}done{% endif %}">
-                <span>3</span>
-                <div><strong>复核赋码</strong><small>{% if export.error_count %}还有 {{ export.error_count }} 个阻断问题{% else %}当前可发起开票{% endif %}</small></div>
-              </li>
-              <li>
-                <span>4</span>
-                <div><strong>发起开票</strong><small>系统处理税局提交和退回原因</small></div>
-              </li>
-              <li>
-                <span>5</span>
-                <div><strong>预览确认</strong><small>只到预览，不自动最终开具</small></div>
-              </li>
-            </ol>
-          </section>
-
-          {% if saved %}<section class="banner ok"><p>修改已保存。</p></section>{% endif %}
-          {% if success_recorded %}<section class="banner ok"><p>已记录本次开票结果。</p></section>{% endif %}
-          {% if applied_failure_repairs and applied_failure_repairs.applied_count %}
-            <section class="banner ok">
-              <p>已应用 {{ applied_failure_repairs.applied_count }} 条税局建议，请确认后保存修改。</p>
-            </section>
-          {% endif %}
-          {% if run_blocked %}<section class="banner alert"><p>当前草稿还有错误，暂不能发起开票。</p></section>{% endif %}
-
-          {% if export.error_count %}
-            <section class="banner alert">
-              <strong>上传前预校验未通过</strong>
-              {% for issue in export.validation_issues %}
-                <p>{{ issue.sheet }} 第 {{ issue.row }} 行 {{ issue.header }}：{{ issue.message }}{% if issue.value %}（当前值：{{ issue.value }}）{% endif %}</p>
-              {% endfor %}
-            </section>
-          {% elif export.warning_count %}
-            <section class="banner notice"><p>有 {{ export.warning_count }} 条提醒，但无阻断错误。</p></section>
-          {% endif %}
-
-          {% if draft.extract_warnings %}
-            <section class="banner notice">
-              <strong>识别结果需复核</strong>
-              {% for warning in draft.extract_warnings %}
-                <p>{{ warning }}</p>
-              {% endfor %}
-            </section>
-          {% endif %}
-
-          {% if failure_report %}
-            <section class="banner alert failure-panel">
-              <div class="banner-head">
-                <div>
-                  <strong>税局失败明细回流</strong>
-                  <p>已解析 {{ failure_report.failure_count or (failure_report.records|length) }} 条失败原因。系统只会写回安全白名单建议，二次上传仍需助理确认后手动启动。</p>
-                </div>
-                {% if failure_report.actionable_count %}
-                  <button
-                    class="secondary compact-action"
-                    formaction="{{ url_for('apply_failure_repairs', draft_id=draft.draft_id) }}"
-                    type="submit"
-                  >应用安全建议</button>
-                {% endif %}
-              </div>
-              <div class="failure-summary-grid">
-                <div><span>可一键修复</span><strong>{{ failure_report.safe_actionable_count or failure_report.actionable_count or 0 }}</strong><small>税局给出明确建议值</small></div>
-                <div><span>需人工确认</span><strong>{{ failure_report.human_confirmation_count or failure_report.manual_review_count or 0 }}</strong><small>再次上传前必须人工确认</small></div>
-                <div><span>不可自动修复</span><strong>{{ failure_report.non_auto_count or 0 }}</strong><small>主体资质/业务口径风险</small></div>
-                <div><span>已应用</span><strong>{{ failure_report.applied_count or 0 }}</strong><small>已写回草稿</small></div>
-              </div>
-              {% if failure_report.global_records %}
-                <div class="failure-global-list">
-                  {% for item in failure_report.global_records %}
-                    <article class="failure-record global-repair {{ item.repair_decision or '' }}">
-                      <div class="failure-record-top">
-                        <span class="failure-pill">{{ item.repair_decision_label or '需人工确认' }}</span>
-                        <strong>{{ item.repair_scope_label or '同类明细集中修复' }}</strong>
-                      </div>
-                      <p>{{ item.field_name or '未识别字段' }}：{{ item.reason }}</p>
-                      {% if item.repair_focus or item.suggested_action %}<small>修复焦点：{{ item.repair_focus or item.suggested_action }}</small>{% endif %}
-                      {% if item.applied_line_labels %}<small>涉及明细：{{ item.applied_line_labels|join('、') }}</small>{% endif %}
-                      {% if item.repair_decision_hint %}<small>{{ item.repair_decision_hint }}</small>{% endif %}
-                      {% if item.repair_completion_hint %}<small>{{ item.repair_completion_hint }}</small>{% endif %}
-                    </article>
-                  {% endfor %}
-                </div>
-              {% endif %}
-              <div class="failure-record-list">
-                {% for item in failure_report.records if item.repair_scope != 'matching_lines' and (item.get('applied_line_count', 0)|int) <= 1 %}
-                  <article class="failure-record {{ item.repair_decision or '' }}">
-                    <div class="failure-record-top">
-                      <span class="failure-pill">{{ item.repair_decision_label or '需人工确认' }}</span>
-                      <strong>{{ item.target_label or ('流水号 ' ~ item.serial_no) }}</strong>
-                    </div>
-                    <p>{{ item.field_name or '未识别字段' }}：{{ item.reason }}</p>
-                    {% if item.failure_type or item.suggested_action %}
-                      <small>修复焦点：{{ item.repair_focus or item.suggested_action }}；类型：{{ item.failure_type or '未识别' }}</small>
-                    {% endif %}
-                    {% if item.repair_decision_hint %}<small>{{ item.repair_decision_hint }}</small>{% endif %}
-                    {% if item.repair_completion_hint %}<small>{{ item.repair_completion_hint }}</small>{% endif %}
-                  </article>
-                {% endfor %}
-              </div>
-            </section>
-          {% endif %}
-
-          <details class="work-card composer-card compact-composer draft-source-panel">
-            <summary class="card-head">
-              <div class="card-title">
-                <span class="card-icon">源</span>
-                <div>
-                  <h2>原始材料与补充说明</h2>
-                  <p>默认收起，避免复核页变成长表单；需要追加材料时再展开。</p>
-                </div>
-              </div>
-            </summary>
-
-            <div class="composer-meta">
-              <label class="field compact-field">
-                <span>销售方 / 纳税主体</span>
-                <input name="company_name" value="{{ draft.company_name }}" placeholder="以税局当前登录主体为准">
-              </label>
-              <label class="field compact-field">
-                <span>补充说明</span>
-                <input name="note" value="{{ draft.note }}" placeholder="写入对本次草稿的重要说明">
-              </label>
-            </div>
-
-            <div class="chat-composer">
-              <textarea name="raw_text" rows="4">{{ draft.raw_text }}</textarea>
-              <div class="composer-toolbar">
-                <label class="file-trigger">
-                  <input type="file" name="source_files" multiple data-file-input>
-                  <span>选择或拖入图片 / Excel / PDF</span>
-                </label>
-                <small data-file-status>修改后请先保存；尚未选择新材料。</small>
-                <button class="secondary" type="submit">重新生成</button>
-              </div>
-            </div>
-          </details>
-
-          <section class="work-card draft-card">
-            <header class="card-head">
-              <div class="card-title">
-                <span class="card-icon">票</span>
-                <div>
-                  <h2>发票草稿</h2>
-                  <p>像发票一样复核，确认无误后发起开票。</p>
-                </div>
-              </div>
-            </header>
-
-            <div class="draft-surface">
-              <div class="draft-toolbar">
-                <div class="editable-field field-choice">
-                  <span class="field-label">发票类型</span>
-                  <div class="choice-wrap">
-                    <span class="choice-display" data-choice-display>{{ draft.invoice_kind }}</span>
-                    <select name="invoice_kind" class="choice-select">
-                      <option value="普通发票" {% if draft.invoice_kind == '普通发票' %}selected{% endif %}>普通发票</option>
-                      <option value="增值税专用发票" {% if draft.invoice_kind == '增值税专用发票' %}selected{% endif %}>增值税专用发票</option>
-                    </select>
-                  </div>
-                  <button type="button" class="icon-button" data-toggle-choice title="修改发票类型">✎</button>
-                </div>
-                <div class="editable-field">
-                  <span class="field-label">特定业务</span>
-                  <input name="special_business" value="{{ draft.special_business }}" placeholder="无特定业务可留空" readonly data-lockable>
-                  <button type="button" class="icon-button" data-edit-field title="修改特定业务">✎</button>
-                </div>
-                <div class="surface-chip">待上传税局</div>
-              </div>
-
-              <div class="party-grid single-party-grid">
-                <section class="info-card">
-                  <div class="section-head">
-                    <h3>购买方</h3>
-                    <button type="button" class="icon-button" data-edit-section="buyer-fields" title="编辑购买方">✎</button>
-                  </div>
-                  <div class="field-stack" data-edit-scope="buyer-fields">
-                    <div class="editable-field"><span class="field-label">名称</span><input name="buyer_name" value="{{ draft.buyer.name }}" readonly data-lockable></div>
-                    <div class="editable-field"><span class="field-label">税号</span><input name="buyer_tax_id" value="{{ draft.buyer.tax_id }}" readonly data-lockable></div>
-                    <div class="editable-field"><span class="field-label">地址</span><input name="buyer_address" value="{{ draft.buyer.address }}" readonly data-lockable></div>
-                    <div class="editable-field"><span class="field-label">电话</span><input name="buyer_phone" value="{{ draft.buyer.phone }}" readonly data-lockable></div>
-                    <div class="editable-field"><span class="field-label">开户行</span><input name="buyer_bank_name" value="{{ draft.buyer.bank_name }}" readonly data-lockable></div>
-                    <div class="editable-field"><span class="field-label">银行账号</span><input name="buyer_bank_account" value="{{ draft.buyer.bank_account }}" readonly data-lockable></div>
-                  </div>
-                </section>
-              </div>
-
-              <section class="bulk-strip">
-                <div class="bulk-title">
-                  <h3>一键修改</h3>
-                  <small>面对多行明细时，用这里统一改赋码和税率。</small>
-                </div>
-                <div class="taxonomy-picker" data-taxonomy-picker>
-                  <label>查找税收编码<input data-taxonomy-query placeholder="输入关键词，如：医疗、注射、器械；选择后自动填入下方"></label>
-                  <div class="taxonomy-results" data-taxonomy-results hidden></div>
-                </div>
-                <div class="bulk-fields">
-                  <label>选中的赋码大类<input data-bulk-source="line_tax_category" placeholder="选择官方编码后自动填入，也可手动改"></label>
-                  <label>选中的税收编码<input data-bulk-source="line_tax_code" placeholder="选择官方编码后自动填入"></label>
-                  <label>税率<input data-bulk-source="line_tax_rate" placeholder="例如：13%"></label>
-                </div>
-                <div class="bulk-actions">
-                  <button type="button" class="secondary" data-bulk-apply="line_tax_rate">只改税率</button>
-                  <button type="button" class="secondary" data-bulk-apply="line_tax_category">只改大类</button>
-                  <button type="button" class="secondary" data-bulk-apply="line_tax_code">只改编码</button>
-                  <button type="button" class="primary" data-bulk-apply-all>应用到全部明细</button>
-                </div>
-              </section>
-
-              <section class="line-board" data-edit-scope="line-board">
-                <div class="line-board-head">
-                  <h3>开票明细</h3>
-                  <div class="head-actions">
-                    <button type="button" class="secondary" data-edit-section="line-board">编辑明细</button>
-                    <button type="button" class="secondary" data-add-line>新增项目</button>
-                  </div>
-                </div>
-                <div class="table-wrap table-scroll">
-                  <table class="line-table">
-                    <thead>
-                      <tr>
-                        <th>项目名称</th>
-                        <th>赋码大类</th>
-                        <th>税收编码</th>
-                        <th>命中来源</th>
-                        <th>规格型号</th>
-                        <th>单位</th>
-                        <th>数量</th>
-                        <th>单价(元)</th>
-                        <th>金额(元)</th>
-                        <th>税率/征收率</th>
-                      </tr>
-                    </thead>
-                    <tbody data-lines>
-                      {% for line in line_rows %}
-                        <tr>
-                          <td>
-                            <input name="line_project_name" value="{{ line.project_name }}" readonly data-lockable>
-                            {% if line.failure_alerts %}
-                              <div class="line-failure-list">
-                                {% for failure in line.failure_alerts %}
-                                  <div class="line-failure">
-                                    <span>{{ failure.repair_decision_label or '税局退回' }}</span>
-                                    <strong>{{ failure.field_name or '明细字段' }}</strong>
-                                    <small>{{ failure.repair_focus or failure.suggested_action }}</small>
-                                    {% if failure.repair_decision_hint %}<small>{{ failure.repair_decision_hint }}</small>{% endif %}
-                                    {% if failure.repair_status == 'applied' %}
-                                      <em class="repair-applied">已应用：{{ failure.applied_value or failure.repair_value }}</em>
-                                    {% elif failure.repair_field and failure.repair_value %}
-                                      <button
-                                        type="button"
-                                        class="inline-repair"
-                                        data-apply-line-repair
-                                        data-repair-field="{{ failure.repair_field }}"
-                                        data-repair-value="{{ failure.repair_value }}"
-                                      >应用建议：{{ failure.repair_value }}</button>
-                                    {% endif %}
-                                  </div>
-                                {% endfor %}
-                              </div>
-                            {% endif %}
-                          </td>
-                          <td><input name="line_tax_category" value="{{ line.tax_category }}" readonly data-lockable></td>
-                          <td><input name="line_tax_code" value="{{ line.tax_code }}" readonly data-lockable></td>
-                          {% set coding_reference = line.coding_reference or '' %}
-                          <td>
-                            <span class="coding-note{% if coding_reference.startswith('智能推荐') %} smart-suggestion{% endif %}" data-coding-note title="{{ coding_reference }}">
-                              {{ coding_reference.split(':', 1)[0] if coding_reference else '待人工复核' }}
-                            </span>
-                          </td>
-                          <td><input name="line_specification" value="{{ line.specification }}" readonly data-lockable></td>
-                          <td><input name="line_unit" value="{{ line.unit }}" readonly data-lockable></td>
-                          <td><input name="line_quantity" value="{{ line.quantity }}" readonly data-lockable></td>
-                          <td><input name="line_unit_price" value="{{ line.unit_price }}" readonly data-lockable></td>
-                          <td><input name="line_amount_with_tax" value="{{ line.amount_with_tax }}" readonly data-lockable></td>
-                          <td>
-                            <input name="line_tax_rate" value="{{ line.tax_rate }}" readonly data-lockable>
-                            <input type="hidden" name="line_coding_reference" value="{{ line.coding_reference }}">
-                          </td>
-                        </tr>
-                      {% endfor %}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-
-              <footer class="draft-foot">
-                <div class="total-block">
-                  <span>价税合计</span>
-                  <strong>{{ preview.amount_total or '0.00' }}</strong>
-                </div>
-                <div class="total-block">
-                  <span>税额预估</span>
-                  <strong>{{ preview.tax_total or '0.00' }}</strong>
-                </div>
-              </footer>
-            </div>
-          </section>
+        <section class="env-bar draft-env-bar">
+          <div class="env-item"><span>销售主体</span><strong>{{ draft.company_name or '未填写' }}</strong><small>提交前需与当前税局登录主体一致</small></div>
+          <div class="env-item"><span>购买方</span><strong>{{ draft.buyer.name or '待补全购买方' }}</strong><small>材料抽取结果仍需人工复核</small></div>
+          <div class="env-item"><span>预校验</span><strong>{{ export.error_count }} 个阻断 / {{ export.warning_count }} 个提醒</strong><small>{% if export.error_count %}请先修正阻断问题{% else %}当前可生成税局模板{% endif %}</small></div>
+          <div class="env-item"><span>明细</span><strong>{{ draft.lines|length }} 行</strong><small>修改赋码后可保存为学习候选</small></div>
         </section>
 
-        <aside class="status-rail">
-          <header class="rail-head">
-            <span class="rail-badge">Action Panel</span>
-            <h2>执行操作</h2>
-          </header>
+        {% if saved %}<section class="banner ok"><p>修改已保存。</p></section>{% endif %}
+        {% if success_recorded %}<section class="banner ok"><p>已记录本次开票结果。</p></section>{% endif %}
+        {% if run_blocked %}<section class="banner alert"><p>当前草稿还有错误，暂不能发起开票。</p></section>{% endif %}
+        {% if applied_failure_repairs and applied_failure_repairs.applied_count %}<section class="banner ok"><p>已应用 {{ applied_failure_repairs.applied_count }} 条税局建议，请确认后保存修改。</p></section>{% endif %}
+        {% if export.error_count %}
+          <section class="banner alert"><strong>上传前预校验未通过</strong>{% for issue in export.validation_issues %}<p>{{ issue.sheet }} 第 {{ issue.row }} 行 {{ issue.header }}：{{ issue.message }}{% if issue.value %}（当前值：{{ issue.value }}）{% endif %}</p>{% endfor %}</section>
+        {% elif export.warning_count %}
+          <section class="banner notice"><p>有 {{ export.warning_count }} 条提醒，但无阻断错误。</p></section>
+        {% endif %}
 
-          <section class="status-card">
-            <h3>核心结果</h3>
-            <div class="result-list">
-              <div><span>票种</span><strong>{{ draft.invoice_kind or '未定' }}</strong></div>
-              <div><span>购买方</span><strong>{{ draft.buyer.name or '未识别' }}</strong></div>
-              <div><span>明细行</span><strong>{{ draft.lines|length }}</strong></div>
-              <div><span>价税合计</span><strong>{{ preview.amount_total or '0.00' }}</strong></div>
-            </div>
-          </section>
+        <section class="workflow-strip compact-flow">
+          <div class="workflow-head"><div><span class="eyebrow">Service Flow</span><h2>智能开票服务流程</h2></div><p>{% if export.error_count %}当前停在复核赋码，请先修正阻断问题。{% else %}草稿已可发起开票，最终开具仍由人工确认。{% endif %}</p></div>
+          <ol class="workflow-steps">
+            <li class="done"><span>1</span><div><strong>录入材料</strong><small>已完成</small></div></li>
+            <li class="done"><span>2</span><div><strong>生成草稿</strong><small>{{ draft.lines|length }} 行明细</small></div></li>
+            <li class="{% if export.error_count %}active{% else %}done{% endif %}"><span>3</span><div><strong>复核赋码</strong><small>{% if export.error_count %}仍有阻断{% else %}可发起开票{% endif %}</small></div></li>
+            <li><span>4</span><div><strong>发起开票</strong><small>提交模板与退回处理</small></div></li>
+            <li><span>5</span><div><strong>预览确认</strong><small>不自动最终开具</small></div></li>
+          </ol>
+        </section>
 
-          <section class="status-card">
-            <h3>智能审核</h3>
-            <div class="hy-panel-list" style="margin-top:12px;">
-              <div class="hy-panel-item"><span class="hy-badge {% if export.error_count %}error{% elif export.warning_count %}warn{% else %}ok{% endif %}">预校验</span><p>{% if export.error_count %}存在阻断错误，暂不可上传税局。{% elif export.warning_count %}无阻断错误，但有提醒需要复核。{% else %}当前模板预校验通过。{% endif %}</p></div>
-              <div class="hy-panel-item"><span class="hy-badge info">字段来源</span><p>购买方、金额、明细来自材料解析、历史客户档案或人工修正；保存修改不会重复触发 OCR / LLM。</p></div>
-              <div class="hy-panel-item"><span class="hy-badge warn">规则学习</span><p>人工修改税收编码、税率或项目后，会作为本地即时学习候选，后续仍需人工复核。</p></div>
-            </div>
-          </section>
+        <div class="draft-three-col">
+          <aside class="draft-left-rail">
+            <section class="card source-card">
+              <div class="card-head"><div><h2>材料摘要</h2><p>只看来源，不在草稿页重复输入材料。</p></div></div>
+              <div class="panel-list">
+                <div class="panel-item"><span class="badge info">原始文本</span><p>{{ draft.raw_text[:180] if draft.raw_text else '本草稿没有保留原始文本。' }}{% if draft.raw_text|length > 180 %}…{% endif %}</p></div>
+                <div class="panel-item"><span class="badge {% if draft.ocr_status == 'success' %}ok{% else %}neutral{% endif %}">OCR</span><p>{{ draft.ocr_note or draft.ocr_status or '未请求 OCR' }}</p></div>
+                <div class="panel-item"><span class="badge {% if draft.source_doc_status == 'success' %}ok{% else %}neutral{% endif %}">文件解析</span><p>{{ draft.source_doc_note or draft.source_doc_status or '未解析文件' }}</p></div>
+              </div>
+            </section>
 
-          <section class="status-card operation-card">
-            <div class="operation-head">
-              <h3>下一步操作</h3>
-              <span>{% if export.error_count %}待修正{% else %}可开票{% endif %}</span>
-            </div>
+            <section class="card compact-party-card">
+              <div class="card-head"><div><h2>主体与购买方</h2><p>用于草稿生成与提交前安全核对。</p></div></div>
+              <label class="review-field"><span>销售方 / 纳税主体</span><input name="company_name" value="{{ draft.company_name }}" placeholder="销售方主体"></label>
+              <label class="review-field"><span>购买方名称</span><input name="buyer_name" value="{{ draft.buyer.name }}" placeholder="购买方名称"></label>
+              <label class="review-field"><span>购买方税号</span><input name="buyer_tax_id" value="{{ draft.buyer.tax_id }}" placeholder="购买方税号"></label>
+              <details class="mini-details"><summary>更多购买方字段</summary>
+                <label class="review-field"><span>地址</span><input name="buyer_address" value="{{ draft.buyer.address }}"></label>
+                <label class="review-field"><span>电话</span><input name="buyer_phone" value="{{ draft.buyer.phone }}"></label>
+                <label class="review-field"><span>开户行</span><input name="buyer_bank_name" value="{{ draft.buyer.bank_name }}"></label>
+                <label class="review-field"><span>银行账号</span><input name="buyer_bank_account" value="{{ draft.buyer.bank_account }}"></label>
+              </details>
+            </section>
+          </aside>
 
-            <label class="failure-upload">
-              <span>税局失败明细</span>
-              <strong>上传失败明细 Excel</strong>
-              <small>开票未通过时，用这里查看原因并定位明细。</small>
-              <em>选择 Excel 文件</em>
-              <input type="file" name="failure_file" accept=".xlsx">
-            </label>
+          <main class="draft-center-stage">
+            <section class="card invoice-review-card">
+              <div class="card-head"><div><h2>发票复核</h2><p>像看一张发票一样复核，不再把页面做成材料录入表单。</p></div><span class="badge {% if export.error_count %}error{% elif export.warning_count %}warn{% else %}ok{% endif %}">{% if export.error_count %}待修正{% elif export.warning_count %}待复核{% else %}可开票{% endif %}</span></div>
+              <div class="invoice-chip-row">
+                <label class="review-field"><span>发票类型</span><select name="invoice_kind"><option value="普通发票" {% if draft.invoice_kind == '普通发票' %}selected{% endif %}>普通发票</option><option value="增值税专用发票" {% if draft.invoice_kind == '增值税专用发票' %}selected{% endif %}>增值税专用发票</option></select></label>
+                <label class="review-field"><span>特定业务</span><input name="special_business" value="{{ draft.special_business }}" placeholder="无特定业务可留空"></label>
+                <div class="review-total"><span>价税合计</span><strong>{{ preview.amount_total or '0.00' }}</strong></div>
+                <div class="review-total"><span>税额预估</span><strong>{{ preview.tax_total or '0.00' }}</strong></div>
+              </div>
+            </section>
 
-            <div class="status-actions" data-action-panel>
-              <button class="{% if needs_rebuild %}secondary{% else %}primary{% endif %}" data-invoice-action formaction="{{ url_for('execute_draft', draft_id=draft.draft_id) }}" type="submit">启动开票</button>
-              <button class="{% if needs_rebuild %}primary{% else %}secondary{% endif %}" data-save-action type="submit">保存修改</button>
-              <a class="secondary action-link" href="{{ url_for('download_template', draft_id=draft.draft_id) }}">下载税局文件</a>
-              <button class="secondary" formaction="{{ url_for('upload_failure', draft_id=draft.draft_id) }}" type="submit">解析失败明细</button>
-              <button class="secondary quiet-action" formaction="{{ url_for('mark_success', draft_id=draft.draft_id) }}" type="submit">标记成功并累计</button>
-            </div>
+            <section class="card bulk-coding-card" id="bulk-coding">
+              <div class="card-head"><div><h2>一键赋码</h2><p>多行明细统一修改税率、税收分类或编码。</p></div></div>
+              <div class="taxonomy-picker" data-taxonomy-picker><label class="review-field"><span>查找税收编码</span><input data-taxonomy-query placeholder="输入关键词，如：医疗、注射、器械；选择后自动填入下方"></label><div class="taxonomy-results" data-taxonomy-results hidden></div></div>
+              <div class="bulk-fields"><label>赋码大类<input data-bulk-source="line_tax_category" placeholder="选择官方编码后自动填入，也可手动改"></label><label>税收编码<input data-bulk-source="line_tax_code" placeholder="选择官方编码后自动填入"></label><label>税率<input data-bulk-source="line_tax_rate" placeholder="例如：13%"></label></div>
+              <div class="bulk-actions"><button type="button" class="btn" data-bulk-apply="line_tax_rate">只改税率</button><button type="button" class="btn" data-bulk-apply="line_tax_category">只改大类</button><button type="button" class="btn" data-bulk-apply="line_tax_code">只改编码</button><button type="button" class="btn primary" data-bulk-apply-all>应用到全部明细</button></div>
+            </section>
 
-            <details class="advanced-settings">
-              <summary>浏览器连接设置</summary>
-              <label class="field">
-                <span>本机浏览器地址</span>
-                <input name="cdp_endpoint" value="http://127.0.0.1:9222">
-              </label>
-            </details>
-          </section>
-        </aside>
+            <section class="card line-review-card" data-edit-scope="line-board">
+              <div class="card-head"><div><h2>开票明细</h2><p>字段直接在表格中修改；保存修改不会重新触发 OCR / LLM。</p></div><button type="button" class="btn" data-add-line>新增项目</button></div>
+              <div class="table-wrap table-scroll"><table class="line-table compact-line-table"><thead><tr><th>项目名称</th><th>赋码大类</th><th>税收编码</th><th>命中来源</th><th>规格</th><th>单位</th><th>数量</th><th>单价</th><th>金额</th><th>税率</th></tr></thead><tbody data-lines>
+                {% for line in line_rows %}
+                  <tr>
+                    <td><input name="line_project_name" value="{{ line.project_name }}">{% if line.failure_alerts %}<div class="line-failure-list">{% for failure in line.failure_alerts %}<div class="line-failure"><span>{{ failure.repair_decision_label or '税局退回' }}</span><strong>{{ failure.field_name or '明细字段' }}</strong><small>{{ failure.repair_focus or failure.suggested_action }}</small>{% if failure.repair_field and failure.repair_value %}<button type="button" class="inline-repair" data-apply-line-repair data-repair-field="{{ failure.repair_field }}" data-repair-value="{{ failure.repair_value }}">应用建议：{{ failure.repair_value }}</button>{% endif %}</div>{% endfor %}</div>{% endif %}</td>
+                    <td><input name="line_tax_category" value="{{ line.tax_category }}"></td>
+                    <td><input name="line_tax_code" value="{{ line.tax_code }}"></td>
+                    {% set coding_reference = line.coding_reference or '' %}
+                    <td><span class="coding-note{% if coding_reference.startswith('智能推荐') %} smart-suggestion{% endif %}" data-coding-note title="{{ coding_reference }}">{{ coding_reference.split(':', 1)[0] if coding_reference else '待人工复核' }}</span><input type="hidden" name="line_coding_reference" value="{{ line.coding_reference }}"></td>
+                    <td><input name="line_specification" value="{{ line.specification }}"></td>
+                    <td><input name="line_unit" value="{{ line.unit }}"></td>
+                    <td><input name="line_quantity" value="{{ line.quantity }}"></td>
+                    <td><input name="line_unit_price" value="{{ line.unit_price }}"></td>
+                    <td><input name="line_amount_with_tax" value="{{ line.amount_with_tax }}"></td>
+                    <td><input name="line_tax_rate" value="{{ line.tax_rate }}"></td>
+                  </tr>
+                {% endfor %}
+              </tbody></table></div>
+            </section>
+          </main>
+
+          <aside class="draft-action-rail">
+            <section class="card action-panel-card">
+              <div class="card-head"><div><h2>执行操作</h2><p>{% if export.error_count %}先修正阻断项{% else %}当前可发起开票{% endif %}</p></div></div>
+              <div class="result-list">
+                <div><span>票种</span><strong>{{ draft.invoice_kind or '未定' }}</strong></div>
+                <div><span>购买方</span><strong>{{ draft.buyer.name or '未识别' }}</strong></div>
+                <div><span>明细行</span><strong>{{ draft.lines|length }}</strong></div>
+                <div><span>价税合计</span><strong>{{ preview.amount_total or '0.00' }}</strong></div>
+              </div>
+              <div class="status-actions" data-action-panel>
+                <button class="btn primary" data-invoice-action formaction="{{ url_for('execute_draft', draft_id=draft.draft_id) }}" type="submit">启动开票</button>
+                <button class="btn" data-save-action type="submit">保存修改</button>
+                <a class="btn" href="{{ url_for('download_template', draft_id=draft.draft_id) }}">下载税局文件</a>
+                <button class="btn" formaction="{{ url_for('mark_success', draft_id=draft.draft_id) }}" type="submit">标记成功并累计</button>
+              </div>
+              <details class="mini-details"><summary>浏览器连接设置</summary><label class="review-field"><span>本机浏览器地址</span><input name="cdp_endpoint" value="http://127.0.0.1:9222"></label></details>
+            </section>
+
+            <section class="card audit-card">
+              <h2>智能审核</h2>
+              <div class="panel-list" style="margin-top:12px;">
+                <div class="panel-item"><span class="badge {% if export.error_count %}error{% elif export.warning_count %}warn{% else %}ok{% endif %}">预校验</span><p>{% if export.error_count %}存在阻断错误，暂不可上传税局。{% elif export.warning_count %}无阻断错误，但有提醒需要复核。{% else %}当前模板预校验通过。{% endif %}</p></div>
+                <div class="panel-item"><span class="badge info">字段来源</span><p>购买方、金额、明细来自材料解析、历史客户档案或人工修正；保存修改不会重复触发 OCR / LLM。</p></div>
+                <div class="panel-item"><span class="badge warn">规则学习</span><p>人工修改税收编码、税率或项目后，会作为本地即时学习候选，后续仍需人工复核。</p></div>
+              </div>
+            </section>
+
+            <section class="card failure-upload-card">
+              <h2>失败明细</h2>
+              <p>税局开票未通过时，上传失败明细 Excel 并回填安全建议。</p>
+              <label class="failure-upload"><strong>选择失败明细 Excel</strong><input type="file" name="failure_file" accept=".xlsx"></label>
+              <button class="btn" formaction="{{ url_for('upload_failure', draft_id=draft.draft_id) }}" type="submit">解析失败明细</button>
+              {% if failure_report %}<div class="notice" style="margin-top:12px;">已解析 {{ failure_report.failure_count or (failure_report.records|length) }} 条失败原因。{% if failure_report.actionable_count %}<button class="btn" formaction="{{ url_for('apply_failure_repairs', draft_id=draft.draft_id) }}" type="submit">应用安全建议</button>{% endif %}</div>{% endif %}
+            </section>
+
+            <section class="notice"><strong>安全边界：</strong>系统只辅助上传模板并进入税局预览页，不会自动最终开具。</section>
+          </aside>
+        </div>
       </form>
-    </main>
+    </div>
   </body>
 </html>
