@@ -783,3 +783,19 @@ input[name="line_amount_with_tax"] { text-align: right; font-variant-numeric: ta
     grid-template-columns: 1fr;
   }
 }
+
+/* Profiles trust-layer page */
+.profile-upload-actions {
+  align-items: center;
+}
+.profile-upload-button input {
+  display: none;
+}
+.account-strip .profile-status {
+  grid-column: 1 / -1;
+}
+.nav .nav-item.disabled,
+.sidebar-nav .nav-item.disabled {
+  opacity: .5;
+  pointer-events: none;
+}

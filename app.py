@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 from threading import Lock, Thread
 from uuid import uuid4
@@ -37,10 +38,17 @@ from tax_invoice_batch_demo.lean_workbench import (
 )
 from tax_invoice_demo import workbench as workbench_module
 from tax_invoice_demo.case_events import record_case_event
-from tax_invoice_demo.customer_profiles import profile_cache_summary, profile_counts_for_seller
+from tax_invoice_demo.customer_profiles import PROFILE_CACHE_PATH, profile_cache_summary, profile_counts_for_seller
 from tax_invoice_demo.models import BuyerInfo, DraftBatchItem, InvoiceLine
 from tax_invoice_demo.sync_service import schedule_background_customer_profile_pull, schedule_background_rule_pull
 from tax_invoice_demo.taxonomy_search import search_taxonomy
+from tools.ingest_customer_profile_inbox import (
+    DEFAULT_PROFILE_ROOT,
+    ensure_dirs as ensure_profile_dirs,
+    ingest_pending_files,
+    rebuild_profiles,
+    sync_profiles_to_cloud,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -198,6 +206,45 @@ def apply_failure_repairs(draft_id: str):
         applied_failure_repairs=result,
         needs_rebuild=bool(result.get("applied_count")),
     )
+
+
+@app.get("/profiles")
+def profiles_page():
+    return _render_profiles_page()
+
+
+@app.post("/profiles/upload-history")
+def upload_profile_history():
+    result: dict[str, object]
+    files = [file for file in request.files.getlist("history_files") if file and file.filename]
+    if not files:
+        result = {"status": "error", "message": "请先选择从税局下载的历史开票明细 Excel。"}
+        return _render_profiles_page(upload_result=result), 400
+    try:
+        ensure_profile_dirs(DEFAULT_PROFILE_ROOT)
+        bundle_dir = DEFAULT_PROFILE_ROOT / "_收件箱" / "待处理" / f"workbench_upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        bundle_dir.mkdir(parents=True, exist_ok=True)
+        saved_files = []
+        for file in files:
+            filename = _safe_upload_name(file.filename or "history.xlsx")
+            target = _unique_path(bundle_dir / filename)
+            file.save(target)
+            saved_files.append(target.name)
+        ingest_counts = ingest_pending_files(DEFAULT_PROFILE_ROOT)
+        rebuild_counts = rebuild_profiles(DEFAULT_PROFILE_ROOT)
+        cloud_sync = sync_profiles_to_cloud()
+        result = {
+            "status": "success" if cloud_sync.get("status") == "success" else "warning",
+            "message": "历史开票明细已导入，本地客户档案已重建，并已尝试同步到阿里云。",
+            "saved_files": saved_files,
+            "ingest": ingest_counts,
+            "rebuild": rebuild_counts,
+            "cloud_sync": cloud_sync,
+        }
+    except Exception as exc:  # noqa: BLE001
+        result = {"status": "error", "message": f"档案导入失败：{type(exc).__name__}: {exc}"}
+        return _render_profiles_page(upload_result=result), 500
+    return _render_profiles_page(upload_result=result)
 
 
 @app.get("/api/taxonomy/search")
@@ -505,6 +552,71 @@ def run_apply_failure_repairs(run_id: str):
         abort(404)
     apply_failure_repairs_to_draft(draft)
     return redirect(url_for("draft_detail", draft_id=draft.draft_id))
+
+
+def _render_profiles_page(*, upload_result: dict[str, object] | None = None):
+    sellers = _cached_profile_sellers()
+    summary = profile_cache_summary()
+    return render_template(
+        "lean_profiles.html",
+        profile_summary=summary,
+        sellers=sellers,
+        upload_result=upload_result,
+        profile_cache_path=str(PROFILE_CACHE_PATH),
+        profile_root=str(DEFAULT_PROFILE_ROOT),
+        pending_event_count=0,
+    )
+
+
+def _cached_profile_sellers() -> list[dict[str, object]]:
+    if not PROFILE_CACHE_PATH.exists():
+        return []
+    try:
+        payload = json.loads(PROFILE_CACHE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(payload, list):
+        return []
+    rows = []
+    for seller in payload:
+        if not isinstance(seller, dict):
+            continue
+        projects = [item for item in seller.get("project_profiles") or [] if isinstance(item, dict)]
+        buyers = [item for item in seller.get("buyer_profiles") or [] if isinstance(item, dict)]
+        top_project = projects[0] if projects else {}
+        rows.append(
+            {
+                "seller_name": str(seller.get("seller_name") or ""),
+                "seller_tax_id": str(seller.get("seller_tax_id") or ""),
+                "buyer_count": len(buyers),
+                "project_count": len(projects),
+                "top_project": str(top_project.get("project_name") or ""),
+                "top_tax_category": str(top_project.get("tax_category") or ""),
+                "top_tax_code": str(top_project.get("tax_code") or ""),
+                "top_tax_rate": str(top_project.get("tax_rate") or ""),
+                "updated_at": str(seller.get("updated_at") or ""),
+                "source_confidence": str(seller.get("source_confidence") or ""),
+            }
+        )
+    return rows
+
+
+def _safe_upload_name(filename: str) -> str:
+    cleaned = Path(filename).name.strip().replace("\\", "_").replace("/", "_")
+    cleaned = re.sub(r"[\x00-\x1f:*?\"<>|]+", "_", cleaned).strip("._ ")
+    if not cleaned.lower().endswith(".xlsx"):
+        cleaned = f"{cleaned or 'history'}.xlsx"
+    return cleaned or "history.xlsx"
+
+
+def _unique_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    for index in range(2, 1000):
+        candidate = path.with_name(f"{path.stem}_{index}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise RuntimeError(f"无法生成不重名文件：{path}")
 
 
 def _success_ledger_row_count() -> int:

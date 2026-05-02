@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>主体与档案</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260502-profiles1') }}">
+    <script defer src="{{ url_for('static', filename='lean.js', v='20260502-v27') }}"></script>
+  </head>
+  <body class="operator-body">
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">AI</div>
+          <div class="brand-title"><strong>智能开票助手</strong><span>Invoice Ops</span></div>
+        </div>
+        <nav class="nav">
+          <a href="{{ url_for('index') }}"><span class="nav-dot">台</span>开票工作台</a>
+          <span class="nav-item disabled"><span class="nav-dot">稿</span>发票草稿</span>
+          <span class="nav-item disabled"><span class="nav-dot">批</span>批量复核</span>
+          <span class="nav-item disabled"><span class="nav-dot">跑</span>税局执行</span>
+          <a class="active" href="{{ url_for('profiles_page') }}"><span class="nav-dot">档</span>主体与档案</a>
+          <a href="{{ url_for('ledger_page') }}"><span class="nav-dot">表</span>发票记录</a>
+        </nav>
+        <div class="sidebar-card">
+          <h3>Mercury 信任层</h3>
+          <p>主体、档案、规则、同步做成账户后台；让助理知道系统为什么可信。</p>
+        </div>
+      </aside>
+
+      <main class="page">
+        <div class="topline">
+          <div>
+            <div class="eyebrow">Mercury-like trust layer</div>
+            <h1>主体与客户档案</h1>
+            <p>集中管理当前税局主体、客户历史购买方、常用项目规则和云端同步状态。</p>
+          </div>
+          <form class="actions profile-upload-actions" method="post" action="{{ url_for('upload_profile_history') }}" enctype="multipart/form-data">
+            <label class="btn primary profile-upload-button">
+              上传历史开票明细
+              <input type="file" name="history_files" accept=".xlsx" multiple data-file-input>
+            </label>
+            <button class="btn" type="submit">导入并同步阿里云</button>
+            <button class="btn" type="button" data-tax-identify>识别当前税局主体</button>
+          </form>
+        </div>
+
+        <section class="account-strip" data-tax-console>
+          <div class="account-card dark"><span>当前税局账户</span><strong>待识别</strong><p>连接 CDP Edge 后点击“识别当前税局主体”。</p></div>
+          <div class="account-card"><span>客户档案</span><strong>{{ profile_summary.buyer_count or 0 }} 个购买方</strong><p>{{ profile_summary.seller_count or 0 }} 个销售主体 / {{ profile_summary.project_profile_count or 0 }} 个常用项目</p></div>
+          <div class="account-card"><span>档案来源</span><strong>税局历史明细</strong><p>只把官方历史明细纳入 active 档案</p></div>
+          <div class="account-card"><span>同步队列</span><strong>{{ pending_event_count }} 个待发送</strong><p>上传后会尝试同步到阿里云</p></div>
+          <div class="notice profile-status" data-tax-status>主体识别状态：待识别。上传历史明细可新建或更新该主体客户档案。</div>
+        </section>
+
+        {% if upload_result %}
+          <section class="banner {% if upload_result.status == 'success' %}ok{% elif upload_result.status == 'warning' %}notice{% else %}alert{% endif %}">
+            <strong>{{ upload_result.message }}</strong>
+            {% if upload_result.saved_files %}<p>已接收文件：{{ upload_result.saved_files|join('、') }}</p>{% endif %}
+            {% if upload_result.rebuild %}<p>本地档案：销售主体 {{ upload_result.rebuild.seller_count }} 个 / 购买方 {{ upload_result.rebuild.buyer_count }} 个 / 历史明细 {{ upload_result.rebuild.trusted_history_rows }} 行。</p>{% endif %}
+            {% if upload_result.cloud_sync %}<p>云端同步：{{ upload_result.cloud_sync.status }}；batch_id={{ upload_result.cloud_sync.batch_id or '-' }}；{{ upload_result.cloud_sync.error or '' }}</p>{% endif %}
+          </section>
+        {% endif %}
+
+        <div class="layout">
+          <section class="stack">
+            <div class="card">
+              <div class="card-head">
+                <div><h2>销售主体账户</h2><p>像账户后台一样管理不同纳税主体，避免助理开错主体或混用客户档案。</p></div>
+                <span class="badge {% if sellers %}ok{% else %}warn{% endif %}">{% if sellers %}{{ sellers|length }} 个 active 主体{% else %}暂无 active 档案{% endif %}</span>
+              </div>
+              <div class="table-wrap"><table><thead><tr><th>主体</th><th>税号</th><th>购买方</th><th>常用项目</th><th>主常用项目</th><th>最近更新</th><th>状态</th></tr></thead><tbody>
+                {% for seller in sellers %}
+                  <tr><td><strong>{{ seller.seller_name }}</strong></td><td>{{ seller.seller_tax_id }}</td><td>{{ seller.buyer_count }}</td><td>{{ seller.project_count }}</td><td>{{ seller.top_project or '待积累' }}{% if seller.top_tax_category %} / {{ seller.top_tax_category }}{% endif %}</td><td>{{ seller.updated_at or '-' }}</td><td><span class="badge ok">可复用</span></td></tr>
+                {% else %}
+                  <tr><td colspan="7"><strong>暂无 active 客户档案。</strong> 请上传从税局下载的历史开票明细 Excel，系统会自动识别销售主体并新建档案。</td></tr>
+                {% endfor %}
+              </tbody></table></div>
+            </div>
+
+            <div class="card">
+              <div class="card-head"><div><h2>建档 / 更新路径</h2><p>把“发群给助理建档”改为工具内闭环。</p></div><span class="badge info">P0 可用</span></div>
+              <ol class="timeline compact-timeline">
+                <li class="done"><span>1</span><div><strong>登录税局并识别主体</strong><small>当前页面可通过 CDP 识别税局主体。</small></div></li>
+                <li class="active"><span>2</span><div><strong>上传历史开票明细</strong><small>右上角选择税局下载的 Excel，系统解析销方、购买方、项目、税码、税率。</small></div></li>
+                <li class="done"><span>3</span><div><strong>本地 active 档案重建</strong><small>已有主体增量更新；新主体自动建档。</small></div></li>
+                <li class="done"><span>4</span><div><strong>同步阿里云档案中心</strong><small>结构化档案上传云端，工作台生成草稿时优先使用云端缓存。</small></div></li>
+                <li><span>5</span><div><strong>自动下载历史记录</strong><small>下一步接真实税局“历史记录查询/下载”自动化，不做假按钮。</small></div></li>
+              </ol>
+            </div>
+          </section>
+
+          <aside class="stack">
+            <div class="card">
+              <h2>账户健康度</h2>
+              <div class="panel-list" style="margin-top:16px">
+                <div class="panel-item"><span class="badge {% if profile_summary.exists %}ok{% else %}warn{% endif %}">档案缓存</span><p>{% if profile_summary.exists %}本地缓存已存在：{{ profile_cache_path }}{% else %}本机暂无客户档案缓存。{% endif %}</p></div>
+                <div class="panel-item"><span class="badge info">档案库目录</span><p>{{ profile_root }}</p></div>
+                <div class="panel-item"><span class="badge ok">更新策略</span><p>同一销售主体重复上传历史明细会去重并重建 active 档案；不存在的主体会自动新建。</p></div>
+                <div class="panel-item"><span class="badge warn">可信边界</span><p>active 档案只来自正常、正数、未作废/未红冲的税局历史明细。</p></div>
+              </div>
+            </div>
+            <div class="card">
+              <h2>上传要求</h2>
+              <p>请上传税局导出的历史开票明细 Excel，通常包含“信息汇总表”，且有销方名称、销方识别号、购买方名称、购方识别号、税收分类编码、货物或应税劳务名称、税率、价税合计等字段。</p>
+            </div>
+          </aside>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

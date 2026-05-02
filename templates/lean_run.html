@@ -21,21 +21,16 @@
         </div>
 
         <nav class="sidebar-nav">
+          <a class="nav-item" href="{{ url_for('index') }}"><span class="nav-dot">台</span><span>开票工作台</span></a>
           {% if run.draft_id %}
-            <a class="nav-item" href="{{ url_for('draft_detail', draft_id=run.draft_id) }}">
-              <span class="nav-dot">改</span>
-              <span>返回草稿</span>
-            </a>
+            <a class="nav-item" href="{{ url_for('draft_detail', draft_id=run.draft_id) }}"><span class="nav-dot">稿</span><span>发票草稿</span></a>
           {% else %}
-            <a class="nav-item" href="{{ url_for('index') }}">
-              <span class="nav-dot">台</span>
-              <span>开票工作台</span>
-            </a>
+            <span class="nav-item disabled"><span class="nav-dot">稿</span><span>发票草稿</span></span>
           {% endif %}
-          <a class="nav-item active" href="{{ url_for('run_detail', run_id=run.run_id) }}">
-            <span class="nav-dot">跑</span>
-            <span>税局执行</span>
-          </a>
+          <span class="nav-item disabled"><span class="nav-dot">批</span><span>批量复核</span></span>
+          <a class="nav-item active" href="{{ url_for('run_detail', run_id=run.run_id) }}"><span class="nav-dot">跑</span><span>税局执行</span></a>
+          <a class="nav-item" href="{{ url_for('profiles_page') }}"><span class="nav-dot">档</span><span>主体与档案</span></a>
+          <a class="nav-item" href="{{ url_for('ledger_page') }}"><span class="nav-dot">表</span><span>发票记录</span></a>
         </nav>
 
         <section class="sidebar-panel">
