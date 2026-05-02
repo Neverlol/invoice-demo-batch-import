@@ -30,6 +30,7 @@ class BatchRunResult:
 TAX_PORTAL_URLS = {
     "liaoning": "https://dppt.liaoning.chinatax.gov.cn:8443/",
     "jilin": "https://dppt.jilin.chinatax.gov.cn:8443/",
+    "heilongjiang": "https://dppt.heilongjiang.chinatax.gov.cn:8443/",
     "beijing": "https://dppt.beijing.chinatax.gov.cn:8443/",
 }
 
