@@ -1,28 +1,29 @@
 @echo off
-chcp 65001 >nul
 setlocal EnableExtensions
-cd /d "%~dp0"
+
+set "PROJECT_ROOT=%~dp0"
+if "%PROJECT_ROOT:~-1%"=="\" set "PROJECT_ROOT=%PROJECT_ROOT:~0,-1%"
+cd /d "%PROJECT_ROOT%"
 
 title Invoice Assistant - Start
 
 echo.
 echo ========================================
-echo   智能开票助手 - 一键启动
+echo   Invoice Assistant - Start
 echo ========================================
 echo.
-echo 第一步：启动税局专用浏览器...
-start "Invoice Tax Browser" "%~dp0start_edge_cdp.bat"
+echo Step 1: starting tax browser CDP...
+start "Invoice Tax Browser CDP" "%PROJECT_ROOT%\start_edge_cdp.bat"
 
-echo 等待浏览器启动...
-timeout /t 3 /nobreak >nul
+echo Waiting a few seconds for CDP startup...
+timeout /t 5 /nobreak >nul
 
-echo 第二步：启动开票工作台...
-start "Invoice Workbench" "%~dp0start_lean_workbench.bat"
+echo Step 2: starting workbench...
+start "Invoice Workbench" "%PROJECT_ROOT%\start_lean_workbench.bat"
 
 echo.
-echo 已发起启动。
-echo 如果网页没有自动打开，请手动访问：http://127.0.0.1:5012
-echo.
-echo 请保留两个黑色窗口，不要关闭。
+echo Startup requested.
+echo If the page does not open, visit: http://127.0.0.1:5012
+echo Keep the Edge CDP and workbench windows open.
 echo.
 pause

@@ -129,12 +129,12 @@ if defined TESS_EXE (
 )
 
 echo.
-echo [6/6] 创建桌面快捷方式...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$desktop=[Environment]::GetFolderPath('Desktop'); $s=(New-Object -COM WScript.Shell).CreateShortcut((Join-Path $desktop '智能开票助手.lnk')); $s.TargetPath=(Join-Path '%CD%' '启动智能开票助手.bat'); $s.WorkingDirectory='%CD%'; $s.IconLocation='%SystemRoot%\System32\shell32.dll,44'; $s.Save()" >nul 2>nul
+echo [6/6] Create desktop shortcut...
+call "%~dp0REPAIR_DESKTOP_SHORTCUT.bat"
 if errorlevel 1 (
-  echo 桌面快捷方式创建失败，可手动双击“启动智能开票助手.bat”。
+  echo Desktop shortcut creation failed. You can run 02_START_INVOICE_ASSISTANT.bat manually.
 ) else (
-  echo 已创建桌面快捷方式：智能开票助手
+  echo Desktop shortcut created: Invoice Assistant
 )
 
 echo.
