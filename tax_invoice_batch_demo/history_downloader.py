@@ -80,8 +80,7 @@ class TaxHistoryDownloader:
                 page = self._open_invoice_query_page(page)
                 self._set_query_dates(page, start_date, end_date)
                 self._click_query(page)
-                self._select_all_results(page)
-                output_path, suggested = self._download_selected(page, PlaywrightTimeoutError)
+                output_path, suggested = self._export_all_results(page, PlaywrightTimeoutError)
                 return TaxHistoryDownloadResult(
                     status="success",
                     current_step="downloaded",
@@ -222,52 +221,32 @@ class TaxHistoryDownloader:
                 self._log("query", "查询结果表格已出现。")
                 return
             page.wait_for_timeout(1000)
-        self._log("query", "未明确识别表格结果，继续尝试全选和下载。")
+        self._log("query", "未明确识别表格结果，继续尝试点击“导出”并选择“导出全部”。")
 
-    def _select_all_results(self, page) -> None:
-        selected = page.evaluate(
-            """
-            () => {
-              const visible = (el) => {
-                if (!el) return false;
-                const style = window.getComputedStyle(el);
-                const rect = el.getBoundingClientRect();
-                return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
-              };
-              const candidates = Array.from(document.querySelectorAll('thead input[type="checkbox"], table input[type="checkbox"], input[type="checkbox"]')).filter(visible);
-              const target = candidates[0];
-              if (!target) return { ok: false, count: 0 };
-              target.scrollIntoView({ block: 'center', inline: 'center' });
-              if (!target.checked) target.click();
-              target.dispatchEvent(new Event('change', { bubbles: true }));
-              return { ok: true, count: candidates.length, checked: target.checked };
-            }
-            """
-        )
-        if not selected or not selected.get("ok"):
-            raise RuntimeError("未找到结果表格左上角全选框。")
-        self._log("select", f"已点击结果表格全选框，页面 checkbox 数量: {selected.get('count')}。")
-        page.wait_for_timeout(1000)
-
-    def _download_selected(self, page, timeout_error_cls) -> tuple[Path, str]:
-        self._log("download", "准备下载已选择发票的历史明细。")
-        for texts in (("下载", "导出", "批量下载", "发票下载"), ("下载发票", "下载明细", "导出明细", "批量导出")):
-            try:
-                with page.expect_download(timeout=15000) as download_info:
-                    clicked = _click_download_button_by_dom(page, texts) or bool(_click_first_visible_text(page, texts, timeout=5000))
-                    if not clicked:
-                        raise RuntimeError("no download button")
-                download = download_info.value
-                suggested = download.suggested_filename or "tax_invoice_history.xlsx"
-                output_path = DOWNLOAD_ROOT / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{_safe_filename(suggested)}"
-                download.save_as(str(output_path))
-                self._log("download", f"已下载历史明细: {output_path}")
-                return output_path, suggested
-            except timeout_error_cls:
-                continue
-            except Exception:
-                continue
-        raise RuntimeError("已全选查询结果，但未能自动触发下载。请确认页面下载按钮文字或位置是否变化。")
+    def _export_all_results(self, page, timeout_error_cls) -> tuple[Path, str]:
+        self._log("download", "准备按页面真实流程导出全部历史明细：点击“导出” → “导出全部”。")
+        clicked_export = _click_export_dropdown_button(page) or bool(_click_first_visible_text(page, ("导出",), timeout=5000))
+        if not clicked_export:
+            raise RuntimeError("查询结果表格已出现，但未找到蓝色“导出”按钮。")
+        self._log("download", "已点击“导出”按钮，等待下拉选项。")
+        page.wait_for_timeout(800)
+        try:
+            with page.expect_download(timeout=20000) as download_info:
+                clicked_all = _click_export_all_option(page) or bool(
+                    _click_first_visible_text(page, ("导出全部", "全部导出", "导出全部发票"), timeout=6000)
+                )
+                if not clicked_all:
+                    raise RuntimeError("export all option not found")
+            download = download_info.value
+            suggested = download.suggested_filename or "tax_invoice_history.xlsx"
+            output_path = DOWNLOAD_ROOT / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{_safe_filename(suggested)}"
+            download.save_as(str(output_path))
+            self._log("download", f"已通过“导出全部”下载历史明细: {output_path}")
+            return output_path, suggested
+        except timeout_error_cls:
+            raise RuntimeError("已点击“导出全部”，但未在 20 秒内捕获到浏览器下载。请确认税局页面是否弹出二次确认或下载被浏览器拦截。")
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"未能点击下拉项“导出全部”：{type(exc).__name__}: {exc}") from exc
 
     def _log(self, step: str, message: str) -> None:
         self.logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] {step}: {message}")
@@ -310,6 +289,62 @@ def _click_query_button_by_dom(page) -> bool:
                 const style = window.getComputedStyle(el);
                 return /primary|blue|main/.test(cls) || /rgb\(64, 158, 255\)|rgb\(22, 119, 255\)|rgb\(24, 144, 255\)/.test(style.backgroundColor);
               }) || candidates[candidates.length - 1];
+              if (!target) return false;
+              target.scrollIntoView({ block: 'center', inline: 'center' });
+              target.click();
+              return true;
+            }
+            """
+        )
+    )
+
+
+def _click_export_dropdown_button(page) -> bool:
+    return bool(
+        page.evaluate(
+            """
+            () => {
+              const visible = (el) => {
+                if (!el) return false;
+                const style = window.getComputedStyle(el);
+                const rect = el.getBoundingClientRect();
+                return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+              };
+              const textOf = (el) => (el.innerText || el.textContent || '').replace(/\s+/g, '').trim();
+              const candidates = Array.from(document.querySelectorAll('button, a, [role="button"], .el-button, .t-button, .ant-btn, .ivu-btn'))
+                .filter(visible)
+                .filter((el) => textOf(el) === '导出' || (textOf(el).includes('导出') && !textOf(el).includes('导出全部') && textOf(el).length <= 8));
+              const target = candidates.find((el) => {
+                const cls = String(el.className || '');
+                const style = window.getComputedStyle(el);
+                return /primary|blue|main/.test(cls) || /rgb\(64, 158, 255\)|rgb\(22, 119, 255\)|rgb\(24, 144, 255\)|rgb\(0, 82, 217\)/.test(style.backgroundColor);
+              }) || candidates[0];
+              if (!target) return false;
+              target.scrollIntoView({ block: 'center', inline: 'center' });
+              target.click();
+              return true;
+            }
+            """
+        )
+    )
+
+
+def _click_export_all_option(page) -> bool:
+    return bool(
+        page.evaluate(
+            """
+            () => {
+              const visible = (el) => {
+                if (!el) return false;
+                const style = window.getComputedStyle(el);
+                const rect = el.getBoundingClientRect();
+                return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+              };
+              const textOf = (el) => (el.innerText || el.textContent || '').replace(/\s+/g, '').trim();
+              const candidates = Array.from(document.querySelectorAll('li, button, a, [role="menuitem"], [role="option"], .el-dropdown-menu__item, .t-dropdown__item, .ant-dropdown-menu-item, .ivu-dropdown-item, div, span'))
+                .filter(visible)
+                .filter((el) => ['导出全部', '全部导出', '导出全部发票'].some((token) => textOf(el).includes(token)));
+              const target = candidates.find((el) => /item|menu|dropdown|option/.test(String(el.className || '') + ' ' + String(el.getAttribute('role') || ''))) || candidates[0];
               if (!target) return false;
               target.scrollIntoView({ block: 'center', inline: 'center' });
               target.click();
