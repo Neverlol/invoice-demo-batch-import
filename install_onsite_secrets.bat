@@ -1,5 +1,4 @@
 @echo off
-chcp 65001 >nul
 setlocal EnableExtensions
 cd /d "%~dp0"
 
@@ -7,24 +6,21 @@ title Invoice Assistant - Install Private Config
 
 echo.
 echo ========================================
-echo   智能开票助手 - 安装现场私密配置
+echo   Invoice Assistant - Install Private Config
 echo ========================================
 echo.
-echo 本步骤用于安装 MiMo / 阿里云同步 / 云端客户档案配置。
-echo 请确认当前文件夹内存在：
+echo This step installs MiMo, sync center, and cloud profile config.
+echo Please make sure this file exists:
 echo   _onsite_private_config\onsite_secrets.json
-echo 或：
-echo   _现场私密配置\onsite_secrets.json
 echo.
 
 set "SECRET_DIR=%~dp0_onsite_private_config"
-if not exist "%SECRET_DIR%\onsite_secrets.json" set "SECRET_DIR=%~dp0_现场私密配置"
 
 if not exist "%SECRET_DIR%\onsite_secrets.json" (
-  echo 未找到私密配置文件：
+  echo Missing private config file:
   echo   _onsite_private_config\onsite_secrets.json
   echo.
-  echo 请先把“现场私密配置包”解压到本文件夹，再重新运行。
+  echo Copy the private config folder into this project folder, then run this again.
   pause
   exit /b 1
 )
@@ -32,16 +28,16 @@ if not exist "%SECRET_DIR%\onsite_secrets.json" (
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\install_onsite_secrets.ps1" -ProjectRoot "%~dp0" -SecretDir "%SECRET_DIR%"
 if errorlevel 1 (
   echo.
-  echo 私密配置安装失败，请联系技术人员。
+  echo Private config install failed. Please contact technical support.
   pause
   exit /b 1
 )
 
 echo.
-echo 私密配置已安装完成。
-echo 建议下一步运行：
+echo Private config installed.
+echo Next step:
 echo   00_FIRST_INSTALL.bat
-echo 或：
+echo or:
 echo   02_START_INVOICE_ASSISTANT.bat
 echo.
 pause

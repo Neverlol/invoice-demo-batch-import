@@ -4,16 +4,34 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
-  $ProjectRoot = Split-Path -Parent $PSScriptRoot
-}
-$ProjectRoot = (Resolve-Path $ProjectRoot).Path
-
 function Require-Value([object]$value, [string]$name) {
   if ($null -eq $value -or [string]::IsNullOrWhiteSpace([string]$value)) {
     throw "Missing required config: $name"
   }
 }
+
+function Value-OrDefault([object]$value, [string]$defaultValue) {
+  if ($null -eq $value -or [string]::IsNullOrWhiteSpace([string]$value)) {
+    return $defaultValue
+  }
+  return [string]$value
+}
+
+function Int-OrDefault([object]$value, [int]$defaultValue) {
+  if ($null -eq $value -or [string]::IsNullOrWhiteSpace([string]$value)) {
+    return $defaultValue
+  }
+  try {
+    return [int]$value
+  } catch {
+    return $defaultValue
+  }
+}
+
+if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
+  $ProjectRoot = Split-Path -Parent $PSScriptRoot
+}
+$ProjectRoot = (Resolve-Path $ProjectRoot).Path
 
 $mimoApiKey = [Environment]::GetEnvironmentVariable("TAX_INVOICE_MIMO_API_KEY", "User")
 if ([string]::IsNullOrWhiteSpace($mimoApiKey)) {
@@ -53,6 +71,11 @@ try {
   exit 1
 }
 
+$syncTimeout = Int-OrDefault $sync.timeout_seconds 8
+$rulesEndpoint = Value-OrDefault $sync.rules_endpoint ""
+$profileImportEndpoint = Value-OrDefault $sync.profile_import_endpoint ""
+$customerProfilesEndpoint = Value-OrDefault $sync.customer_profiles_endpoint ""
+
 $secretDir = Join-Path $ProjectRoot "_onsite_private_config"
 New-Item -ItemType Directory -Force -Path $secretDir | Out-Null
 $secretPath = Join-Path $secretDir "onsite_secrets.json"
@@ -69,11 +92,11 @@ $cfg = [ordered]@{
   sync_endpoint = [string]$sync.endpoint
   sync_token = [string]$sync.token
   sync_tenant = [string]$sync.tenant
-  sync_timeout_seconds = if ($sync.timeout_seconds) { [int]$sync.timeout_seconds } else { 8 }
+  sync_timeout_seconds = $syncTimeout
 
-  rules_endpoint = if ($sync.rules_endpoint) { [string]$sync.rules_endpoint } else { "" }
-  profile_import_endpoint = if ($sync.profile_import_endpoint) { [string]$sync.profile_import_endpoint } else { "" }
-  customer_profiles_endpoint = if ($sync.customer_profiles_endpoint) { [string]$sync.customer_profiles_endpoint } else { "" }
+  rules_endpoint = $rulesEndpoint
+  profile_import_endpoint = $profileImportEndpoint
+  customer_profiles_endpoint = $customerProfilesEndpoint
 
   delete_source_after_install = $true
 }
