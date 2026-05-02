@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>批量开票轻工作台</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260501-v26') }}">
-    <script defer src="{{ url_for('static', filename='lean.js', v='20260501-v26') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260502-v27') }}">
+    <script defer src="{{ url_for('static', filename='lean.js', v='20260502-v27') }}"></script>
   </head>
   <body class="operator-body">
     <main class="dashboard-shell">
@@ -74,7 +74,7 @@
               <span class="card-icon">税</span>
               <div>
                 <h2>税局连接与主体档案</h2>
-                <p>先打开 CDP Edge，再登录税局；系统会识别当前纳税主体，并加载对应客户档案。</p>
+                <p>税局主体用于提交前安全核对；材料输入里的销售方用于草稿生成和云端档案推荐，二者分开判断。</p>
               </div>
             </div>
           </header>
@@ -120,6 +120,9 @@
                 <span>补充说明</span>
                 <input name="note" value="{{ form.note or '' }}" placeholder="例如：本次先按普票 3% 生成">
               </label>
+            </div>
+            <div class="banner seller-profile-status" data-seller-profile-status>
+              <p>材料销售方档案：填写销售方后，系统会按此主体匹配云端常用项目；不依赖当前税局登录主体。</p>
             </div>
 
             <div class="chat-composer">

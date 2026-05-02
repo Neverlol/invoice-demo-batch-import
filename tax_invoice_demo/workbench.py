@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -561,19 +561,24 @@ def _ensure_requests_cover_uploaded_images(
 
     OCR/LLM 可能只给 5 张图里的 2 张返回结构化文本；这种情况下也必须保留另外 3 张，
     让它们进入“待补全 / 异常项”，避免现场出现“5 张图只生成 2 张发票”。
+
+    重要：OCR/LLM 返回的块名有时使用保存后的文件名，例如原图 `02.jpg` 保存为
+    `uploads/02_02.jpg` 后，LLM 文本块会写成 `[02_02.jpg]`。强制批量时仍必须以
+    原始上传图片为唯一业务单元，不能把 `[02_02.jpg]` 和 `02.jpg` 生成两张票。
     """
     image_attachments = _uploaded_image_attachments(attachments)
     if len(image_attachments) < 2:
         return requests
-    if not requests:
-        return [_blank_request_from_attachment(attachment) for attachment in image_attachments]
 
-    covered_names = {_normalize_source_name(request.source_name) for request in requests}
-    merged = list(requests)
+    remaining = list(requests)
+    merged: list[PlatformInvoiceRequest] = []
     for attachment in image_attachments:
-        source_name = attachment.original_name or attachment.stored_name
-        if _normalize_source_name(source_name) not in covered_names:
+        matched = _pop_matching_request_for_attachment(attachment, remaining)
+        if matched is None:
             merged.append(_blank_request_from_attachment(attachment))
+        else:
+            # 对助理展示始终使用原始上传名，避免出现 02_02.jpg / 03_03.jpg 这类内部保存名。
+            merged.append(replace(matched, source_name=attachment.original_name or Path(attachment.stored_name).name))
     return merged
 
 
@@ -587,7 +592,7 @@ def _uploaded_image_attachments(attachments: list[DraftAttachment]) -> list[Draf
 
 
 def _blank_request_from_attachment(attachment: DraftAttachment) -> PlatformInvoiceRequest:
-    source_name = attachment.original_name or attachment.stored_name
+    source_name = attachment.original_name or Path(attachment.stored_name).name
     return PlatformInvoiceRequest(
         source_name=source_name,
         buyer=BuyerInfo(name="", tax_id=""),
@@ -596,8 +601,40 @@ def _blank_request_from_attachment(attachment: DraftAttachment) -> PlatformInvoi
     )
 
 
+def _pop_matching_request_for_attachment(
+    attachment: DraftAttachment,
+    requests: list[PlatformInvoiceRequest],
+) -> PlatformInvoiceRequest | None:
+    if not requests:
+        return None
+    attachment_names = _attachment_source_name_candidates(attachment)
+    attachment_keys = {_normalize_source_name(name) for name in attachment_names}
+    for index, request in enumerate(requests):
+        if _normalize_source_name(request.source_name) in attachment_keys:
+            return requests.pop(index)
+
+    attachment_numeric_key = _source_numeric_key(attachment.original_name or Path(attachment.stored_name).name)
+    if attachment_numeric_key:
+        for index, request in enumerate(requests):
+            request_numeric_key = _source_numeric_key(request.source_name)
+            if request_numeric_key and request_numeric_key == attachment_numeric_key:
+                return requests.pop(index)
+    return None
+
+
+def _attachment_source_name_candidates(attachment: DraftAttachment) -> list[str]:
+    names = [attachment.original_name, Path(attachment.stored_name or "").name]
+    return [name for name in names if name]
+
+
 def _normalize_source_name(value: str) -> str:
     return Path(value or "").name.strip().lower()
+
+
+def _source_numeric_key(value: str) -> str:
+    stem = Path(value or "").stem.lower()
+    tokens = [token.lstrip("0") or "0" for token in re.findall(r"\d+", stem)]
+    return tokens[-1] if tokens else ""
 
 
 def _blank_batch_line_profile() -> LineHistoryMatch:

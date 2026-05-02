@@ -204,6 +204,20 @@ def taxonomy_search_api():
     return jsonify({"results": [item.to_dict() for item in search_taxonomy(query)]})
 
 
+@app.get("/api/profiles/seller")
+def seller_profile_api():
+    query = (request.args.get("q") or "").strip()
+    summary = profile_cache_summary()
+    profile = profile_counts_for_seller(query) if query else {
+        "matched": False,
+        "seller_name": "",
+        "seller_tax_id": "",
+        "buyer_count": 0,
+        "project_profile_count": 0,
+    }
+    return jsonify({"query": query, "summary": summary, "profile": profile})
+
+
 @app.post("/drafts/<draft_id>/mark-success")
 def mark_success(draft_id: str):
     draft = save_lean_draft_from_form(draft_id, request.form, [])

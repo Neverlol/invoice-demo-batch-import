@@ -394,6 +394,59 @@ if (tbody) {
   });
 }
 
+const sellerProfileBox = document.querySelector("[data-seller-profile-status]");
+const sellerCompanyInput = document.querySelector('input[name="company_name"]');
+let sellerProfileTimer = null;
+
+function setSellerProfileStatus(message, kind = "") {
+  if (!sellerProfileBox) {
+    return;
+  }
+  sellerProfileBox.classList.remove("ok", "alert", "notice");
+  if (kind) {
+    sellerProfileBox.classList.add(kind);
+  }
+  sellerProfileBox.innerHTML = `<p>${escapeHtml(message)}</p>`;
+}
+
+async function refreshSellerProfileStatus() {
+  if (!sellerProfileBox || !sellerCompanyInput) {
+    return;
+  }
+  const seller = sellerCompanyInput.value.trim();
+  if (!seller) {
+    setSellerProfileStatus("材料销售方档案：填写销售方后，系统会按此主体匹配云端常用项目；不依赖当前税局登录主体。", "notice");
+    return;
+  }
+  try {
+    const response = await fetch(`/api/profiles/seller?q=${encodeURIComponent(seller)}`);
+    const data = await response.json();
+    const profile = data.profile || {};
+    const summary = data.summary || {};
+    if (profile.matched) {
+      setSellerProfileStatus(`材料销售方档案：已匹配 ${profile.seller_name || seller}，生成草稿会使用 ${profile.project_profile_count || 0} 个常用项目 / ${profile.buyer_count || 0} 个购买方。当前税局登录主体只在上传前做安全核对。`, "ok");
+    } else if (summary.exists) {
+      setSellerProfileStatus(`材料销售方档案：云端缓存已加载 ${summary.seller_count || 0} 个销售主体，但未匹配“${seller}”。请检查销售方全称，或先导入该主体历史档案。`, "notice");
+    } else {
+      setSellerProfileStatus("材料销售方档案：本机暂无云端缓存；工作台会在后台尝试拉取。", "notice");
+    }
+  } catch (error) {
+    setSellerProfileStatus("材料销售方档案：查询失败，但不阻断生成草稿。", "notice");
+  }
+}
+
+if (sellerCompanyInput && sellerProfileBox) {
+  sellerProfileBox.classList.add("notice");
+  sellerCompanyInput.addEventListener("input", () => {
+    clearTimeout(sellerProfileTimer);
+    sellerProfileTimer = setTimeout(refreshSellerProfileStatus, 250);
+  });
+  sellerCompanyInput.addEventListener("blur", refreshSellerProfileStatus);
+  if (sellerCompanyInput.value.trim()) {
+    refreshSellerProfileStatus();
+  }
+}
+
 const taxConsole = document.querySelector("[data-tax-console]");
 if (taxConsole) {
   const statusBox = taxConsole.querySelector("[data-tax-status]");
@@ -418,8 +471,9 @@ if (taxConsole) {
     const subject = data.subject || "未识别到主体";
     const page = data.best_page || {};
     const profile = data.profile || {};
-    if (companyInput && subject && subject !== "未识别到主体") {
+    if (companyInput && subject && subject !== "未识别到主体" && !companyInput.value.trim()) {
       companyInput.value = (profile.seller_name || subject.split("/")[0] || "").trim();
+      companyInput.dispatchEvent(new Event("input", { bubbles: true }));
     }
     const profileText = profile.matched
       ? `已匹配档案：${profile.seller_name || "当前主体"}，${profile.project_profile_count || 0} 个常用项目 / ${profile.buyer_count || 0} 个购买方。`

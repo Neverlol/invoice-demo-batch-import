@@ -534,6 +534,39 @@ A4复印纸 10包 240元
         self.assertTrue(any("05.jpg 未可靠识别购买方税号" in issue for issue in fifth.issues))
         self.assertTrue(any("05.jpg 未可靠识别开票金额" in issue for issue in fifth.issues))
 
+    def test_force_batch_mode_merges_llm_blocks_named_after_stored_files(self):
+        files = [
+            FileStorage(stream=io.BytesIO(f"fake image {index}".encode()), filename=f"0{index}.jpg", content_type="image/jpeg")
+            for index in range(1, 6)
+        ]
+        text = """
+[02_02.jpg]
+发票详情
+抬头 中智关爱通（上海）科技
+税号 91411726MADJ77GFXP
+建议开票金额 29.88
+订单号: 8011766126836281741
+
+[03_03.jpg]
+发票详情
+抬头 哈尔滨乐威爱思环保科技
+税号 91230102MA1CLMWC68
+建议开票金额 8.80
+订单号: 8011766126836281742
+"""
+
+        batch = workbench_module.create_draft_from_workbench("", text, "批量截图模式", files, force_batch=True)
+
+        self.assertEqual(batch.__class__.__name__, "DraftBatch")
+        self.assertEqual(len(batch.items), 5)
+        drafts = [workbench_module.load_draft(item.draft_id) for item in batch.items]
+        for index, draft in enumerate(drafts, start=1):
+            self.assertIn(f"来源图片：0{index}.jpg", draft.note)
+        self.assertEqual(drafts[1].buyer.name, "中智关爱通（上海）科技")
+        self.assertEqual(drafts[1].lines[0].amount_with_tax, "29.88")
+        self.assertEqual(drafts[2].buyer.tax_id, "91230102MA1CLMWC68")
+        self.assertEqual(drafts[2].lines[0].amount_with_tax, "8.80")
+
     def test_weak_chat_text_uses_history_profile_for_buyer_and_project(self):
         _seed_history_profile_row(
             company_name="吉林省风生水起商贸有限公司",
