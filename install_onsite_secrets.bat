@@ -1,6 +1,9 @@
 @echo off
 setlocal EnableExtensions
-cd /d "%~dp0"
+
+set "PROJECT_ROOT=%~dp0"
+if "%PROJECT_ROOT:~-1%"=="\" set "PROJECT_ROOT=%PROJECT_ROOT:~0,-1%"
+cd /d "%PROJECT_ROOT%"
 
 title Invoice Assistant - Install Private Config
 
@@ -14,7 +17,7 @@ echo Please make sure this file exists:
 echo   _onsite_private_config\onsite_secrets.json
 echo.
 
-set "SECRET_DIR=%~dp0_onsite_private_config"
+set "SECRET_DIR=%PROJECT_ROOT%\_onsite_private_config"
 
 if not exist "%SECRET_DIR%\onsite_secrets.json" (
   echo Missing private config file:
@@ -25,7 +28,7 @@ if not exist "%SECRET_DIR%\onsite_secrets.json" (
   exit /b 1
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\install_onsite_secrets.ps1" -ProjectRoot "%~dp0" -SecretDir "%SECRET_DIR%"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PROJECT_ROOT%\tools\install_onsite_secrets.ps1" -ProjectRoot "%PROJECT_ROOT%" -SecretDir "%SECRET_DIR%"
 if errorlevel 1 (
   echo.
   echo Private config install failed. Please contact technical support.

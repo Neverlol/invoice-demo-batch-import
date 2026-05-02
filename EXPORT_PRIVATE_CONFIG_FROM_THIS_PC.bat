@@ -1,6 +1,9 @@
 @echo off
 setlocal EnableExtensions
-cd /d "%~dp0"
+
+set "PROJECT_ROOT=%~dp0"
+if "%PROJECT_ROOT:~-1%"=="\" set "PROJECT_ROOT=%PROJECT_ROOT:~0,-1%"
+cd /d "%PROJECT_ROOT%"
 
 title Invoice Assistant - Export Private Config
 
@@ -19,7 +22,7 @@ echo.
 echo WARNING: onsite_secrets.json contains private keys. Do not share it in public chats.
 echo.
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\export_onsite_secrets_from_this_pc.ps1" -ProjectRoot "%~dp0"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PROJECT_ROOT%\tools\export_onsite_secrets_from_this_pc.ps1" -ProjectRoot "%PROJECT_ROOT%"
 if errorlevel 1 (
   echo.
   echo Export failed. Please check:
