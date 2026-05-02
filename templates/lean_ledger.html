@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>发票记录</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260502-hybrid4') }}">
+  </head>
+  <body class="operator-body">
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">AI</div>
+          <div class="brand-title"><strong>智能开票助手</strong><span>Invoice Ops</span></div>
+        </div>
+        <nav class="nav">
+          <a href="{{ url_for('index') }}"><span class="nav-dot">台</span>开票工作台</a>
+          <a class="active" href="{{ url_for('ledger_page') }}"><span class="nav-dot">表</span>发票记录</a>
+        </nav>
+        <div class="sidebar-card">
+          <h3>记录边界</h3>
+          <p>这里只记录已由助理确认并标记成功的开票结果；不代表系统自动最终开具。</p>
+        </div>
+      </aside>
+
+      <main class="page">
+        <div class="topline">
+          <div>
+            <div class="eyebrow">Success ledger</div>
+            <h1>发票记录</h1>
+            <p>用于现场复盘和导出已确认成功的开票明细。没有记录时会显示空状态，不再 Not Found。</p>
+          </div>
+          <div class="actions">
+            <a class="btn" href="{{ url_for('index') }}">返回工作台</a>
+            {% if ledger_exists %}
+              <a class="btn primary" href="{{ url_for('success_ledger') }}">下载成功明细 Excel</a>
+            {% endif %}
+          </div>
+        </div>
+
+        <section class="metric-grid">
+          <div class="metric"><span>记录文件</span><strong>{% if ledger_exists %}已生成{% else %}暂无{% endif %}</strong><small>{{ ledger_filename }}</small></div>
+          <div class="metric"><span>明细行数</span><strong>{{ row_count }}</strong><small>按明细行累计</small></div>
+          <div class="metric"><span>当前用途</span><strong>复盘</strong><small>现场测试与客户交付留痕</small></div>
+          <div class="metric"><span>最终开具</span><strong>人工确认</strong><small>系统不会自动最终开具</small></div>
+        </section>
+
+        <div class="layout" style="margin-top:22px">
+          <section class="stack">
+            {% if ledger_exists %}
+              <section class="card">
+                <div class="card-head">
+                  <div><h2>成功明细文件已生成</h2><p>点击下载可获取当前累计的成功开票明细。</p></div>
+                  <span class="badge ok">可下载</span>
+                </div>
+                <div class="table-wrap"><table><thead><tr><th>文件</th><th>行数</th><th>保存位置</th><th>操作</th></tr></thead><tbody><tr><td>{{ ledger_filename }}</td><td>{{ row_count }}</td><td>{{ ledger_path }}</td><td><a href="{{ url_for('success_ledger') }}">下载 Excel</a></td></tr></tbody></table></div>
+              </section>
+            {% else %}
+              <section class="card soft">
+                <div class="card-head">
+                  <div><h2>还没有成功记录</h2><p>这不是错误。只有在草稿页点击“标记成功并累计”后，这里才会生成成功明细文件。</p></div>
+                  <span class="badge neutral">空状态</span>
+                </div>
+                <div class="notice">建议现场测试时：税局到预览页并由助理人工确认后，再回到草稿页点击“标记成功并累计”。</div>
+                <div class="actions" style="justify-content:flex-start;margin-top:16px"><a class="btn primary" href="{{ url_for('index') }}">回到开票工作台</a></div>
+              </section>
+            {% endif %}
+          </section>
+
+          <aside class="stack">
+            <section class="card">
+              <h2>记录规则</h2>
+              <div class="panel-list" style="margin-top:16px">
+                <div class="panel-item"><span class="badge info">来源</span><p>来自草稿页“标记成功并累计”。</p></div>
+                <div class="panel-item"><span class="badge warn">安全边界</span><p>到税局预览页后仍需人工确认，系统不自动最终开具。</p></div>
+                <div class="panel-item"><span class="badge ok">导出</span><p>生成后可下载 Excel，用于现场复盘和交付记录。</p></div>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </main>
+    </div>
+  </body>
+</html>

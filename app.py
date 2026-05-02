@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import re
 from pathlib import Path
@@ -16,6 +17,7 @@ from tax_invoice_batch_demo.batch_runner import (
 )
 from tax_invoice_batch_demo.lean_workbench import (
     BATCH_OUTPUT_ROOT,
+    SUCCESS_LEDGER_CSV,
     SUCCESS_LEDGER_XLSX,
     apply_failure_repairs_to_draft,
     create_lean_draft,
@@ -455,10 +457,21 @@ def _form_list_value(form, name: str, index: int) -> str:
     return (values[index] or "").strip()
 
 
+@app.get("/ledger")
+def ledger_page():
+    return render_template(
+        "lean_ledger.html",
+        ledger_exists=SUCCESS_LEDGER_XLSX.exists(),
+        ledger_filename=SUCCESS_LEDGER_XLSX.name,
+        ledger_path=str(SUCCESS_LEDGER_XLSX),
+        row_count=_success_ledger_row_count(),
+    )
+
+
 @app.get("/ledger/success")
 def success_ledger():
     if not SUCCESS_LEDGER_XLSX.exists():
-        abort(404)
+        return redirect(url_for("ledger_page"))
     return send_file(SUCCESS_LEDGER_XLSX, as_attachment=True)
 
 
@@ -492,6 +505,16 @@ def run_apply_failure_repairs(run_id: str):
         abort(404)
     apply_failure_repairs_to_draft(draft)
     return redirect(url_for("draft_detail", draft_id=draft.draft_id))
+
+
+def _success_ledger_row_count() -> int:
+    if not SUCCESS_LEDGER_CSV.exists():
+        return 0
+    try:
+        with SUCCESS_LEDGER_CSV.open("r", encoding="utf-8-sig", newline="") as handle:
+            return sum(1 for _ in csv.DictReader(handle))
+    except Exception:
+        return 0
 
 
 def _queue_batch_run(template_path: Path, cdp_endpoint: str, *, draft_id: str = "") -> str:
