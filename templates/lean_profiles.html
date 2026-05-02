@@ -38,8 +38,12 @@
           <div class="actions profile-upload-actions">
             <form class="profile-inline-form" method="post" action="{{ url_for('download_profile_history') }}">
               <input type="hidden" name="cdp_endpoint" value="http://127.0.0.1:9222">
-              <input type="hidden" name="months" value="6">
-              <button class="btn primary" type="submit">自动下载近半年历史</button>
+              <select class="profile-range-select" name="months" aria-label="历史查询区间">
+                <option value="3">近 3 个月</option>
+                <option value="6" selected>近半年</option>
+                <option value="12">近 12 个月</option>
+              </select>
+              <button class="btn primary" type="submit">自动更新客户档案</button>
             </form>
             <form class="profile-inline-form" method="post" action="{{ url_for('upload_profile_history') }}" enctype="multipart/form-data">
               <label class="btn profile-upload-button">
@@ -61,14 +65,15 @@
         </section>
 
         {% if download_result %}
-          <section class="banner {% if download_result.status == 'success' %}ok{% elif download_result.status == 'warning' %}notice{% else %}alert{% endif %}">
-            <strong>{% if download_result.status == 'success' %}税局历史明细已自动下载并导入档案。{% else %}自动下载历史明细未完成。{% endif %}</strong>
+          <section class="banner {% if download_result.status == 'success' %}ok{% elif download_result.status == 'no_data' or download_result.status == 'warning' %}notice{% else %}alert{% endif %}">
+            <strong>{% if download_result.status == 'success' %}客户档案已自动更新。{% elif download_result.status == 'no_data' %}当前主体在所选区间暂无历史发票。{% else %}自动更新客户档案未完成。{% endif %}</strong>
             <p>查询区间：{{ download_result.start_date or '-' }} 至 {{ download_result.end_date or '-' }}；主体：{{ download_result.subject or '未识别' }}</p>
+            {% if download_result.status == 'no_data' %}<p>这是安全空状态：系统不会新建空档案，也不会向阿里云同步空数据。可换更长区间，或等该主体产生历史开票记录后再更新。</p>{% endif %}
             {% if download_result.downloaded_path %}<p>下载文件：{{ download_result.downloaded_path }}</p>{% endif %}
             {% if download_result.import_result and download_result.import_result.rebuild %}<p>本地档案：销售主体 {{ download_result.import_result.rebuild.seller_count }} 个 / 购买方 {{ download_result.import_result.rebuild.buyer_count }} 个 / 历史明细 {{ download_result.import_result.rebuild.trusted_history_rows }} 行。</p>{% endif %}
             {% if download_result.import_result and download_result.import_result.cloud_sync %}<p>云端同步：{{ download_result.import_result.cloud_sync.status }}；batch_id={{ download_result.import_result.cloud_sync.batch_id or '-' }}；{{ download_result.import_result.cloud_sync.error or '' }}</p>{% endif %}
             {% if download_result.error %}<p>{{ download_result.error }}</p>{% endif %}
-            {% if download_result.logs %}<details><summary>查看自动下载日志</summary><pre>{{ download_result.logs|join('\n') }}</pre></details>{% endif %}
+            {% if download_result.logs %}<details><summary>查看自动更新日志</summary><pre>{{ download_result.logs|join('\n') }}</pre></details>{% endif %}
           </section>
         {% endif %}
 
@@ -99,12 +104,12 @@
 
             <div class="card">
               <div class="card-head"><div><h2>建档 / 更新路径</h2><p>把“发群给助理建档”改为工具内闭环。</p></div><span class="badge info">P0 可用</span></div>
-              <ol class="timeline compact-timeline">
-                <li class="done"><span>1</span><div><strong>登录税局并识别主体</strong><small>当前页面可通过 CDP 识别税局主体。</small></div></li>
-                <li class="active"><span>2</span><div><strong>上传历史开票明细</strong><small>右上角选择税局下载的 Excel，系统解析销方、购买方、项目、税码、税率。</small></div></li>
-                <li class="done"><span>3</span><div><strong>本地 active 档案重建</strong><small>已有主体增量更新；新主体自动建档。</small></div></li>
-                <li class="done"><span>4</span><div><strong>同步阿里云档案中心</strong><small>结构化档案上传云端，工作台生成草稿时优先使用云端缓存。</small></div></li>
-                <li class="active"><span>5</span><div><strong>自动下载历史记录</strong><small>已接入吉林税局路径：发票查询统计 → 全量发票查询 → 近半年 → 查询 → 导出 → 导出全部。</small></div></li>
+              <ol class="timeline compact-timeline profile-flow">
+                <li class="done"><span>1</span><div><strong>连接税局</strong><small>通过 CDP Edge 识别当前登录主体。</small></div></li>
+                <li class="done"><span>2</span><div><strong>查询历史</strong><small>进入全量发票查询，默认近半年，可切换 3/6/12 个月。</small></div></li>
+                <li class="active"><span>3</span><div><strong>导出全部</strong><small>点击蓝色“导出”，在下拉中选择“导出全部”。</small></div></li>
+                <li class="done"><span>4</span><div><strong>导入本地</strong><small>已有主体增量更新；新主体自动建档；无数据安全结束。</small></div></li>
+                <li class="done"><span>5</span><div><strong>同步云端</strong><small>只同步结构化 active 档案到阿里云客户档案中心。</small></div></li>
               </ol>
             </div>
           </section>
@@ -121,7 +126,7 @@
             </div>
             <div class="card">
               <h2>上传要求</h2>
-              <p>可点击“自动下载近半年历史”，也可上传税局导出的历史开票明细 Excel/ZIP。Excel 通常包含“信息汇总表”，且有销方名称、销方识别号、购买方名称、购方识别号、税收分类编码、货物或应税劳务名称、税率、价税合计等字段。</p>
+              <p>可点击“自动更新客户档案”，也可上传税局导出的历史开票明细 Excel/ZIP。Excel 通常包含“信息汇总表”，且有销方名称、销方识别号、购买方名称、购方识别号、税收分类编码、货物或应税劳务名称、税率、价税合计等字段。</p>
             </div>
           </aside>
         </div>

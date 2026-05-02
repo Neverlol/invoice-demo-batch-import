@@ -19,6 +19,10 @@ from .batch_runner import (
 DOWNLOAD_ROOT = Path(__file__).resolve().parents[1] / "output" / "customer_profile_history_downloads"
 
 
+class NoTaxHistoryData(RuntimeError):
+    """Raised when the tax query succeeds but the selected date range has no invoices."""
+
+
 @dataclass
 class TaxHistoryDownloadResult:
     status: str
@@ -79,7 +83,19 @@ class TaxHistoryDownloader:
                     self._log("subject", f"当前税局主体: {subject}")
                 page = self._open_invoice_query_page(page)
                 self._set_query_dates(page, start_date, end_date)
-                self._click_query(page)
+                try:
+                    self._click_query(page)
+                except NoTaxHistoryData as exc:
+                    self._log("no_data", str(exc))
+                    return TaxHistoryDownloadResult(
+                        status="no_data",
+                        current_step="no_data",
+                        logs=self.logs,
+                        subject=subject,
+                        page_url=page.url,
+                        start_date=start_date,
+                        end_date=end_date,
+                    )
                 output_path, suggested = self._export_all_results(page, PlaywrightTimeoutError)
                 return TaxHistoryDownloadResult(
                     status="success",
@@ -214,9 +230,9 @@ class TaxHistoryDownloader:
         page.wait_for_timeout(4000)
         for _ in range(20):
             text = _safe_body_text(page)
-            if "共 0 条" in text or "共0条" in text:
+            if _looks_like_empty_query_result(text):
                 self._log("query", "查询完成：当前区间暂无发票记录。")
-                raise RuntimeError("当前近半年区间查询结果为 0 条，无法下载历史明细。")
+                raise NoTaxHistoryData("当前查询区间暂无历史发票记录，不会建档，也不会同步空档案。")
             if any(token in text for token in ("数电发票号码", "发票代码", "发票号码", "购/销方名称", "购/销方识别号")):
                 self._log("query", "查询结果表格已出现。")
                 return
@@ -268,6 +284,11 @@ def _is_all_invoice_query_page(page) -> bool:
         return True
     text = _safe_body_text(page)
     return "全量发票查询" in text and "开票日期" in text and "查询" in text
+
+
+def _looks_like_empty_query_result(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text or "")
+    return any(token in compact for token in ("共0条", "暂无数据", "暂无发票", "未查询到数据", "未查询到符合条件"))
 
 
 def _click_query_button_by_dom(page) -> bool:

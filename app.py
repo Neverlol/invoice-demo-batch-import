@@ -228,6 +228,8 @@ def download_profile_history():
         months=months,
     )
     download_result = downloader.run().as_dict()
+    if download_result.get("status") == "no_data":
+        return _render_profiles_page(download_result=download_result), 200
     if download_result.get("status") != "success":
         return _render_profiles_page(download_result=download_result), 500
     try:
