@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>开票草稿 {{ draft.draft_id }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260502-hybrid1') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260502-hybrid3') }}">
     <script defer src="{{ url_for('static', filename='lean.js', v='20260429-v23') }}"></script>
   </head>
   <body class="operator-body">
@@ -178,16 +178,16 @@
             </section>
           {% endif %}
 
-          <section class="work-card composer-card compact-composer">
-            <header class="card-head">
+          <details class="work-card composer-card compact-composer draft-source-panel">
+            <summary class="card-head">
               <div class="card-title">
-                <span class="card-icon">录</span>
+                <span class="card-icon">源</span>
                 <div>
-                  <h2>材料输入</h2>
-                  <p>这里只保留一个细长输入板，继续补充文字或拖入文件即可。</p>
+                  <h2>原始材料与补充说明</h2>
+                  <p>默认收起，避免复核页变成长表单；需要追加材料时再展开。</p>
                 </div>
               </div>
-            </header>
+            </summary>
 
             <div class="composer-meta">
               <label class="field compact-field">
@@ -211,7 +211,7 @@
                 <button class="secondary" type="submit">重新生成</button>
               </div>
             </div>
-          </section>
+          </details>
 
           <section class="work-card draft-card">
             <header class="card-head">

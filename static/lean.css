@@ -117,7 +117,16 @@ h1,h2,h3,p,span,strong,td,th,a,button,input,textarea,select,small { overflow-wra
 
 .page,
 .main-stage { min-width: 0; padding: 30px; }
-.dashboard-form { min-width: 0; }
+.dashboard-form {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--right);
+  gap: 22px;
+  align-items: start;
+  padding: 30px;
+}
+.dashboard-form .main-stage { padding: 0; }
+.dashboard-form .status-rail { margin-top: 76px; }
 
 .topline,
 .hy-topline,
@@ -442,4 +451,146 @@ input[name="line_amount_with_tax"] { text-align: right; font-variant-numeric: ta
   .workflow-steps { grid-template-columns: 1fr; }
   h1 { font-size: 27px; }
   .card, .work-card, .status-card { padding: 16px; border-radius: 22px; }
+}
+
+/* UI v3 full-page alignment fixes */
+.dashboard-form {
+  width: 100%;
+}
+.dashboard-form .workflow-strip {
+  margin-bottom: 18px;
+}
+.dashboard-form .banner {
+  margin-bottom: 14px;
+}
+.draft-source-panel {
+  padding: 0;
+  overflow: hidden;
+}
+.draft-source-panel > summary.card-head {
+  list-style: none;
+  margin: 0;
+  padding: 18px 22px;
+  cursor: pointer;
+  border-bottom: 1px solid transparent;
+}
+.draft-source-panel > summary.card-head::-webkit-details-marker { display: none; }
+.draft-source-panel > summary.card-head::after {
+  content: "展开";
+  margin-left: auto;
+  color: var(--muted);
+  background: var(--surface-warm);
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 900;
+}
+.draft-source-panel[open] > summary.card-head {
+  border-bottom-color: var(--line);
+}
+.draft-source-panel[open] > summary.card-head::after { content: "收起"; }
+.draft-source-panel .composer-meta,
+.draft-source-panel .chat-composer {
+  margin: 0 22px 18px;
+}
+.draft-card {
+  padding: 22px;
+}
+.draft-card .draft-toolbar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+.draft-card .info-card h3,
+.draft-card .bulk-strip h3,
+.draft-card .line-board h3 {
+  margin: 0;
+}
+.section-head,
+.bulk-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.line-board {
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: #fbf5eb;
+  padding: 16px;
+}
+.line-board .table-wrap {
+  background: #fffdfa;
+}
+.choice-wrap {
+  position: relative;
+}
+.choice-display { display: none; }
+.choice-select { width: 100%; }
+.status-rail .status-actions {
+  justify-content: stretch;
+}
+.status-rail .status-actions > * {
+  width: 100%;
+}
+.status-rail .failure-upload {
+  display: grid;
+  gap: 6px;
+  text-align: left;
+  margin: 12px 0;
+}
+.status-rail .failure-upload strong,
+.status-rail .failure-upload span,
+.status-rail .failure-upload small,
+.status-rail .failure-upload em { display: block; }
+.status-rail .failure-upload em {
+  color: var(--brand);
+  font-style: normal;
+  font-weight: 900;
+}
+.banner-head,
+.failure-record-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+.failure-record-list,
+.failure-global-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+.failure-record {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fffdfa;
+  padding: 12px;
+}
+.timeline li.error > span,
+.workflow-steps li.error > span {
+  background: var(--danger);
+  color: #fff;
+}
+.run-shell .main-stage {
+  width: 100%;
+}
+.run-shell .hy-grid-2 {
+  grid-template-columns: minmax(0, 1fr) var(--right);
+}
+@media (max-width: 1280px) {
+  .dashboard-form,
+  .run-shell .hy-grid-2 {
+    grid-template-columns: minmax(0, 1fr) 330px;
+  }
+}
+@media (max-width: 1180px) {
+  .dashboard-form,
+  .run-shell .hy-grid-2 {
+    grid-template-columns: 1fr;
+  }
+  .dashboard-form .status-rail { margin-top: 0; }
+  .draft-card .draft-toolbar { grid-template-columns: 1fr; }
 }
