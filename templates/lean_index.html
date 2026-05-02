@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>批量开票轻工作台</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260502-v27') }}">
+    <title>智能开票助手 · 开票运营工作台</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260502-hybrid1') }}">
     <script defer src="{{ url_for('static', filename='lean.js', v='20260502-v27') }}"></script>
   </head>
   <body class="operator-body">
@@ -14,14 +14,14 @@
           <div class="brand-logo">AI</div>
           <div>
             <strong>智能开票助手</strong>
-            <small>开票工作台</small>
+            <small>Invoice Ops</small>
           </div>
         </div>
 
         <nav class="sidebar-nav">
           <a class="nav-item active" href="{{ url_for('index') }}">
-            <span class="nav-dot">＋</span>
-            <span>新建发票</span>
+            <span class="nav-dot">台</span>
+            <span>开票工作台</span>
           </a>
           <a class="nav-item" href="{{ url_for('success_ledger') }}">
             <span class="nav-dot">表</span>
@@ -30,122 +30,163 @@
         </nav>
 
         <section class="sidebar-panel">
-          <h3>当前任务</h3>
-          <p>把客户材料整理成可复核、可发起开票的草稿。</p>
+          <h3>一期安全边界</h3>
+          <p>系统生成草稿与税局批量导入模板，只辅助进入税局预览页；最终开具必须由助理人工确认。</p>
         </section>
       </aside>
 
       <section class="main-stage">
-        <section class="work-card workflow-strip workflow-strip-primary">
-          <div class="workflow-head">
-            <div>
-              <span class="rail-badge">Service Flow</span>
-              <h2>智能开票服务流程</h2>
-            </div>
-            <p>从客户材料到税局预览，全流程只在最后人工确认开具。</p>
+        <header class="hy-topline hy-page-title">
+          <div>
+            <p class="hy-eyebrow">Ramp × Mercury hybrid workspace</p>
+            <h1>开票运营工作台</h1>
+            <p>把微信群材料、Excel、PDF 和图片转成可复核的开票草稿与税局批量导入模板。</p>
           </div>
-          <ol class="workflow-steps">
-            <li class="active">
-              <span>1</span>
-              <div><strong>录入材料</strong><small>粘贴文本 / 上传文件</small></div>
-            </li>
-            <li>
-              <span>2</span>
-              <div><strong>生成草稿</strong><small>抽取购买方与明细</small></div>
-            </li>
-            <li>
-              <span>3</span>
-              <div><strong>复核赋码</strong><small>确认票种、税率、编码</small></div>
-            </li>
-            <li>
-              <span>4</span>
-              <div><strong>发起开票</strong><small>系统处理提交和退回原因</small></div>
-            </li>
-            <li>
-              <span>5</span>
-              <div><strong>预览确认</strong><small>只到预览，不自动最终开具</small></div>
-            </li>
-          </ol>
-        </section>
+          <div class="hy-actions">
+            <button class="secondary" type="button" data-tax-identify-external onclick="document.querySelector('[data-tax-identify]')?.click()">识别当前税局主体</button>
+            <button class="secondary" type="button" onclick="window.location.reload()">刷新档案状态</button>
+          </div>
+        </header>
 
-        <section class="work-card tax-console" data-tax-console>
-          <header class="card-head">
-            <div class="card-title">
-              <span class="card-icon">税</span>
-              <div>
-                <h2>税局连接与主体档案</h2>
-                <p>税局主体用于提交前安全核对；材料输入里的销售方用于草稿生成和云端档案推荐，二者分开判断。</p>
-              </div>
-            </div>
-          </header>
-          <div class="tax-console-actions">
+        <section class="hy-env-bar tax-console" data-tax-console>
+          <div class="hy-env-item primary">
+            <span>税局连接</span>
+            <strong>CDP Edge · 127.0.0.1:9222</strong>
+            <small>通过下方按钮打开辽宁 / 吉林 / 北京税局</small>
+          </div>
+          <div class="hy-env-item">
+            <span>当前税局主体</span>
+            <strong>待识别</strong>
+            <small>登录税局后点击识别；用于提交前安全核对</small>
+          </div>
+          <div class="hy-env-item">
+            <span>云端客户档案</span>
+            <strong>{% if profile_summary and profile_summary.exists %}{{ profile_summary.seller_count }} 个销售主体 / {{ profile_summary.buyer_count }} 个购买方{% else %}本机暂无缓存{% endif %}</strong>
+            <small>{% if profile_summary and profile_summary.exists %}{{ profile_summary.project_profile_count }} 个常用项目已可用于草稿推荐{% else %}配置同步后会后台拉取{% endif %}</small>
+          </div>
+          <div class="hy-env-item">
+            <span>同步中心</span>
+            <strong>{% if profile_summary and profile_summary.exists %}已连接 · 本地缓存可用{% else %}待连接 / 后台尝试{% endif %}</strong>
+            <small>事件回传、规则包和客户档案在这里形成闭环</small>
+          </div>
+          <div class="tax-console-actions" style="grid-column: 1 / -1;">
             <button class="secondary" type="button" data-tax-open data-province="liaoning">打开辽宁税局</button>
             <button class="secondary" type="button" data-tax-open data-province="jilin">打开吉林税局</button>
             <button class="secondary" type="button" data-tax-open data-province="beijing">打开北京税局</button>
-            <button class="secondary" type="button" data-tax-identify>识别当前税局主体 / 加载档案</button>
+            <button class="primary" type="button" data-tax-identify>识别当前税局主体 / 加载档案</button>
           </div>
-          <div class="banner profile-status" data-tax-status>
+          <div class="banner profile-status" data-tax-status style="grid-column: 1 / -1;">
             {% if profile_summary and profile_summary.exists %}
-              <p>客户档案缓存：已加载 {{ profile_summary.seller_count }} 个销售主体 / {{ profile_summary.project_profile_count }} 个常用项目 / {{ profile_summary.buyer_count }} 个购买方。生成草稿时会优先使用云端档案缓存，所有推荐仍需人工复核。</p>
+              <p>客户档案缓存：已加载 {{ profile_summary.seller_count }} 个销售主体 / {{ profile_summary.project_profile_count }} 个常用项目 / {{ profile_summary.buyer_count }} 个购买方。材料销售方档案与当前税局主体分开判断。</p>
             {% else %}
               <p>客户档案缓存：本机暂无缓存；如已配置同步，工作台会在后台尝试从云端拉取。</p>
             {% endif %}
           </div>
         </section>
 
+        <section class="hy-metric-grid">
+          <div class="hy-metric"><span>待复核</span><strong>—</strong><small>缺字段、低置信度、税码待确认优先处理</small></div>
+          <div class="hy-metric"><span>可导出模板</span><strong>—</strong><small>通过预校验后下载官方税局 Excel</small></div>
+          <div class="hy-metric"><span>税局退回</span><strong>—</strong><small>失败明细会回填到草稿并给出安全建议</small></div>
+          <div class="hy-metric"><span>客户规则命中率</span><strong>{% if profile_summary and profile_summary.project_profile_count %}已加载{% else %}待加载{% endif %}</strong><small>云端规则 + 本地即时学习，只做推荐不自动最终开具</small></div>
+        </section>
+
         {% if errors %}
-          <section class="banner alert">
+          <section class="banner alert" style="margin-top:18px;">
             {% for error in errors %}<p>{{ error }}</p>{% endfor %}
           </section>
         {% endif %}
 
-        <form class="stage-stack" method="post" action="{{ url_for('create_draft') }}" enctype="multipart/form-data" data-create-draft-form>
-          <section class="work-card composer-card">
-            <header class="card-head">
-              <div class="card-title">
-                <span class="card-icon">录</span>
-                <div>
-                  <h2>材料输入</h2>
-                  <p>像聊天输入框一样录入文字，也可以直接拖入客户文件。</p>
+        <div class="hy-grid-2" style="margin-top:22px;">
+          <section class="hy-stack">
+            <form class="stage-stack" method="post" action="{{ url_for('create_draft') }}" enctype="multipart/form-data" data-create-draft-form>
+              <section class="work-card composer-card">
+                <header class="card-head">
+                  <div class="card-title">
+                    <span class="card-icon">录</span>
+                    <div>
+                      <h2>材料输入</h2>
+                      <p>像聊天一样粘贴客户开票需求，也可以拖入客户发来的 Excel、PDF、图片和平台截图。</p>
+                    </div>
+                  </div>
+                  <span class="hy-badge ok">支持批量开具</span>
+                </header>
+
+                <div class="composer-meta">
+                  <label class="field compact-field">
+                    <span>销售方 / 纳税主体</span>
+                    <input name="company_name" value="{{ form.company_name or '' }}" placeholder="填写材料对应销售方；可与当前税局主体分开核对">
+                  </label>
+                  <label class="field compact-field">
+                    <span>补充说明</span>
+                    <input name="note" value="{{ form.note or '' }}" placeholder="例如：本批先按普票 1% 生成">
+                  </label>
                 </div>
-              </div>
-            </header>
+                <div class="banner seller-profile-status" data-seller-profile-status>
+                  <p>材料销售方档案：填写销售方后，系统会按此主体匹配云端常用项目；不依赖当前税局登录主体。</p>
+                </div>
 
-            <div class="composer-meta">
-              <label class="field compact-field">
-                <span>销售方 / 纳税主体</span>
-                <input name="company_name" value="{{ form.company_name or '' }}" placeholder="可留空，以税局当前登录主体为准">
-              </label>
-              <label class="field compact-field">
-                <span>补充说明</span>
-                <input name="note" value="{{ form.note or '' }}" placeholder="例如：本次先按普票 3% 生成">
-              </label>
-            </div>
-            <div class="banner seller-profile-status" data-seller-profile-status>
-              <p>材料销售方档案：填写销售方后，系统会按此主体匹配云端常用项目；不依赖当前税局登录主体。</p>
-            </div>
+                <div class="chat-composer">
+                  <textarea name="raw_text" rows="5" placeholder="直接粘贴客户发来的开票信息、购买方资料、项目明细、聊天整理文本等。">{{ form.raw_text or '' }}</textarea>
+                  <div class="composer-toolbar">
+                    <label class="file-trigger" data-file-trigger>
+                      <input type="file" name="source_files" multiple data-file-input>
+                      <span>选择或拖入图片 / Excel / PDF</span>
+                    </label>
+                    <small data-file-status>尚未选择材料；支持文字和文件同时输入，Excel 会优先解析明细。</small>
+                    <label class="batch-mode-toggle">
+                      <input type="checkbox" name="batch_mode">
+                      <span><strong>批量开具发票</strong><small>多张截图 / 多个购买方 / 税局批量模板导入时勾选</small></span>
+                    </label>
+                    <button class="primary" type="submit" data-submit-button>生成开票草稿</button>
+                    <div class="submit-status" data-submit-status hidden>正在上传并识别材料；如已启用智能复核，可能需要 10 秒左右。</div>
+                  </div>
+                </div>
+              </section>
+            </form>
 
-            <div class="chat-composer">
-              <textarea name="raw_text" rows="4" placeholder="直接粘贴客户发来的开票信息、购买方资料、项目明细、聊天整理文本等。">{{ form.raw_text or '' }}</textarea>
-              <div class="composer-toolbar">
-                <label class="file-trigger" data-file-trigger>
-                  <input type="file" name="source_files" multiple data-file-input>
-                  <span>选择或拖入图片 / Excel / PDF</span>
-                </label>
-                <small data-file-status>尚未选择材料；支持文字和文件同时输入，Excel 会优先解析明细。</small>
-                <label class="batch-mode-toggle">
-                  <input type="checkbox" name="batch_mode">
-                  <span><strong>批量开具发票</strong><small>多张截图 / 多个购买方 / 税局批量模板导入时勾选</small></span>
-                </label>
-                <button class="primary" type="submit" data-submit-button>生成开票草稿</button>
-                <div class="submit-status" data-submit-status hidden>正在上传并识别材料；如已启用智能复核，可能需要 10 秒左右。</div>
+            <section class="work-card">
+              <header class="card-head">
+                <div>
+                  <h2>最近开票任务</h2>
+                  <p>一期先以当前会话草稿为主；后续可接入台账状态统计。</p>
+                </div>
+                <a class="secondary button-like" href="{{ url_for('success_ledger') }}">查看发票记录</a>
+              </header>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>状态</th><th>来源</th><th>处理重点</th><th>下一步</th></tr></thead>
+                  <tbody>
+                    <tr><td><span class="hy-badge warn">待材料</span></td><td>微信群 / 文件夹</td><td>上传图片、Excel、PDF 或粘贴文本</td><td>生成草稿</td></tr>
+                    <tr><td><span class="hy-badge info">待复核</span></td><td>开票草稿</td><td>确认购买方、金额、税收编码、税率</td><td>下载税局 Excel</td></tr>
+                    <tr><td><span class="hy-badge ok">可执行</span></td><td>批量模板</td><td>模板校验通过后整批上传税局</td><td>进入预览，不最终开具</td></tr>
+                  </tbody>
+                </table>
               </div>
-            </div>
+            </section>
           </section>
 
-        </form>
-      </section>
+          <aside class="hy-stack">
+            <section class="work-card">
+              <header class="card-head"><div><h2>智能审核</h2><p>AI 只做抽取、解释和建议，所有开票动作由助理复核。</p></div></header>
+              <div class="hy-panel-list">
+                <div class="hy-panel-item"><span class="hy-badge info">材料完整度</span><p>上传或粘贴后会提示缺少购买方、税号、金额、税率等字段。</p></div>
+                <div class="hy-panel-item"><span class="hy-badge ok">规则包版本</span><p>{% if profile_summary and profile_summary.exists %}云端客户档案已加载，常用项目会优先参与推荐。{% else %}等待云端档案缓存拉取。{% endif %}</p></div>
+                <div class="hy-panel-item"><span class="hy-badge warn">本地即时学习</span><p>人工修正税收编码、税率后，可沉淀到本地规则候选，后续仍需人工复核。</p></div>
+              </div>
+            </section>
 
+            <section class="work-card">
+              <header class="card-head"><div><h2>主体与档案可信层</h2><p>Mercury-like：像账户后台一样看清数据从哪来。</p></div></header>
+              <div class="hy-panel-list">
+                <div class="hy-panel-item"><strong>当前税局账户</strong><p>由 CDP Edge 登录页面识别；用于上传前安全核对。</p></div>
+                <div class="hy-panel-item"><strong>材料销售方档案</strong><p>由上方销售方输入匹配；用于项目推荐、购买方历史和规则缓存。</p></div>
+                <div class="hy-panel-item"><strong>同步中心状态</strong><p>档案、规则和 case event 形成闭环；离线时不阻断本地草稿生成。</p></div>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </section>
     </main>
   </body>
 </html>

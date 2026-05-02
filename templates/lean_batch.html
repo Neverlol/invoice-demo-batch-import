@@ -4,66 +4,69 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>批量草稿 {{ batch.batch_id }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260502-v27') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260502-hybrid1') }}">
   </head>
   <body class="operator-body">
+    {% set ns = namespace(review=0, ready=0) %}
+    {% for row in batch_rows %}
+      {% if row.has_issues %}{% set ns.review = ns.review + 1 %}{% else %}{% set ns.ready = ns.ready + 1 %}{% endif %}
+    {% endfor %}
     <main class="dashboard-shell single-stage">
       <section class="main-stage">
         <nav class="topbar">
-          <a href="{{ url_for('index') }}">新建草稿</a>
+          <a href="{{ url_for('index') }}">开票工作台</a>
           <a href="{{ url_for('download_batch_template', batch_id=batch.batch_id) }}">下载本批税局文件</a>
         </nav>
 
-        <section class="work-card workflow-strip workflow-strip-primary">
-          <div class="workflow-head">
-            <div>
-              <span class="rail-badge">Batch {{ batch.batch_id }}</span>
-              <h2>批量开票工作表：{{ batch.items|length }} 张发票</h2>
-            </div>
-            <p>本页按税局批量模板组织数据。请在当前页集中复核和补全，不需要逐张跳转。</p>
+        <header class="hy-topline hy-page-title">
+          <div>
+            <p class="hy-eyebrow">Batch {{ batch.batch_id }}</p>
+            <h1>批量导入模板复核</h1>
+            <p>本页集中处理 Sheet 1 基本信息、Sheet 2 明细赋码、Sheet 3 待补全 / 异常项。</p>
           </div>
-          <ol class="workflow-steps">
-            <li class="active"><span>1</span><div><strong>批量识别</strong><small>每张截图/材料生成一张发票</small></div></li>
-            <li class="active"><span>2</span><div><strong>表格复核</strong><small>空白和异常字段会高亮</small></div></li>
-            <li><span>3</span><div><strong>保存并校验</strong><small>在当前页完成修补</small></div></li>
-            <li><span>4</span><div><strong>整批上传税局</strong><small>生成同一个批量 Excel</small></div></li>
-            <li><span>5</span><div><strong>预览确认</strong><small>只到预览，不最终开具</small></div></li>
-          </ol>
+          <div class="hy-actions">
+            <button class="secondary" type="submit" form="batch-sheet-form">保存并重新校验</button>
+            <a class="primary button-like" href="{{ url_for('download_batch_template', batch_id=batch.batch_id) }}">下载税局 Excel</a>
+          </div>
+        </header>
+
+        <section class="hy-metric-grid">
+          <div class="hy-metric"><span>本批发票</span><strong>{{ batch.items|length }}</strong><small>强制批量时一张原始图片 = 一张发票</small></div>
+          <div class="hy-metric"><span>可入模板</span><strong>{{ ns.ready }}</strong><small>当前无明显缺字段的行</small></div>
+          <div class="hy-metric"><span>待补全</span><strong>{{ ns.review }}</strong><small>黄色 / 红色字段需要助理复核</small></div>
+          <div class="hy-metric"><span>阻断错误</span><strong>{{ export.error_count }}</strong><small>{% if export.error_count %}修复前不可上传税局{% else %}当前模板无阻断错误{% endif %}</small></div>
         </section>
 
         {% if saved %}
-          <section class="banner ok"><p>本批修改已保存，并已重新校验模板。</p></section>
+          <section class="banner ok" style="margin-top:18px;"><p>本批修改已保存，并已重新校验模板。</p></section>
         {% endif %}
-
         {% if run_blocked %}
-          <section class="banner alert">
-            <p>当前批量模板还有错误，已阻止上传税局。请先修复下方高亮字段，再保存并重新校验。</p>
-          </section>
+          <section class="banner alert" style="margin-top:18px;"><p>当前批量模板还有错误，已阻止上传税局。请先修复下方高亮字段，再保存并重新校验。</p></section>
         {% endif %}
-
         {% if export.error_count %}
-          <section class="banner alert">
+          <section class="banner alert" style="margin-top:18px;">
             <strong>模板校验未通过：{{ export.error_count }} 个错误</strong>
             {% for issue in export.validation_issues %}
               {% if issue.level == 'error' %}<p>{{ issue.sheet }} 第 {{ issue.row }} 行 {{ issue.header }}：{{ issue.message }}</p>{% endif %}
             {% endfor %}
           </section>
         {% elif export.warning_count %}
-          <section class="banner notice"><strong>模板可生成，但有 {{ export.warning_count }} 个提醒，请复核后再上传。</strong></section>
+          <section class="banner notice" style="margin-top:18px;"><strong>模板可生成，但有 {{ export.warning_count }} 个提醒，请复核后再上传。</strong></section>
         {% else %}
-          <section class="banner ok"><p>本批模板校验通过。可以下载税局 Excel，或直接发起本批开票。</p></section>
+          <section class="banner ok" style="margin-top:18px;"><p>本批模板校验通过。可以下载税局 Excel，或直接发起本批开票。</p></section>
         {% endif %}
 
-        <form method="post" action="{{ url_for('save_batch_sheet', batch_id=batch.batch_id) }}" class="batch-sheet-form">
-          <section class="work-card batch-action-panel">
+        <form method="post" action="{{ url_for('save_batch_sheet', batch_id=batch.batch_id) }}" class="batch-sheet-form" id="batch-sheet-form">
+          <section class="work-card batch-action-panel" style="margin-top:22px;">
             <header class="card-head">
               <div class="card-title">
                 <span class="card-icon">批</span>
                 <div>
                   <h2>整批处理</h2>
-                  <p>先保存本页修改，再下载或上传同一个税局批量模板。</p>
+                  <p>先保存本页修改，再下载或上传同一个税局批量模板。税局最终开具仍由助理人工确认。</p>
                 </div>
               </div>
+              <span class="hy-badge {% if export.error_count %}error{% elif ns.review %}warn{% else %}ok{% endif %}">{% if export.error_count %}有阻断{% elif ns.review %}待补全{% else %}可上传{% endif %}</span>
             </header>
             <div class="action-row">
               <button class="secondary" type="submit">保存本批修改 / 重新校验</button>
@@ -75,20 +78,14 @@
             <header class="sheet-head">
               <div>
                 <span class="sheet-tab active">Sheet 1：发票基本信息</span>
-                <p>贴近税局批量模板：一行代表一张发票。带 ✎ 的字段可直接编辑。</p>
+                <p>一行代表一张发票。带 ✎ 的字段可直接编辑，金额右对齐便于复核。</p>
               </div>
+              <span class="hy-badge {% if ns.review %}warn{% else %}ok{% endif %}">{{ ns.review }} 项待复核</span>
             </header>
             <div class="table-wrap sheet-table-wrap">
               <table class="sheet-table">
                 <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>来源</th>
-                    <th>购买方名称</th>
-                    <th>购买方税号</th>
-                    <th>票种</th>
-                    <th>含税金额</th>
-                  </tr>
+                  <tr><th>#</th><th>来源</th><th>购买方名称</th><th>购买方税号</th><th>票种</th><th>含税金额</th><th>状态</th></tr>
                 </thead>
                 <tbody>
                   {% for row in batch_rows %}
@@ -105,15 +102,13 @@
                         <input name="buyer_tax_id" value="{{ row.buyer_tax_id }}" placeholder="待补全税号">
                         {% if row.issue_map.buyer_tax_id %}<small>{{ row.issue_map.buyer_tax_id }}</small>{% endif %}
                       </td>
-                      <td class="editable-cell">
-                        <span class="edit-mark">✎</span>
-                        <input name="invoice_kind" value="{{ row.invoice_kind }}">
-                      </td>
+                      <td class="editable-cell"><span class="edit-mark">✎</span><input name="invoice_kind" value="{{ row.invoice_kind }}"></td>
                       <td class="editable-cell {% if row.issue_map.amount_with_tax %}field-error{% endif %}">
                         <span class="edit-mark">✎</span>
                         <input name="amount_with_tax" value="{{ row.amount_with_tax }}" placeholder="待补全金额">
                         {% if row.issue_map.amount_with_tax %}<small>{{ row.issue_map.amount_with_tax }}</small>{% endif %}
                       </td>
+                      <td>{% if row.has_issues %}<span class="hy-badge warn">待复核</span>{% else %}<span class="hy-badge ok">可入模板</span>{% endif %}</td>
                     </tr>
                   {% endfor %}
                 </tbody>
@@ -125,49 +120,26 @@
             <header class="sheet-head">
               <div>
                 <span class="sheet-tab active">Sheet 2：发票明细信息</span>
-                <p>集中复核项目、税收分类、税收编码、税率。智能推荐仍需人工确认。</p>
+                <p>集中复核项目、税收分类、税收编码和税率。智能推荐会标注来源，仍需人工确认。</p>
               </div>
+              <span class="hy-badge info">规则 / 档案推荐</span>
             </header>
             <div class="table-wrap sheet-table-wrap">
               <table class="sheet-table">
                 <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>项目名称</th>
-                    <th>税收分类</th>
-                    <th>税收编码</th>
-                    <th>税率</th>
-                    <th>单位</th>
-                    <th>数量</th>
-                    <th>推荐来源</th>
-                  </tr>
+                  <tr><th>#</th><th>项目名称</th><th>税收分类</th><th>税收编码</th><th>税率</th><th>单位</th><th>数量</th><th>推荐来源</th></tr>
                 </thead>
                 <tbody>
                   {% for row in batch_rows %}
                     <tr class="{% if row.has_issues %}row-needs-review{% endif %}">
                       <td>{{ row.index }}</td>
-                      <td class="editable-cell {% if row.issue_map.project_name %}field-error{% endif %}">
-                        <span class="edit-mark">✎</span>
-                        <input name="project_name" value="{{ row.project_name }}" placeholder="待补全项目">
-                        {% if row.issue_map.project_name %}<small>{{ row.issue_map.project_name }}</small>{% endif %}
-                      </td>
-                      <td class="editable-cell">
-                        <span class="edit-mark">✎</span>
-                        <input name="tax_category" value="{{ row.tax_category }}" placeholder="例如：餐饮服务">
-                      </td>
-                      <td class="editable-cell {% if row.issue_map.tax_code %}field-warning{% endif %}">
-                        <span class="edit-mark">✎</span>
-                        <input name="tax_code" value="{{ row.tax_code }}" placeholder="待确认税收编码">
-                        {% if row.issue_map.tax_code %}<small>{{ row.issue_map.tax_code }}</small>{% endif %}
-                      </td>
-                      <td class="editable-cell {% if row.issue_map.tax_rate %}field-error{% endif %}">
-                        <span class="edit-mark">✎</span>
-                        <input name="tax_rate" value="{{ row.tax_rate }}" placeholder="1%">
-                        {% if row.issue_map.tax_rate %}<small>{{ row.issue_map.tax_rate }}</small>{% endif %}
-                      </td>
+                      <td class="editable-cell {% if row.issue_map.project_name %}field-error{% endif %}"><span class="edit-mark">✎</span><input name="project_name" value="{{ row.project_name }}" placeholder="待补全项目">{% if row.issue_map.project_name %}<small>{{ row.issue_map.project_name }}</small>{% endif %}</td>
+                      <td class="editable-cell"><span class="edit-mark">✎</span><input name="tax_category" value="{{ row.tax_category }}" placeholder="例如：餐饮服务"></td>
+                      <td class="editable-cell {% if row.issue_map.tax_code %}field-warning{% endif %}"><span class="edit-mark">✎</span><input name="tax_code" value="{{ row.tax_code }}" placeholder="待确认税收编码">{% if row.issue_map.tax_code %}<small>{{ row.issue_map.tax_code }}</small>{% endif %}</td>
+                      <td class="editable-cell {% if row.issue_map.tax_rate %}field-error{% endif %}"><span class="edit-mark">✎</span><input name="tax_rate" value="{{ row.tax_rate }}" placeholder="1%">{% if row.issue_map.tax_rate %}<small>{{ row.issue_map.tax_rate }}</small>{% endif %}</td>
                       <td class="editable-cell"><span class="edit-mark">✎</span><input name="unit" value="{{ row.unit }}" placeholder="项"></td>
                       <td class="editable-cell"><span class="edit-mark">✎</span><input name="quantity" value="{{ row.quantity }}" placeholder="1"></td>
-                      <td><small>{{ row.coding_reference or '无推荐来源，请人工确认' }}</small></td>
+                      <td><span class="hy-badge {% if row.coding_reference %}info{% else %}neutral{% endif %}">{{ row.coding_reference or '无推荐来源，请人工确认' }}</span></td>
                     </tr>
                   {% endfor %}
                 </tbody>
@@ -180,27 +152,20 @@
           <header class="sheet-head">
             <div>
               <span class="sheet-tab active">Sheet 3：待补全 / 异常项</span>
-              <p>优先处理红色必填项；黄色是推荐或识别结果需要人工复核。</p>
+              <p>优先处理红色阻断错误，再处理黄色建议项；高级编辑只作为备用入口。</p>
             </div>
+            <span class="hy-badge {% if ns.review %}warn{% else %}ok{% endif %}">{{ ns.review }} 项需处理</span>
           </header>
           <div class="table-wrap sheet-table-wrap">
             <table class="sheet-table">
-              <thead>
-                <tr><th>#</th><th>来源</th><th>状态</th><th>提示</th><th>备用入口</th></tr>
-              </thead>
+              <thead><tr><th>#</th><th>来源</th><th>状态</th><th>提示</th><th>备用入口</th></tr></thead>
               <tbody>
                 {% for row in batch_rows %}
                   <tr class="{% if row.has_issues %}row-needs-review{% endif %}">
                     <td>{{ row.index }}</td>
                     <td>{{ row.source_name or row.draft_id }}</td>
-                    <td>{% if row.has_issues %}<span class="status-pill warn">待修补</span>{% else %}<span class="status-pill ok">可入模板</span>{% endif %}</td>
-                    <td>
-                      {% if row.issues %}
-                        {% for issue in row.issues[:3] %}<p class="issue-line">{{ issue }}</p>{% endfor %}
-                      {% else %}
-                        <p class="muted">暂无异常。</p>
-                      {% endif %}
-                    </td>
+                    <td>{% if row.has_issues %}<span class="hy-badge warn">待修补</span>{% else %}<span class="hy-badge ok">可入模板</span>{% endif %}</td>
+                    <td>{% if row.issues %}{% for issue in row.issues[:3] %}<p class="issue-line">{{ issue }}</p>{% endfor %}{% else %}<p class="muted">暂无异常。</p>{% endif %}</td>
                     <td><a href="{{ url_for('draft_detail', draft_id=row.draft_id) }}">高级编辑</a></td>
                   </tr>
                 {% endfor %}
@@ -211,13 +176,13 @@
 
         <section class="work-card action-panel">
           <header class="card-head"><div class="card-title"><span class="card-icon">传</span><div><h2>确认后整批上传</h2><p>只有整批模板校验通过后，才允许发起本批上传。</p></div></div></header>
+          <div class="hy-safe-boundary" style="margin-bottom:14px;">系统只辅助上传模板并进入税局预览页，不会自动最终开具。最终开具必须由助理人工确认。</div>
           <div class="action-row">
             <form method="post" action="{{ url_for('execute_batch', batch_id=batch.batch_id) }}">
               <input type="hidden" name="cdp_endpoint" value="http://127.0.0.1:9222">
               <button class="primary" type="submit" {% if export.error_count %}disabled{% endif %}>发起本批开票 / 上传税局</button>
             </form>
           </div>
-          <p class="muted">注意：系统只到税局“预览发票”，不点击最终开具。</p>
         </section>
       </section>
     </main>
