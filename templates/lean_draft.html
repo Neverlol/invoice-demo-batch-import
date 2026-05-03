@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>发票草稿 {{ draft.draft_id }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-neverlol-logo2') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-assistant-copy') }}">
     <script defer src="{{ url_for('static', filename='lean.js', v='20260429-v23') }}"></script>
   </head>
   <body class="operator-body">
@@ -24,7 +24,7 @@
         </nav>
         <div class="sidebar-card">
           <h3>当前任务</h3>
-          <p>复核字段、处理退回原因，确认后发起开票。原始材料不再占用草稿主流程。</p>
+          <p>请先核对销售方、购买方、金额、税率和税收编码。确认无误后，再发起开票。</p>
         </div>
       </aside>
 
@@ -36,7 +36,7 @@
           <div>
             <div class="eyebrow">Draft {{ draft.draft_id }}</div>
             <h1>发票草稿复核</h1>
-            <p>来源、字段、执行动作分区复核。</p>
+            <p>本页把材料来源、发票字段和下一步操作分开展示，方便你逐项核对。</p>
           </div>
           <div class="actions">
             <a class="btn" href="{{ url_for('download_template', draft_id=draft.draft_id) }}">下载税局文件</a>
@@ -46,9 +46,9 @@
 
         <section class="env-bar draft-env-bar">
           <div class="env-item"><span>销售主体</span><strong>{{ draft.company_name or '未填写' }}</strong><small>提交前需与当前税局登录主体一致</small></div>
-          <div class="env-item"><span>购买方</span><strong>{{ draft.buyer.name or '待补全购买方' }}</strong><small>材料抽取结果仍需人工复核</small></div>
+          <div class="env-item"><span>购买方</span><strong>{{ draft.buyer.name or '待补全购买方' }}</strong><small>请按客户材料再核对一次</small></div>
           <div class="env-item"><span>预校验</span><strong>{{ export.error_count }} 个阻断 / {{ export.warning_count }} 个提醒</strong><small>{% if export.error_count %}请先修正阻断问题{% else %}当前可生成税局模板{% endif %}</small></div>
-          <div class="env-item"><span>明细</span><strong>{{ draft.lines|length }} 行</strong><small>修改赋码后可保存为学习候选</small></div>
+          <div class="env-item"><span>明细</span><strong>{{ draft.lines|length }} 行</strong><small>你修正后可辅助下次推荐</small></div>
         </section>
 
         {% if saved %}<section class="banner ok"><p>修改已保存。</p></section>{% endif %}
@@ -62,7 +62,7 @@
         {% endif %}
 
         <section class="workflow-strip compact-flow">
-          <div class="workflow-head"><div><span class="eyebrow">Service Flow</span><h2>智能开票服务流程</h2></div><p>{% if export.error_count %}先修正阻断问题。{% else %}可发起开票，最终仍需人工确认。{% endif %}</p></div>
+          <div class="workflow-head"><div><span class="eyebrow">Service Flow</span><h2>智能开票服务流程</h2></div><p>{% if export.error_count %}请先修正阻断问题，再发起开票。{% else %}当前可发起开票；到税局预览后仍由你确认最终开具。{% endif %}</p></div>
           <ol class="workflow-steps">
             <li class="done"><span>1</span><div><strong>录入材料</strong><small>已完成</small></div></li>
             <li class="done"><span>2</span><div><strong>生成草稿</strong><small>{{ draft.lines|length }} 行明细</small></div></li>
@@ -75,7 +75,7 @@
         <div class="draft-three-col">
           <aside class="draft-left-rail">
             <section class="card source-card">
-              <div class="card-head"><div><h2>材料摘要</h2><p>来源核对，不重复录入。</p></div></div>
+              <div class="card-head"><div><h2>材料摘要</h2><p>这里帮你回看材料来源，不需要重复录入。</p></div></div>
               <div class="panel-list">
                 <div class="panel-item"><span class="badge info">原始文本</span><p>{{ draft.raw_text[:180] if draft.raw_text else '本草稿没有保留原始文本。' }}{% if draft.raw_text|length > 180 %}…{% endif %}</p></div>
                 <div class="panel-item"><span class="badge {% if draft.ocr_status == 'success' %}ok{% else %}neutral{% endif %}">OCR</span><p>{{ draft.ocr_note or draft.ocr_status or '未请求 OCR' }}</p></div>
@@ -84,7 +84,7 @@
             </section>
 
             <section class="card compact-party-card">
-              <div class="card-head"><div><h2>主体与购买方</h2><p>提交前安全核对。</p></div></div>
+              <div class="card-head"><div><h2>主体与购买方</h2><p>提交前请重点核对，避免主体或购买方填错。</p></div></div>
               <label class="review-field"><span>销售方 / 纳税主体</span><input name="company_name" value="{{ draft.company_name }}" placeholder="销售方主体"></label>
               <label class="review-field"><span>购买方名称</span><input name="buyer_name" value="{{ draft.buyer.name }}" placeholder="购买方名称"></label>
               <label class="review-field"><span>购买方税号</span><input name="buyer_tax_id" value="{{ draft.buyer.tax_id }}" placeholder="购买方税号"></label>
@@ -99,7 +99,7 @@
 
           <main class="draft-center-stage">
             <section class="card invoice-review-card">
-              <div class="card-head"><div><h2>发票复核</h2><p>按发票视图核对关键字段。</p></div><span class="badge {% if export.error_count %}error{% elif export.warning_count %}warn{% else %}ok{% endif %}">{% if export.error_count %}待修正{% elif export.warning_count %}待复核{% else %}可开票{% endif %}</span></div>
+              <div class="card-head"><div><h2>发票复核</h2><p>请按发票视图核对票种、金额、税率和项目明细。</p></div><span class="badge {% if export.error_count %}error{% elif export.warning_count %}warn{% else %}ok{% endif %}">{% if export.error_count %}待修正{% elif export.warning_count %}待复核{% else %}可开票{% endif %}</span></div>
               <div class="invoice-chip-row">
                 <label class="review-field"><span>发票类型</span><select name="invoice_kind"><option value="普通发票" {% if draft.invoice_kind == '普通发票' %}selected{% endif %}>普通发票</option><option value="增值税专用发票" {% if draft.invoice_kind == '增值税专用发票' %}selected{% endif %}>增值税专用发票</option></select></label>
                 <label class="review-field"><span>特定业务</span><input name="special_business" value="{{ draft.special_business }}" placeholder="无特定业务可留空"></label>
@@ -109,14 +109,14 @@
             </section>
 
             <section class="card bulk-coding-card" id="bulk-coding">
-              <div class="card-head"><div><h2>一键赋码</h2><p>统一调整税率、分类或编码。</p></div></div>
+              <div class="card-head"><div><h2>一键赋码</h2><p>如果多行项目使用同一税率或编码，可以在这里统一调整。</p></div></div>
               <div class="taxonomy-picker" data-taxonomy-picker><label class="review-field"><span>查找税收编码</span><input data-taxonomy-query placeholder="输入关键词，如：医疗、注射、器械；选择后自动填入下方"></label><div class="taxonomy-results" data-taxonomy-results hidden></div></div>
               <div class="bulk-fields"><label>赋码大类<input data-bulk-source="line_tax_category" placeholder="选择官方编码后自动填入，也可手动改"></label><label>税收编码<input data-bulk-source="line_tax_code" placeholder="选择官方编码后自动填入"></label><label>税率<input data-bulk-source="line_tax_rate" placeholder="例如：13%"></label></div>
               <div class="bulk-actions"><button type="button" class="btn" data-bulk-apply="line_tax_rate">只改税率</button><button type="button" class="btn" data-bulk-apply="line_tax_category">只改大类</button><button type="button" class="btn" data-bulk-apply="line_tax_code">只改编码</button><button type="button" class="btn primary" data-bulk-apply-all>应用到全部明细</button></div>
             </section>
 
             <section class="card line-review-card" data-edit-scope="line-board">
-              <div class="card-head"><div><h2>开票明细</h2><p>表格内修改；保存不触发重新识别。</p></div><button type="button" class="btn" data-add-line>新增项目</button></div>
+              <div class="card-head"><div><h2>开票明细</h2><p>你可以直接在表格里修改；保存修改不会重新识别原始材料。</p></div><button type="button" class="btn" data-add-line>新增项目</button></div>
               <div class="table-wrap table-scroll"><table class="line-table compact-line-table"><thead><tr><th>项目名称</th><th>赋码大类</th><th>税收编码</th><th>命中来源</th><th>规格</th><th>单位</th><th>数量</th><th>单价</th><th>金额</th><th>税率</th></tr></thead><tbody data-lines>
                 {% for line in line_rows %}
                   <tr>
@@ -124,7 +124,7 @@
                     <td><input name="line_tax_category" value="{{ line.tax_category }}"></td>
                     <td><input name="line_tax_code" value="{{ line.tax_code }}"></td>
                     {% set coding_reference = line.coding_reference or '' %}
-                    <td><span class="coding-note{% if coding_reference.startswith('智能推荐') %} smart-suggestion{% endif %}" data-coding-note title="{{ coding_reference }}">{{ coding_reference.split(':', 1)[0] if coding_reference else '待人工复核' }}</span><input type="hidden" name="line_coding_reference" value="{{ line.coding_reference }}"></td>
+                    <td><span class="coding-note{% if coding_reference.startswith('智能推荐') %} smart-suggestion{% endif %}" data-coding-note title="{{ coding_reference }}">{{ coding_reference.split(':', 1)[0] if coding_reference else '待你核对' }}</span><input type="hidden" name="line_coding_reference" value="{{ line.coding_reference }}"></td>
                     <td><input name="line_specification" value="{{ line.specification }}"></td>
                     <td><input name="line_unit" value="{{ line.unit }}"></td>
                     <td><input name="line_quantity" value="{{ line.quantity }}"></td>
@@ -159,8 +159,8 @@
               <h2>智能审核</h2>
               <div class="panel-list" style="margin-top:12px;">
                 <div class="panel-item"><span class="badge {% if export.error_count %}error{% elif export.warning_count %}warn{% else %}ok{% endif %}">预校验</span><p>{% if export.error_count %}存在阻断错误，暂不可上传税局。{% elif export.warning_count %}无阻断错误，但有提醒需要复核。{% else %}当前模板预校验通过。{% endif %}</p></div>
-                <div class="panel-item"><span class="badge info">字段来源</span><p>购买方、金额、明细来自材料解析、历史客户档案或人工修正；保存修改不会重复触发 OCR / LLM。</p></div>
-                <div class="panel-item"><span class="badge warn">规则学习</span><p>人工修改税收编码、税率或项目后，会作为本地即时学习候选，后续仍需人工复核。</p></div>
+                <div class="panel-item"><span class="badge info">字段来源</span><p>购买方、金额、明细可能来自材料解析、历史客户档案或你的修改；保存修改不会重复触发 OCR / LLM。</p></div>
+                <div class="panel-item"><span class="badge warn">规则学习</span><p>你修改税收编码、税率或项目后，系统会作为本地学习候选记录下来，下次仍请复核。</p></div>
               </div>
             </section>
 

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>批量模板 {{ batch.batch_id }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-neverlol-logo2') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-assistant-copy') }}">
   </head>
   <body class="operator-body">
     {% set ns = namespace(review=0, ready=0) %}
@@ -22,12 +22,12 @@
           <a href="{{ url_for('profiles_page') }}"><span class="nav-dot">档</span>主体与档案</a>
           <a href="{{ url_for('ledger_page') }}"><span class="nav-dot">记</span>执行记录</a>
         </nav>
-        <div class="sidebar-card"><h3>批量页目标</h3><p>贴近税局模板，但比 Excel 更清楚地标记缺字段、阻断错误和推荐来源。</p></div>
+        <div class="sidebar-card"><h3>批量复核提示</h3><p>请先处理红色阻断和黄色待补全项，确认后再下载或上传本批税局模板。</p></div>
       </aside>
 
       <main class="page">
         <div class="topline">
-          <div><div class="eyebrow">Batch {{ batch.batch_id }}</div><h1>批量导入模板复核</h1><p>批量开票工作表：{{ batch.items|length }} 张发票。本页集中处理 Sheet 1 基本信息、Sheet 2 明细赋码、Sheet 3 异常项。</p></div>
+          <div><div class="eyebrow">Batch {{ batch.batch_id }}</div><h1>批量导入模板复核</h1><p>批量开票工作表：{{ batch.items|length }} 张发票。请按 Sheet 1 基本信息、Sheet 2 明细赋码、Sheet 3 异常项逐项复核。</p></div>
           <div class="actions">
             <button class="btn" type="submit" form="batch-sheet-form">保存并重新校验</button>
             <a class="btn primary" href="{{ url_for('download_batch_template', batch_id=batch.batch_id) }}">下载税局 Excel</a>
@@ -37,7 +37,7 @@
         <section class="metric-grid">
           <div class="metric"><span>本批发票</span><strong>{{ batch.items|length }}</strong><small>来自截图、Excel、PDF；强制批量时一张图一张票</small></div>
           <div class="metric"><span>可入模板</span><strong>{{ ns.ready }}</strong><small>已通过当前字段检查</small></div>
-          <div class="metric"><span>待补全</span><strong>{{ ns.review }}</strong><small>黄色建议项，需人工复核</small></div>
+          <div class="metric"><span>待补全</span><strong>{{ ns.review }}</strong><small>黄色建议项，请核对后补全</small></div>
           <div class="metric"><span>阻断错误</span><strong>{{ export.error_count }}</strong><small>{% if export.error_count %}修复前不可上传{% else %}当前无阻断错误{% endif %}</small></div>
         </section>
 
@@ -53,12 +53,12 @@
 
         <form method="post" action="{{ url_for('save_batch_sheet', batch_id=batch.batch_id) }}" id="batch-sheet-form" class="stack" style="margin-top:22px">
           <div class="card">
-            <div class="card-head"><div><h2>整批处理</h2><p>先保存本页修改，再下载或上传同一个税局批量模板。</p></div><span class="badge {% if export.error_count %}error{% elif ns.review %}warn{% else %}ok{% endif %}">{% if export.error_count %}有阻断{% elif ns.review %}待补全{% else %}可上传{% endif %}</span></div>
+            <div class="card-head"><div><h2>整批处理</h2><p>请先保存本页修改并重新校验，再下载或上传同一个税局批量模板。</p></div><span class="badge {% if export.error_count %}error{% elif ns.review %}warn{% else %}ok{% endif %}">{% if export.error_count %}有阻断{% elif ns.review %}待补全{% else %}可上传{% endif %}</span></div>
             <div class="actions" style="justify-content:flex-start"><button class="btn" type="submit">保存本批修改 / 重新校验</button><a class="btn primary" href="{{ url_for('download_batch_template', batch_id=batch.batch_id) }}">下载本批税局 Excel</a></div>
           </div>
 
           <div class="card">
-            <div class="card-head"><div><h2>Sheet 1：发票基本信息</h2><p>一行代表一张发票，缺失字段直接高亮。</p></div><span class="badge warn">{{ ns.review }} 项待复核</span></div>
+            <div class="card-head"><div><h2>Sheet 1：发票基本信息</h2><p>一行代表一张发票；缺失或不确定的字段会高亮，方便你补全。</p></div><span class="badge warn">{{ ns.review }} 项待复核</span></div>
             <div class="table-wrap"><table class="sheet-table"><thead><tr><th>#</th><th>来源</th><th>购买方名称</th><th>购买方税号</th><th>票种</th><th>含税金额</th><th>状态</th></tr></thead><tbody>
               {% for row in batch_rows %}
                 <tr class="{% if row.has_issues %}row-needs-review{% endif %}">
@@ -75,7 +75,7 @@
           </div>
 
           <div class="card">
-            <div class="card-head"><div><h2>Sheet 2：发票明细信息</h2><p>集中复核项目、税收分类、税收编码和税率。</p></div><span class="badge info">规则 / 档案推荐</span></div>
+            <div class="card-head"><div><h2>Sheet 2：发票明细信息</h2><p>请集中核对项目名称、税收分类、税收编码和税率。</p></div><span class="badge info">规则 / 档案推荐</span></div>
             <div class="table-wrap"><table class="sheet-table"><thead><tr><th>#</th><th>项目名称</th><th>税收分类</th><th>税收编码</th><th>税率</th><th>单位</th><th>数量</th><th>推荐来源</th></tr></thead><tbody>
               {% for row in batch_rows %}
                 <tr class="{% if row.has_issues %}row-needs-review{% endif %}">
@@ -103,7 +103,7 @@
         </form>
 
         <section class="card" style="margin-top:18px">
-          <div class="card-head"><div><h2>Sheet 3：待补全 / 异常项</h2><p>优先处理红色阻断错误，再处理黄色建议项；高级编辑只作为备用入口。</p></div><span class="badge {% if ns.review %}warn{% else %}ok{% endif %}">{{ ns.review }} 项需处理</span></div>
+          <div class="card-head"><div><h2>Sheet 3：待补全 / 异常项</h2><p>请先处理红色阻断错误，再处理黄色建议项；高级编辑只是备用入口。</p></div><span class="badge {% if ns.review %}warn{% else %}ok{% endif %}">{{ ns.review }} 项需处理</span></div>
           <div class="table-wrap"><table class="sheet-table"><thead><tr><th>#</th><th>来源</th><th>状态</th><th>提示</th><th>备用入口</th></tr></thead><tbody>
             {% for row in batch_rows %}
               <tr class="{% if row.has_issues %}row-needs-review{% endif %}"><td>{{ row.index }}</td><td>{{ row.source_name or row.draft_id }}</td><td>{% if row.has_issues %}<span class="badge warn">待修补</span>{% else %}<span class="badge ok">可入模板</span>{% endif %}</td><td>{% if row.issues %}{% for issue in row.issues[:3] %}<p class="issue-line">{{ issue }}</p>{% endfor %}{% else %}<p>暂无异常。</p>{% endif %}</td><td><a href="{{ url_for('draft_detail', draft_id=row.draft_id) }}">高级编辑</a></td></tr>
@@ -112,8 +112,8 @@
         </section>
 
         <section class="card" style="margin-top:18px">
-          <div class="card-head"><div><h2>确认后整批上传</h2><p>只有整批模板校验通过后，才允许发起本批上传。</p></div></div>
-          <div class="notice">系统只辅助上传模板并进入税局预览页，不会自动最终开具。最终开具必须由助理人工确认。</div>
+          <div class="card-head"><div><h2>确认后整批上传</h2><p>整批模板校验通过后，你可以发起本批上传。</p></div></div>
+          <div class="notice">系统只辅助上传模板并进入税局预览页，不会自动最终开具。请你在税局页面确认后，再决定是否最终开具。</div>
           <div class="actions" style="margin-top:14px;justify-content:flex-start"><form method="post" action="{{ url_for('execute_batch', batch_id=batch.batch_id) }}"><input type="hidden" name="cdp_endpoint" value="http://127.0.0.1:9222"><button class="btn primary" type="submit" {% if export.error_count %}disabled{% endif %}>发起本批开票 / 上传税局</button></form></div>
         </section>
       </main>

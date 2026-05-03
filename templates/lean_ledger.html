@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>执行记录</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-neverlol-logo2') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-assistant-copy') }}">
   </head>
   <body class="operator-body">
     <div class="app-shell">
@@ -23,7 +23,7 @@
         </nav>
         <div class="sidebar-card">
           <h3>观测边界</h3>
-          <p>执行记录用于排障、复盘和产品优化；客户历史发票档案以“主体与档案”为准。</p>
+          <p>这里记录你每次操作走到了哪一步，方便你回看；客户历史档案仍以“主体与档案”为准。</p>
         </div>
       </aside>
 
@@ -32,7 +32,7 @@
           <div>
             <div class="eyebrow">Execution telemetry</div>
             <h1>执行记录</h1>
-            <p>记录材料识别、草稿修改、模板生成、税局执行和人工确认，方便现场后回推问题。</p>
+            <p>这里会记录材料识别、草稿修改、模板生成、税局执行和你的人工确认，方便你回看每一单走到了哪一步。</p>
           </div>
           <div class="actions">
             <a class="btn" href="{{ url_for('index') }}">返回工作台</a>
@@ -53,7 +53,7 @@
           <section class="stack">
             <section class="card execution-table-card">
               <div class="card-head">
-                <div><h2>最近执行记录</h2><p>按 case 聚合展示，帮助定位问题发生在识别、复核、模板还是税局执行。</p></div>
+                <div><h2>最近执行记录</h2><p>每一行是一单或一批任务。你可以看它停在识别、复核、模板还是税局执行。</p></div>
                 <span class="badge info">{{ execution_records|length }} 条</span>
               </div>
               {% if execution_records %}
@@ -90,14 +90,14 @@
                   </table>
                 </div>
               {% else %}
-                <div class="notice">暂无执行记录。生成草稿、保存、导出模板或发起税局执行后，这里会自动出现记录。</div>
+                <div class="notice">暂无执行记录。你生成草稿、保存修改、导出模板或发起税局执行后，这里会自动出现记录。</div>
               {% endif %}
             </section>
 
             {% if ledger_exists %}
               <section class="card">
                 <div class="card-head">
-                  <div><h2>人工确认明细</h2><p>税局执行页人工确认后生成，用于现场交付留痕；不作为客户历史档案来源。</p></div>
+                  <div><h2>人工确认明细</h2><p>你在税局执行页确认后，会生成这份明细，方便交付留痕；它不替代客户历史档案。</p></div>
                   <span class="badge ok">可下载</span>
                 </div>
                 <div class="table-wrap"><table><thead><tr><th>文件</th><th>行数</th><th>保存位置</th><th>操作</th></tr></thead><tbody><tr><td>{{ ledger_filename }}</td><td>{{ row_count }}</td><td>{{ ledger_path }}</td><td><a href="{{ url_for('success_ledger') }}">下载 Excel</a></td></tr></tbody></table></div>
@@ -109,17 +109,17 @@
             <section class="card">
               <h2>如何使用</h2>
               <div class="panel-list" style="margin-top:14px">
-                <div class="panel-item"><span class="badge info">排障</span><p>助理说不清问题时，先看最近 case 停在哪个状态：识别、复核、模板或税局。</p></div>
-                <div class="panel-item"><span class="badge warn">边界</span><p>执行记录是产品观测数据；客户历史档案仍以“主体与档案”的税局历史明细为准。</p></div>
-                <div class="panel-item"><span class="badge ok">云端</span><p>这些事件会进入同步队列，网络可用时上传云端，方便后续按字段、材料类型和失败步骤分析。</p></div>
+                <div class="panel-item"><span class="badge info">遇到卡住</span><p>如果你不确定刚才卡在哪一步，可以先看最近记录的状态：识别、复核、模板或税局。</p></div>
+                <div class="panel-item"><span class="badge warn">边界</span><p>执行记录只说明这次工具怎么运行；客户历史发票和常用项目，请以“主体与档案”为准。</p></div>
+                <div class="panel-item"><span class="badge ok">同步</span><p>网络可用时，记录会自动同步。后续需要协助时，可以根据这些记录更快定位问题。</p></div>
               </div>
             </section>
             <section class="card">
-              <h2>优化指标</h2>
+              <h2>记录内容</h2>
               <div class="panel-list" style="margin-top:14px">
-                <div class="panel-item"><span class="badge neutral">识别</span><p>材料类型、识别策略、LLM/OCR 状态、缺失字段和人工修改次数。</p></div>
-                <div class="panel-item"><span class="badge neutral">税局</span><p>CDP 执行状态、失败明细、是否到预览、是否由助理确认。</p></div>
-                <div class="panel-item"><span class="badge neutral">产品</span><p>高频修改字段和失败步骤会反推到具体功能优化。</p></div>
+                <div class="panel-item"><span class="badge neutral">识别</span><p>会记录材料类型、识别方式、缺失字段和你修改过的字段数量。</p></div>
+                <div class="panel-item"><span class="badge neutral">税局</span><p>会记录是否上传税局、是否失败、是否到预览，以及你是否已确认。</p></div>
+                <div class="panel-item"><span class="badge neutral">后续改进</span><p>如果某些字段经常需要你改，后续会优先改进这些地方，减少你的重复工作。</p></div>
               </div>
             </section>
           </aside>

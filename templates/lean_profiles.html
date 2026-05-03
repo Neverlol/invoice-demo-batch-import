@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>主体与档案</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-neverlol-logo2') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-assistant-copy') }}">
     <script defer src="{{ url_for('static', filename='lean.js', v='20260502-v27') }}"></script>
   </head>
   <body class="operator-body">
@@ -23,8 +23,8 @@
           <a href="{{ url_for('ledger_page') }}"><span class="nav-dot">记</span>执行记录</a>
         </nav>
         <div class="sidebar-card">
-          <h3>Mercury 信任层</h3>
-          <p>主体、档案、规则、同步做成账户后台；让助理知道系统为什么可信。</p>
+          <h3>为什么可以信任</h3>
+          <p>这里展示当前税局主体、历史档案来源和同步状态，方便你开票前核对。</p>
         </div>
       </aside>
 
@@ -33,11 +33,11 @@
           <div class="profiles-hero-copy">
             <div class="eyebrow">Mercury-like trust layer</div>
             <h1>主体与客户档案</h1>
-            <p>管理税局主体、历史购买方、常用项目和同步状态。</p>
+            <p>这里用于核对当前税局主体、历史购买方、常用项目和同步状态。</p>
           </div>
           <section class="card profile-action-card">
             <div class="card-head compact-head">
-              <div><h2>自动更新客户档案</h2><p>下载历史明细，结构化同步云端。</p></div>
+              <div><h2>自动更新客户档案</h2><p>从税局下载历史明细后，系统会整理购买方和常用项目。</p></div>
               <span class="badge info">P0</span>
             </div>
             <form class="profile-action-form" method="post" action="{{ url_for('download_profile_history') }}">
@@ -65,7 +65,7 @@
         <section class="profile-status-card" data-tax-status>
           <span class="badge neutral">主体识别</span>
           <strong>待识别</strong>
-          <p>建议先识别当前税局主体；无历史发票时显示安全空状态。</p>
+          <p>建议你先识别当前税局主体。没有历史发票时，系统会显示安全空状态，不会乱建档案。</p>
         </section>
 
         {% if download_result %}
@@ -100,7 +100,7 @@
           <section class="stack">
             <div class="card">
               <div class="card-head">
-                <div><h2>销售主体账户</h2><p>像账户后台一样管理不同纳税主体，避免助理开错主体或混用客户档案。</p></div>
+                <div><h2>销售主体账户</h2><p>不同纳税主体会分开管理，帮助你避免开错主体或混用客户档案。</p></div>
                 <span class="badge {% if sellers %}ok{% else %}warn{% endif %}">{% if sellers %}{{ sellers|length }} 个 active 主体{% else %}暂无 active 档案{% endif %}</span>
               </div>
               <div class="table-wrap"><table><thead><tr><th>主体</th><th>税号</th><th>购买方</th><th>常用项目</th><th>主常用项目</th><th>最近更新</th><th>状态</th></tr></thead><tbody>
@@ -113,11 +113,11 @@
             </div>
 
             <div class="card profile-help-card">
-              <div class="card-head"><div><h2>本页操作提示</h2><p>给现场助理看的最短路径：确认主体、更新档案、继续开票。</p></div><span class="badge info">助理操作</span></div>
+              <div class="card-head"><div><h2>本页操作提示</h2><p>你在现场可以按这三步处理：确认主体、更新档案、继续开票。</p></div><span class="badge info">操作提示</span></div>
               <div class="profile-help-grid">
-                <div><span>01</span><strong>先识别主体</strong><p>税局已登录后，点击“识别当前税局主体”，确认正在处理哪个纳税主体。</p></div>
-                <div><span>02</span><strong>有历史发票再更新</strong><p>点击“自动更新”会查询所选区间历史发票；没有历史发票会显示安全空状态。</p></div>
-                <div><span>03</span><strong>继续主流程开票</strong><p>档案用于后续推荐购买方和常用项目；当前账号没有历史记录也不影响生成新草稿。</p></div>
+                <div><span>01</span><strong>先识别主体</strong><p>税局登录后，请点击“识别当前税局主体”，确认现在处理的是哪个纳税主体。</p></div>
+                <div><span>02</span><strong>有历史发票再更新</strong><p>点击“自动更新”会查询所选区间历史发票；如果没有数据，系统会明确提示，不会影响新开票。</p></div>
+                <div><span>03</span><strong>继续主流程开票</strong><p>档案用于推荐购买方和常用项目；即使当前账号没有历史记录，你也可以继续生成新草稿。</p></div>
               </div>
             </div>
           </section>
@@ -128,13 +128,13 @@
               <div class="panel-list" style="margin-top:16px">
                 <div class="panel-item"><span class="badge {% if profile_summary.exists %}ok{% else %}warn{% endif %}">档案缓存</span><p>{% if profile_summary.exists %}本地缓存已存在：{{ profile_cache_path }}{% else %}本机暂无客户档案缓存。{% endif %}</p></div>
                 <div class="panel-item"><span class="badge info">档案库目录</span><p>{{ profile_root }}</p></div>
-                <div class="panel-item"><span class="badge ok">更新策略</span><p>同一销售主体重复上传历史明细会去重并重建 active 档案；不存在的主体会自动新建。</p></div>
-                <div class="panel-item"><span class="badge warn">可信边界</span><p>active 档案只来自正常、正数、未作废/未红冲的税局历史明细。</p></div>
+                <div class="panel-item"><span class="badge ok">更新策略</span><p>同一销售主体重复上传历史明细时，系统会去重整理；新主体会单独建立档案。</p></div>
+                <div class="panel-item"><span class="badge warn">可信边界</span><p>可复用档案只来自正常、正数、未作废、未红冲的税局历史明细。</p></div>
               </div>
             </div>
             <div class="card">
               <h2>上传要求</h2>
-              <p>可点击“自动更新”，也可上传税局导出的历史开票明细 Excel/ZIP。Excel 通常包含“信息汇总表”，且有销方名称、销方识别号、购买方名称、购方识别号、税收分类编码、货物或应税劳务名称、税率、价税合计等字段。</p>
+              <p>你可以点击“自动更新”，也可以上传税局导出的历史开票明细 Excel/ZIP。文件里通常需要包含销方、购买方、税收分类编码、项目名称、税率、价税合计等字段。</p>
               <details class="mini-details profile-debug-details"><summary>工作原理 / 调试信息</summary><ol><li>连接 CDP Edge 并识别当前税局主体。</li><li>进入全量发票查询并设置日期区间。</li><li>点击“导出”并选择“导出全部”。</li><li>解析下载文件并重建本地 active 档案。</li><li>同步结构化档案到阿里云。</li></ol></details>
             </div>
           </aside>

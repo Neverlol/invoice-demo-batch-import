@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>智能开票 Ramp × Mercury 混合风格 - 工作台</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-neverlol-logo2') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-assistant-copy') }}">
     <script defer src="{{ url_for('static', filename='lean.js', v='20260502-v27') }}"></script>
     <!-- compatibility marker: 20260501-v26 -->
   </head>
@@ -25,7 +25,7 @@
         </nav>
         <div class="sidebar-card">
           <h3>一期边界</h3>
-          <p>人工登录税局；系统生成草稿与批量导入模板；只到预览，不自动最终开具。</p>
+          <p>请按顺序处理：登录税局、导入材料、复核草稿、到预览页。系统只到预览，不自动最终开具。</p>
         </div>
       </aside>
 
@@ -34,7 +34,7 @@
           <div>
             <div class="eyebrow">Ramp × Mercury hybrid workspace</div>
             <h1>开票运营工作台</h1>
-            <p>将聊天、Excel、PDF、图片转成可复核草稿和税局批量模板。</p>
+            <p>把客户发来的聊天、Excel、PDF、图片整理成可复核草稿和税局批量模板。</p>
           </div>
           <div class="actions">
             <button class="btn" type="button" onclick="document.querySelector('[data-tax-identify]')?.click()">识别当前税局主体</button>
@@ -65,7 +65,7 @@
         </section>
 
         <section class="metric-grid">
-          <div class="metric"><span>待复核</span><strong>—</strong><small>需要助理确认字段或赋码</small></div>
+          <div class="metric"><span>待复核</span><strong>—</strong><small>请确认字段、金额和赋码</small></div>
           <div class="metric"><span>可导出模板</span><strong>—</strong><small>校验通过，可下载税局 Excel</small></div>
           <div class="metric"><span>税局退回</span><strong>—</strong><small>失败明细可回填到草稿</small></div>
           <div class="metric"><span>客户规则命中率</span><strong>{% if profile_summary and profile_summary.project_profile_count %}已加载{% else %}待加载{% endif %}</strong><small>优先命中云端/本地规则</small></div>
@@ -77,14 +77,14 @@
           </section>
         {% endif %}
 
-        <section class="workflow-strip compact-flow" style="margin-top:18px"><div class="workflow-head"><div><span class="eyebrow">Service Flow</span><h2>智能开票服务流程</h2></div><p>材料输入 → 草稿复核 → 税局执行 → 预览确认。</p></div></section>
+        <section class="workflow-strip compact-flow" style="margin-top:18px"><div class="workflow-head"><div><span class="eyebrow">Service Flow</span><h2>智能开票服务流程</h2></div><p>你可以按这个顺序处理：材料输入 → 草稿复核 → 税局执行 → 预览确认。</p></div></section>
 
         <div class="layout" style="margin-top:22px">
           <section class="stack">
             <form method="post" action="{{ url_for('create_draft') }}" enctype="multipart/form-data" data-create-draft-form>
               <div class="card soft">
                 <div class="card-head">
-                  <div><h2>材料输入</h2><p>粘贴客户需求，或上传 Excel、PDF、图片、截图。</p></div>
+                  <div><h2>材料输入</h2><p>把客户发来的文字或文件放到这里；系统会先整理成草稿，后面仍由你复核。</p></div>
                   <span class="badge ok">支持批量开具</span>
                 </div>
                 <div class="form-grid">
@@ -107,7 +107,7 @@
             </form>
 
             <div class="card">
-              <div class="card-head"><div><h2>最近开票任务</h2><p>按状态优先处理：税局退回、缺字段、待复核、可导出。</p></div><a class="btn" href="{{ url_for('ledger_page') }}">查看记录</a></div>
+              <div class="card-head"><div><h2>最近开票任务</h2><p>你可以先处理税局退回和缺字段的任务，再处理待复核和可导出的任务。</p></div><a class="btn" href="{{ url_for('ledger_page') }}">查看记录</a></div>
               <div class="table-wrap"><table><thead><tr><th>状态</th><th>来源</th><th>处理重点</th><th>下一步</th></tr></thead><tbody>
                 <tr><td><span class="badge warn">待材料</span></td><td>微信群 / 文件夹</td><td>上传图片、Excel、PDF 或粘贴文本</td><td>生成草稿</td></tr>
                 <tr><td><span class="badge info">待复核</span></td><td>开票草稿</td><td>确认购买方、金额、税收编码、税率</td><td>下载模板</td></tr>
@@ -119,25 +119,25 @@
           <aside class="stack">
             <div class="card">
               <h2>智能审核</h2>
-              <p>AI 建议需人工复核。</p>
+              <p>这里的建议只作辅助，最终以你复核后的内容为准。</p>
               <div class="panel-list" style="margin-top:16px">
-                <div class="panel-item"><span class="badge info">材料完整度</span><h3 style="margin-top:8px">待上传后评估</h3><p>缺购买方、税号、金额、税率时会进入待补全。</p></div>
+                <div class="panel-item"><span class="badge info">材料完整度</span><h3 style="margin-top:8px">待上传后评估</h3><p>如果缺购买方、税号、金额或税率，系统会标出来，方便你补全。</p></div>
                 <div class="panel-item"><span class="badge ok">规则包</span><p>{% if profile_summary and profile_summary.exists %}档案已加载 · {{ profile_summary.project_profile_count }} 个常用项目。{% else %}等待云端档案。{% endif %}</p></div>
-                <div class="panel-item"><span class="badge warn">本地学习</span><p>人工修正编码和税率后，进入本地即时学习候选，仍需人工复核。</p></div>
+                <div class="panel-item"><span class="badge warn">本地学习</span><p>你修正过的编码和税率会作为候选记录下来，下次可辅助推荐，但仍需要复核。</p></div>
               </div>
             </div>
             <div class="card">
-              <h2>主体与档案可信层</h2>
-              <p>主体、档案、同步状态集中核对。</p>
+              <h2>主体与档案</h2>
+              <p>你可以在这里确认当前税局账号、销售方档案和同步状态是否正常。</p>
               <div class="panel-list" style="margin-top:16px">
-                <div class="panel-item"><span class="badge info">当前税局账户</span><p>由 CDP Edge 登录页面识别；用于提交前安全核对。</p></div>
-                <div class="panel-item"><span class="badge ok">材料销售方档案</span><p>由销售方输入匹配；用于项目推荐、购买方历史和规则缓存。</p></div>
-                <div class="panel-item"><span class="badge neutral">同步中心</span><p>档案、规则和 case event 形成闭环；离线时不阻断本地草稿生成。</p></div>
+                <div class="panel-item"><span class="badge info">当前税局账户</span><p>点击识别后，系统会读取当前登录的税局主体，提交前会帮你核对是否一致。</p></div>
+                <div class="panel-item"><span class="badge ok">材料销售方档案</span><p>你填写销售方后，系统会按这个主体查找历史购买方和常用项目。</p></div>
+                <div class="panel-item"><span class="badge neutral">同步中心</span><p>有网络时会同步档案和执行记录；暂时离线也可以先生成和复核草稿。</p></div>
               </div>
             </div>
           </aside>
         </div>
-        <p class="footer-note">Ramp 主工作台 + Mercury 账户/档案可信感；系统不自动最终开具。</p>
+        <p class="footer-note">请先复核，再提交到税局预览；系统不会自动最终开具。</p>
       </main>
     </div>
   </body>

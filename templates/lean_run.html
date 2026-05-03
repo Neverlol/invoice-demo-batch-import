@@ -7,7 +7,7 @@
       <meta http-equiv="refresh" content="2">
     {% endif %}
     <title>执行 {{ run.run_id }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-neverlol-logo2') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-assistant-copy') }}">
   </head>
   <body class="operator-body">
     <main class="dashboard-shell run-shell">
@@ -92,7 +92,7 @@
                   <span class="card-icon">进</span>
                   <div>
                     <h2>当前进度与下一步</h2>
-                    <p>{% if run.status == 'failed' %}本次未通过税局校验，请先处理失败原因，再由助理确认后重新发起开票。{% elif run.status == 'done' %}本次已到达处理完成状态，请只预览核对，不要自动最终开具。{% else %}正在执行，请保持 Edge 和税局页面打开。{% endif %}</p>
+                    <p>{% if run.status == 'failed' %}本次未通过税局校验，请先处理失败原因，确认后再重新发起开票。{% elif run.status == 'done' %}本次已到达处理完成状态，请只预览核对，不要自动最终开具。{% else %}正在执行，请保持 Edge 和税局页面打开。{% endif %}</p>
                   </div>
                 </div>
               </header>
@@ -118,7 +118,7 @@
                 </header>
                 <div class="failure-summary-grid">
                   <div><span>可一键修复</span><strong>{{ run.failure_report.safe_actionable_count or run.failure_report.actionable_count or 0 }}</strong><small>税局给出明确建议值</small></div>
-                  <div><span>需人工确认</span><strong>{{ run.failure_report.manual_review_count or 0 }}</strong><small>需助理核对字段</small></div>
+                  <div><span>需人工确认</span><strong>{{ run.failure_report.manual_review_count or 0 }}</strong><small>请你核对字段</small></div>
                   <div><span>不可自动修复</span><strong>{{ run.failure_report.non_auto_count or 0 }}</strong><small>主体/业务口径风险</small></div>
                   <div><span>已应用</span><strong>{{ run.failure_report.applied_count or 0 }}</strong><small>已写回草稿</small></div>
                 </div>
@@ -143,7 +143,7 @@
             {% endif %}
 
             <section class="work-card hy-quiet-log">
-              <header class="card-head"><div class="card-title"><span class="card-icon">志</span><div><h2>执行日志</h2><p>默认弱化展示，必要时用于技术人员定位。</p></div></div></header>
+              <header class="card-head"><div class="card-title"><span class="card-icon">志</span><div><h2>执行日志</h2><p>平时不用看；遇到问题时，可把这里的日志提供给技术人员定位。</p></div></div></header>
               <details {% if run.status in ['failed', 'running'] %}open{% endif %}>
                 <summary>查看详细日志</summary>
                 <pre class="logs">{{ "\n".join(run.logs) }}</pre>
@@ -153,7 +153,7 @@
 
           <aside class="hy-stack">
             <section class="work-card">
-              <header class="card-head"><div><h2>下一步建议</h2><p>根据税局当前状态给助理明确动作。</p></div></header>
+              <header class="card-head"><div><h2>下一步建议</h2><p>这里会根据税局当前状态，提示你下一步该做什么。</p></div></header>
               <div class="hy-panel-list">
                 {% if run.status == 'failed' and run.draft_id %}
                   <div class="hy-panel-item"><span class="hy-badge error">税局退回</span><p>优先查看失败明细，应用安全建议或回草稿人工修改。</p></div>
@@ -163,7 +163,7 @@
                   <a class="secondary button-like" href="{{ url_for('draft_detail', draft_id=run.draft_id) }}">回到本次草稿修改</a>
                 {% elif run.status == 'done' %}
                   <div class="hy-panel-item"><span class="hy-badge ok">核对预览</span><p>请在税局页面核对金额、税额、购买方和明细。</p></div>
-                  <div class="hy-panel-item"><span class="hy-badge warn">人工决策</span><p>系统不会点击最终开具；助理确认后再记录成功。</p></div>
+                  <div class="hy-panel-item"><span class="hy-badge warn">人工决策</span><p>系统不会点击最终开具；请你确认无误后，再记录成功。</p></div>
                   <form method="post" action="{{ url_for('run_record_success', run_id=run.run_id) }}"><button class="primary" type="submit" {% if run.success_recorded %}disabled{% endif %}>{% if run.success_recorded %}已记录成功{% else %}已人工确认，记录为成功{% endif %}</button></form>
                 {% else %}
                   <div class="hy-panel-item"><span class="hy-badge info">执行中</span><p>保持 Edge 与税局页面打开，等待税局返回处理结果。</p></div>
@@ -171,7 +171,7 @@
               </div>
             </section>
             <section class="hy-safe-boundary">
-              <strong>重要边界：</strong>系统只辅助上传模板并进入税局预览页，不会自动最终开具。最终开具必须由助理人工确认。
+              <strong>重要边界：</strong>系统只辅助上传模板并进入税局预览页，不会自动最终开具。请你在税局页面确认后，再决定是否最终开具。
             </section>
           </aside>
         </div>
