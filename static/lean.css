@@ -21,14 +21,14 @@
   --warning: #a66a00;
   --danger: #a83b32;
   --info: #4169a8;
-  --shadow-card: 0 16px 42px rgba(23, 35, 58, 0.07);
-  --shadow-pop: 0 24px 64px rgba(23, 35, 58, 0.12);
-  --radius-sm: 11px;
-  --radius-md: 16px;
-  --radius-lg: 22px;
-  --radius-xl: 30px;
-  --sidebar: 252px;
-  --right: 360px;
+  --shadow-card: 0 8px 24px rgba(23, 35, 58, 0.055);
+  --shadow-pop: 0 12px 32px rgba(23, 35, 58, 0.08);
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 22px;
+  --sidebar: 232px;
+  --right: 340px;
 }
 
 * { box-sizing: border-box; }
@@ -36,11 +36,12 @@ html, body { margin: 0; min-height: 100%; }
 body, body.operator-body {
   font-family: Inter, -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
   background:
-    radial-gradient(circle at 82% -8%, rgba(12,111,69,.13), transparent 38rem),
-    radial-gradient(circle at 12% 12%, rgba(173,124,43,.17), transparent 30rem),
-    linear-gradient(180deg, var(--page-bg), #f8f4ed 76%, var(--page-bg-2));
+    radial-gradient(circle at 82% -8%, rgba(12,111,69,.045), transparent 34rem),
+    radial-gradient(circle at 12% 12%, rgba(173,124,43,.05), transparent 28rem),
+    linear-gradient(180deg, #f7f4ed, #f8f5ef 76%, #fbf8f1);
   color: var(--ink);
-  line-height: 1.55;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 a { color: inherit; text-decoration: none; }
@@ -996,4 +997,428 @@ input[name="line_amount_with_tax"] { text-align: right; font-variant-numeric: ta
   .profile-action-form {
     grid-template-columns: 1fr;
   }
+}
+
+/* UI polish v1: mature SaaS density pass, no behavior changes */
+h1 {
+  font-size: 28px;
+  line-height: 1.18;
+  letter-spacing: -0.03em;
+  font-weight: 760;
+}
+h2 {
+  font-size: 18px;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+  font-weight: 720;
+}
+h3 {
+  font-size: 14px;
+  line-height: 1.35;
+  font-weight: 680;
+}
+p, small, .panel-item p, .hy-panel-item p {
+  font-size: 13px;
+  line-height: 1.5;
+}
+strong { font-weight: 720; }
+.page,
+.main-stage {
+  padding: 24px 28px;
+  max-width: 1480px;
+  width: 100%;
+}
+.sidebar {
+  padding: 20px 16px;
+  gap: 18px;
+  box-shadow: 8px 0 24px rgba(23,35,58,.055);
+}
+.brand-mark,
+.brand-logo {
+  width: 36px;
+  height: 36px;
+  box-shadow: 0 6px 16px rgba(0,0,0,.12);
+}
+.brand-title strong,
+.brand-block strong { font-size: 15px; font-weight: 720; }
+.nav,
+.sidebar-nav { gap: 5px; }
+.nav a,
+.nav-item {
+  padding: 9px 10px;
+  border-radius: 12px;
+  min-height: 40px;
+  font-size: 13px;
+  font-weight: 650;
+}
+.nav-dot {
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
+}
+.sidebar-card,
+.sidebar-panel {
+  border-radius: 16px;
+  padding: 12px;
+}
+.sidebar-card h3,
+.sidebar-panel h3 { font-size: 13px; margin-bottom: 6px; }
+.sidebar-card p,
+.sidebar-panel p {
+  font-size: 12px;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.topline,
+.hy-topline,
+.stage-head {
+  gap: 16px;
+  margin-bottom: 14px;
+  align-items: flex-start;
+}
+.topline p,
+.hy-topline p,
+.stage-head p { max-width: 780px; }
+.eyebrow,
+.hy-eyebrow,
+.rail-badge {
+  font-size: 11px;
+  font-weight: 720;
+  letter-spacing: .09em;
+}
+.actions,
+.hy-actions,
+.action-row,
+.status-actions,
+.run-next-actions,
+.tax-console-actions,
+.composer-toolbar,
+.bulk-actions { gap: 8px; }
+.btn,
+.primary,
+.secondary,
+.ghost-button,
+.button-like,
+.action-link,
+button.primary,
+button.secondary,
+a.primary,
+a.secondary {
+  min-height: 36px;
+  padding: 8px 13px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 650;
+  box-shadow: none;
+}
+.btn.primary,
+.primary,
+button.primary,
+a.primary { border-radius: 13px; }
+.card,
+.work-card,
+.status-card,
+.workflow-strip,
+.composer-card,
+.draft-card,
+.action-panel,
+.sheet-card,
+.run-overview-card,
+.failure-panel {
+  border-radius: var(--radius-xl);
+  padding: 18px;
+  box-shadow: var(--shadow-card);
+  background: rgba(255,253,250,.94);
+}
+.card.soft,
+.composer-card,
+.workflow-strip-primary {
+  background: linear-gradient(135deg, #fffdfa, #faf3e8);
+}
+.card-head,
+.workflow-head,
+.sheet-head {
+  margin-bottom: 12px;
+  gap: 12px;
+}
+.layout,
+.hy-grid-2 {
+  gap: 18px;
+}
+.stack,
+.hy-stack,
+.stage-stack {
+  gap: 14px;
+}
+.env-bar,
+.hy-env-bar {
+  border-radius: 18px;
+  padding: 10px;
+  gap: 8px;
+  margin-bottom: 14px;
+  box-shadow: var(--shadow-card);
+}
+.env-item,
+.hy-env-item {
+  padding: 9px 11px;
+  border-radius: 13px;
+  background: #fffdfa;
+}
+.env-item span,
+.hy-env-item span {
+  font-size: 11px;
+  font-weight: 650;
+  margin-bottom: 2px;
+}
+.env-item strong,
+.hy-env-item strong {
+  font-size: 13px;
+  line-height: 1.25;
+  font-weight: 700;
+}
+.env-item small,
+.hy-env-item small {
+  font-size: 11px;
+  margin-top: 3px;
+}
+.env-bar .tax-console-actions,
+.hy-env-bar .tax-console-actions {
+  gap: 6px;
+  padding-top: 2px;
+}
+.env-bar .profile-status,
+.hy-env-bar .profile-status {
+  padding: 8px 10px;
+  font-size: 12px;
+  border-radius: 12px;
+}
+.metric-grid,
+.hy-metric-grid,
+.failure-summary-grid,
+.run-overview-grid {
+  gap: 10px;
+}
+.metric,
+.hy-metric,
+.failure-summary-grid > div {
+  border-radius: 18px;
+  padding: 14px;
+  min-height: 92px;
+}
+.metric span,
+.hy-metric span,
+.failure-summary-grid span {
+  font-size: 12px;
+  font-weight: 650;
+}
+.metric strong,
+.hy-metric strong,
+.failure-summary-grid strong {
+  margin-top: 6px;
+  font-size: 22px;
+  letter-spacing: -0.035em;
+  font-weight: 720;
+}
+.metric small,
+.hy-metric small,
+.failure-summary-grid small {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.badge,
+.hy-badge,
+.status-pill,
+.failure-pill,
+.surface-chip,
+.coding-note {
+  padding: 3px 7px;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+.banner,
+.notice,
+.success-box,
+.danger-box,
+.hy-safe-boundary {
+  border-radius: 14px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+.form-grid,
+.composer-meta { gap: 10px; }
+.field,
+.compact-field { gap: 5px; }
+.field label,
+.field span,
+.compact-field span {
+  font-size: 12px;
+  font-weight: 650;
+}
+.input,
+input,
+textarea,
+select,
+.editable-cell input,
+.line-table input,
+.taxonomy-picker input,
+.bulk-fields input {
+  min-height: 36px;
+  border-radius: 11px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+textarea {
+  min-height: 128px;
+}
+.upload,
+.file-trigger,
+.failure-upload {
+  border-radius: 14px;
+  padding: 14px;
+  font-size: 13px;
+}
+.batch-mode-toggle {
+  min-width: 200px;
+  padding: 8px 10px;
+  border-radius: 12px;
+}
+.batch-mode-toggle strong { font-size: 13px; }
+.batch-mode-toggle small { font-size: 12px; }
+.panel-list,
+.hy-panel-list { gap: 9px; }
+.panel-item,
+.hy-panel-item,
+.document-card,
+.info-card,
+.invoice-field {
+  border-radius: 14px;
+  padding: 11px;
+}
+.table-wrap,
+.sheet-table-wrap,
+.table-scroll {
+  border-radius: 14px;
+}
+table,
+.line-table,
+.sheet-table {
+  font-size: 13px;
+}
+th,td,
+.line-table th,.line-table td,
+.sheet-table th,.sheet-table td {
+  padding: 9px 10px;
+  vertical-align: middle;
+}
+th,
+.line-table th,
+.sheet-table th {
+  font-size: 11px;
+  font-weight: 700;
+}
+td { font-size: 13px; }
+.sheet-table .editable-cell { min-width: 126px; }
+.sheet-table .editable-cell input {
+  min-height: 30px;
+  padding: 5px 8px 5px 24px;
+  border-radius: 9px;
+  font-size: 13px;
+}
+.sheet-table .edit-mark {
+  margin: 7px 0 0 8px;
+  font-size: 11px;
+}
+.sheet-table .editable-cell small {
+  margin-top: 3px;
+  font-size: 11px;
+  color: #7f2f28;
+}
+.field-error input,
+.field-warning input {
+  background: #fffdfa;
+  box-shadow: inset 3px 0 0 rgba(168,59,50,.58);
+}
+.field-warning input {
+  box-shadow: inset 3px 0 0 rgba(166,106,0,.5);
+}
+.row-needs-review {
+  background: rgba(173,124,43,.045);
+}
+.issue-line {
+  color: #74332b;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.coding-reference-cell .badge {
+  white-space: nowrap;
+}
+.sheet-table td:nth-child(6),
+.sheet-table input[name="amount_with_tax"] {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+/* Home first-screen compression */
+.tax-console + .metric-grid {
+  margin-top: 0;
+}
+.tax-console .btn {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.seller-profile-status {
+  padding: 8px 10px \!important;
+  margin-top: 10px \!important;
+  font-size: 12px;
+}
+[data-create-draft-form] .card.soft {
+  padding: 16px;
+}
+[data-create-draft-form] textarea {
+  min-height: 118px;
+}
+[data-create-draft-form] .upload {
+  margin-top: 10px \!important;
+  padding: 12px;
+}
+[data-create-draft-form] .actions {
+  margin-top: 12px \!important;
+}
+/* Batch page density */
+body:has(#batch-sheet-form) .topline {
+  margin-bottom: 12px;
+}
+body:has(#batch-sheet-form) .metric {
+  min-height: 86px;
+}
+body:has(#batch-sheet-form) .danger-box,
+body:has(#batch-sheet-form) .success-box,
+body:has(#batch-sheet-form) .notice {
+  margin-top: 12px \!important;
+}
+body:has(#batch-sheet-form) #batch-sheet-form {
+  margin-top: 14px \!important;
+}
+body:has(#batch-sheet-form) .card {
+  padding: 16px;
+}
+body:has(#batch-sheet-form) .card-head p {
+  font-size: 12px;
+}
+@media (max-width: 1180px) {
+  .page,
+  .main-stage { max-width: none; }
+}
+@media (max-width: 720px) {
+  h1 { font-size: 24px; }
+  .page,
+  .main-stage { padding: 16px; }
+  .card,
+  .work-card,
+  .status-card { padding: 15px; border-radius: 18px; }
 }

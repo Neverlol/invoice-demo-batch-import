@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>智能开票 Ramp × Mercury 混合风格 - 工作台</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260502-hybrid3') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-polish1') }}">
     <script defer src="{{ url_for('static', filename='lean.js', v='20260502-v27') }}"></script>
   </head>
   <body class="operator-body">
@@ -33,7 +33,7 @@
           <div>
             <div class="eyebrow">Ramp × Mercury hybrid workspace</div>
             <h1>开票运营工作台</h1>
-            <p>把微信群材料、Excel、PDF 和图片转成可复核的开票草稿与税局批量导入模板。</p>
+            <p>将聊天、Excel、PDF、图片转成可复核草稿和税局批量模板。</p>
           </div>
           <div class="actions">
             <button class="btn" type="button" onclick="document.querySelector('[data-tax-identify]')?.click()">识别当前税局主体</button>
@@ -43,10 +43,10 @@
         </div>
 
         <section class="env-bar tax-console" data-tax-console>
-          <div class="env-item"><span>税局连接</span><strong>CDP Edge · 127.0.0.1:9222</strong><small>先启动税局专用浏览器</small></div>
-          <div class="env-item"><span>当前纳税主体</span><strong>待识别</strong><small>登录税局后点击识别</small></div>
-          <div class="env-item"><span>云端客户档案</span><strong>{% if profile_summary and profile_summary.exists %}已加载 {{ profile_summary.seller_count }} 个销售主体 / {{ profile_summary.buyer_count }} 个购买方{% else %}本机暂无缓存{% endif %}</strong><small>{% if profile_summary and profile_summary.exists %}{{ profile_summary.project_profile_count }} 个常用项目可推荐{% else %}后台会尝试拉取{% endif %}</small></div>
-          <div class="env-item"><span>同步中心</span><strong>{% if profile_summary and profile_summary.exists %}已连接 · 本地缓存可用{% else %}待连接{% endif %}</strong><small>事件、档案和规则闭环</small></div>
+          <div class="env-item"><span>税局连接</span><strong>CDP Edge · 9222</strong><small>税局专用浏览器</small></div>
+          <div class="env-item"><span>当前主体</span><strong>待识别</strong><small>登录后识别</small></div>
+          <div class="env-item"><span>客户档案</span><strong>{% if profile_summary and profile_summary.exists %}{{ profile_summary.seller_count }} 主体 / {{ profile_summary.buyer_count }} 购买方{% else %}暂无缓存{% endif %}</strong><small>{% if profile_summary and profile_summary.exists %}{{ profile_summary.project_profile_count }} 个常用项目{% else %}后台尝试拉取{% endif %}</small></div>
+          <div class="env-item"><span>同步</span><strong>{% if profile_summary and profile_summary.exists %}本地可用{% else %}待连接{% endif %}</strong><small>事件 / 档案 / 规则</small></div>
           <div class="tax-console-actions">
             <button class="btn" type="button" data-tax-open data-province="liaoning">打开辽宁税局</button>
             <button class="btn" type="button" data-tax-open data-province="jilin">打开吉林税局</button>
@@ -56,9 +56,9 @@
           </div>
           <div class="notice profile-status" data-tax-status>
             {% if profile_summary and profile_summary.exists %}
-              客户档案缓存：已加载 {{ profile_summary.seller_count }} 个销售主体 / {{ profile_summary.project_profile_count }} 个常用项目 / {{ profile_summary.buyer_count }} 个购买方。材料销售方档案与当前税局主体分开判断。
+              档案已加载 · {{ profile_summary.seller_count }} 个主体 / {{ profile_summary.project_profile_count }} 个项目 / {{ profile_summary.buyer_count }} 个购买方。提交前仍核对税局主体。
             {% else %}
-              客户档案缓存：本机暂无缓存；如已配置同步，工作台会在后台尝试从云端拉取。
+              本机暂无档案缓存；已配置同步时会后台拉取。
             {% endif %}
           </div>
         </section>
@@ -81,7 +81,7 @@
             <form method="post" action="{{ url_for('create_draft') }}" enctype="multipart/form-data" data-create-draft-form>
               <div class="card soft">
                 <div class="card-head">
-                  <div><h2>材料输入</h2><p>像聊天一样粘贴客户开票需求，也可以拖入客户发来的 Excel、PDF、图片和截图。</p></div>
+                  <div><h2>材料输入</h2><p>粘贴客户需求，或上传 Excel、PDF、图片、截图。</p></div>
                   <span class="badge ok">支持批量开具</span>
                 </div>
                 <div class="form-grid">
@@ -116,16 +116,16 @@
           <aside class="stack">
             <div class="card">
               <h2>智能审核</h2>
-              <p>AI 只做抽取、解释和建议；最终由助理复核。</p>
+              <p>AI 建议需人工复核。</p>
               <div class="panel-list" style="margin-top:16px">
                 <div class="panel-item"><span class="badge info">材料完整度</span><h3 style="margin-top:8px">待上传后评估</h3><p>缺购买方、税号、金额、税率时会进入待补全。</p></div>
-                <div class="panel-item"><span class="badge ok">规则包</span><p>{% if profile_summary and profile_summary.exists %}客户档案缓存已加载，生成草稿会优先使用云端档案。{% else %}等待云端档案缓存拉取。{% endif %}</p></div>
+                <div class="panel-item"><span class="badge ok">规则包</span><p>{% if profile_summary and profile_summary.exists %}档案已加载 · {{ profile_summary.project_profile_count }} 个常用项目。{% else %}等待云端档案。{% endif %}</p></div>
                 <div class="panel-item"><span class="badge warn">本地学习</span><p>人工修正编码和税率后，进入本地即时学习候选，仍需人工复核。</p></div>
               </div>
             </div>
             <div class="card">
               <h2>主体与档案可信层</h2>
-              <p>Mercury-like：像账户后台一样看清谁在登录、数据从哪来、规则是否新。</p>
+              <p>主体、档案、同步状态集中核对。</p>
               <div class="panel-list" style="margin-top:16px">
                 <div class="panel-item"><span class="badge info">当前税局账户</span><p>由 CDP Edge 登录页面识别；用于提交前安全核对。</p></div>
                 <div class="panel-item"><span class="badge ok">材料销售方档案</span><p>由销售方输入匹配；用于项目推荐、购买方历史和规则缓存。</p></div>

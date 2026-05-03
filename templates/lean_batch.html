@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>批量模板 {{ batch.batch_id }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260502-hybrid3') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-polish1') }}">
   </head>
   <body class="operator-body">
     {% set ns = namespace(review=0, ready=0) %}
@@ -86,7 +86,16 @@
                   <td class="editable-cell {% if row.issue_map.tax_rate %}field-error{% endif %}"><span class="edit-mark">✎</span><input name="tax_rate" value="{{ row.tax_rate }}" placeholder="1%">{% if row.issue_map.tax_rate %}<small>{{ row.issue_map.tax_rate }}</small>{% endif %}</td>
                   <td class="editable-cell"><span class="edit-mark">✎</span><input name="unit" value="{{ row.unit }}" placeholder="项"></td>
                   <td class="editable-cell"><span class="edit-mark">✎</span><input name="quantity" value="{{ row.quantity }}" placeholder="1"></td>
-                  <td><span class="badge {% if row.coding_reference %}info{% else %}neutral{% endif %}">{{ row.coding_reference or '无推荐来源，请人工确认' }}</span></td>
+                  <td class="coding-reference-cell">
+                    {% set ref = row.coding_reference or '' %}
+                    {% if ref %}
+                      <span class="badge {% if '客户' in ref or '规则' in ref %}ok{% elif '历史' in ref or '档案' in ref %}info{% elif 'LLM' in ref or '智能' in ref or '候选' in ref %}warn{% else %}neutral{% endif %}" title="{{ ref }}">
+                        {% if '客户' in ref or '规则' in ref %}客户规则{% elif '历史' in ref or '档案' in ref %}历史命中{% elif 'LLM' in ref or '智能' in ref or '候选' in ref %}LLM候选{% else %}推荐{% endif %}
+                      </span>
+                    {% else %}
+                      <span class="badge neutral" title="无推荐来源，请人工确认">无推荐</span>
+                    {% endif %}
+                  </td>
                 </tr>
               {% endfor %}
             </tbody></table></div>
