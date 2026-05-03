@@ -74,7 +74,13 @@ h1,h2,h3,p,span,strong,td,th,a,button,input,textarea,select,small { overflow-wra
 }
 
 .brand,
-.brand-block { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.brand-block {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  min-height: 46px;
+}
 .brand-mark,
 .brand-logo {
   width: 42px; height: 42px; border-radius: 50%;
@@ -87,17 +93,17 @@ h1,h2,h3,p,span,strong,td,th,a,button,input,textarea,select,small { overflow-wra
 }
 .terminal-logo {
   position: relative;
-  width: 40px;
-  height: 32px;
-  border-radius: 8px;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 auto;
+  flex: 0 0 44px;
   overflow: hidden;
   background: #000;
-  border: 1px solid rgba(255,255,255,.2);
-  box-shadow: 0 12px 26px rgba(0,0,0,.18);
+  border: 1px solid rgba(255,255,255,.22);
+  box-shadow: 0 10px 22px rgba(0,0,0,.20);
   transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease;
 }
 .brand:hover .terminal-logo,
@@ -107,24 +113,29 @@ h1,h2,h3,p,span,strong,td,th,a,button,input,textarea,select,small { overflow-wra
 }
 .terminal-logo-prompt {
   position: absolute;
-  left: 3px;
+  left: 5px;
   top: 50%;
-  transform: translateY(-50%);
+  transform: translateY(-52%);
   color: #0066ff;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 800;
   line-height: 1;
 }
-.terminal-logo-n { width: 24px; height: 24px; display: block; }
+.terminal-logo-n {
+  width: 28px;
+  height: 28px;
+  display: block;
+  margin-left: 2px;
+}
 .terminal-logo-cursor {
   position: absolute;
-  right: 4px;
-  top: 55%;
+  right: 5px;
+  top: 60%;
   transform: translateY(-50%);
   color: #0066ff;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 800;
   line-height: 1;
   animation: terminalLogoBlink 1s step-end infinite;
@@ -133,9 +144,11 @@ h1,h2,h3,p,span,strong,td,th,a,button,input,textarea,select,small { overflow-wra
   0%, 50% { opacity: 1; }
   51%, 100% { opacity: 0; }
 }
+.brand-title,
+.brand-block > div { min-width: 0; transform: translateY(1px); }
 .brand-title strong, .brand-title span, .brand-block strong, .brand-block small { display: block; }
-.brand-title strong, .brand-block strong { font-size: 16px; line-height: 1.2; color: #fff; }
-.brand-title span, .brand-block small { color: #b7c4ba; font-size: 12px; margin-top: 2px; }
+.brand-title strong, .brand-block strong { font-size: 16px; line-height: 1.18; color: #fff; }
+.brand-title span, .brand-block small { color: #b7c4ba; font-size: 12px; line-height: 1.25; margin-top: 3px; }
 
 .nav,
 .sidebar-nav { display: grid; gap: 8px; }
@@ -1087,6 +1100,13 @@ strong { font-weight: 720; }
   height: 36px;
   box-shadow: 0 6px 16px rgba(0,0,0,.12);
 }
+.terminal-logo {
+  width: 42px;
+  height: 42px;
+  flex-basis: 42px;
+  border-radius: 11px;
+}
+.terminal-logo-n { width: 27px; height: 27px; }
 .brand-title strong,
 .brand-block strong { font-size: 15px; font-weight: 720; }
 .nav,
