@@ -35,7 +35,12 @@ class SyncCenterAPITest(unittest.TestCase):
                     "batch_id": "",
                     "event_type": "draft_created",
                     "created_at": "2026-04-23T10:00:01",
-                    "payload": {"foo": "bar"},
+                    "payload": {
+                        "company_name": "吉林省风生水起商贸有限公司",
+                        "buyer": {"name": "辽宁恒润电力科技有限公司"},
+                        "extract_strategy": "rules_plus_llm",
+                        "lines": [{"project_name": "代理记账", "amount_with_tax": "500"}],
+                    },
                 },
                 {
                     "event_id": "evt-002",
@@ -69,6 +74,15 @@ class SyncCenterAPITest(unittest.TestCase):
         recent = self.client.get("/api/invoice/tenants/shenyang-seed/events?limit=5", headers=headers)
         self.assertEqual(recent.status_code, 200)
         self.assertEqual(len(recent.get_json()["events"]), 2)
+
+        cases = self.client.get("/api/invoice/tenants/shenyang-seed/cases?limit=5", headers=headers)
+        self.assertEqual(cases.status_code, 200)
+        case_rows = cases.get_json()["cases"]
+        self.assertEqual(len(case_rows), 1)
+        self.assertEqual(case_rows[0]["case_id"], "case-001")
+        self.assertEqual(case_rows[0]["company_name"], "吉林省风生水起商贸有限公司")
+        self.assertEqual(case_rows[0]["buyer_name"], "辽宁恒润电力科技有限公司")
+        self.assertEqual(case_rows[0]["status"], "template_ready")
 
     def test_auth_is_required_when_center_token_is_set(self):
         response = self.client.post(

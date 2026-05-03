@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import re
 import shutil
 import zipfile
@@ -339,9 +340,31 @@ def execute_draft(draft_id: str):
             run_blocked=True,
             applied_failure_repairs=None,
         ), 400
+    cdp_endpoint = request.form.get("cdp_endpoint", "http://127.0.0.1:9222")
+    subject_check = _check_tax_subject_before_submit(
+        expected_seller=draft.company_name,
+        cdp_endpoint=cdp_endpoint,
+        case_id=draft.case_id,
+        draft_id=draft.draft_id,
+    )
+    if subject_check["blocked"]:
+        failure_report = load_failure_report_for_draft(draft_id, draft=draft)
+        return render_template(
+            "lean_draft.html",
+            draft=draft,
+            preview=draft_preview(draft),
+            line_rows=line_form_rows(draft, failure_report=failure_report),
+            export=export,
+            failure_report=failure_report,
+            saved=True,
+            success_recorded=False,
+            run_blocked=True,
+            run_block_reason=subject_check["message"],
+            applied_failure_repairs=None,
+        ), 400
     run_id = _queue_batch_run(
         export["output_path"],
-        request.form.get("cdp_endpoint", "http://127.0.0.1:9222"),
+        cdp_endpoint,
         draft_id=draft.draft_id,
     )
     record_case_event(
@@ -351,7 +374,8 @@ def execute_draft(draft_id: str):
         payload={
             "run_id": run_id,
             "template_path": str(export["output_path"]),
-            "cdp_endpoint": request.form.get("cdp_endpoint", "http://127.0.0.1:9222"),
+            "cdp_endpoint": cdp_endpoint,
+            "subject_match": subject_check,
         },
     )
     return redirect(url_for("run_detail", run_id=run_id))
@@ -393,9 +417,25 @@ def execute_batch(batch_id: str):
     export = export_batch_template(batch_id)
     if export["error_count"]:
         return render_template("lean_batch.html", batch=batch, export=export, batch_rows=_batch_sheet_rows(batch), run_blocked=True), 400
+    cdp_endpoint = request.form.get("cdp_endpoint", "http://127.0.0.1:9222")
+    subject_check = _check_tax_subject_before_submit(
+        expected_seller=batch.company_name,
+        cdp_endpoint=cdp_endpoint,
+        case_id=batch.case_id,
+        batch_id=batch.batch_id,
+    )
+    if subject_check["blocked"]:
+        return render_template(
+            "lean_batch.html",
+            batch=batch,
+            export=export,
+            batch_rows=_batch_sheet_rows(batch),
+            run_blocked=True,
+            run_block_reason=subject_check["message"],
+        ), 400
     run_id = _queue_batch_run(
         export["output_path"],
-        request.form.get("cdp_endpoint", "http://127.0.0.1:9222"),
+        cdp_endpoint,
         draft_id=batch.batch_id,
     )
     record_case_event(
@@ -405,11 +445,66 @@ def execute_batch(batch_id: str):
         payload={
             "run_id": run_id,
             "template_path": str(export["output_path"]),
-            "cdp_endpoint": request.form.get("cdp_endpoint", "http://127.0.0.1:9222"),
+            "cdp_endpoint": cdp_endpoint,
             "invoice_count": len(batch.items),
+            "subject_match": subject_check,
         },
     )
     return redirect(url_for("run_detail", run_id=run_id))
+
+
+def _check_tax_subject_before_submit(
+    *,
+    expected_seller: str,
+    cdp_endpoint: str,
+    case_id: str,
+    draft_id: str = "",
+    batch_id: str = "",
+) -> dict:
+    if os.getenv("TAX_INVOICE_SUBJECT_HARD_BLOCK", "1").strip().lower() in {"0", "false", "no", "off"}:
+        return {"blocked": False, "status": "disabled", "expected_seller": expected_seller, "tax_subject": ""}
+    result = inspect_tax_browser(cdp_endpoint)
+    tax_subject = str(result.get("subject") or "")
+    matched = _subject_matches_seller(tax_subject, expected_seller)
+    check = {
+        "blocked": not matched,
+        "status": "matched" if matched else "blocked",
+        "expected_seller": expected_seller,
+        "tax_subject": tax_subject,
+        "cdp_endpoint": cdp_endpoint,
+        "inspect_status": result.get("status", ""),
+        "message": "",
+    }
+    if matched:
+        return check
+    if not tax_subject:
+        check["message"] = "提交前未能识别当前税局登录主体，已禁止提交。请确认已登录税局专用浏览器，并点击“识别当前税局主体 / 加载档案”后重试。"
+    else:
+        check["message"] = f"当前税局登录主体与草稿销售方不一致，已禁止提交。税局主体：{tax_subject}；草稿销售方：{expected_seller}。"
+    record_case_event(
+        case_id=case_id,
+        draft_id=draft_id,
+        batch_id=batch_id,
+        event_type="tax_subject_mismatch_blocked",
+        payload=check,
+    )
+    return check
+
+
+def _subject_matches_seller(tax_subject: str, expected_seller: str) -> bool:
+    subject_name = _normalize_subject_name(tax_subject)
+    expected_name = _normalize_subject_name(expected_seller)
+    if not subject_name or not expected_name:
+        return False
+    if subject_name == expected_name:
+        return True
+    return expected_name in subject_name or subject_name in expected_name
+
+
+def _normalize_subject_name(value: str) -> str:
+    text = (value or "").split("/", 1)[0]
+    text = re.sub(r"[0-9A-Z]{15,20}", "", text.upper())
+    return "".join(ch for ch in text if ch.isalnum() or "\u4e00" <= ch <= "\u9fff")
 
 
 def _batch_sheet_rows(batch):

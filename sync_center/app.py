@@ -14,6 +14,7 @@ from .store import (
     import_customer_profiles,
     ingest_event_batch,
     initialize_store,
+    list_recent_cases,
     list_rule_candidates,
     list_recent_events,
     publish_rule_package,
@@ -75,6 +76,17 @@ def create_app(*, db_path: Path | None = None) -> Flask:
             {
                 "tenant": tenant,
                 "events": list_recent_events(tenant=tenant, limit=limit, db_path=active_db_path),
+            }
+        )
+
+    @app.get("/api/invoice/tenants/<tenant>/cases")
+    def recent_cases(tenant: str):
+        _check_auth()
+        limit = max(1, min(int(request.args.get("limit", "50")), 500))
+        return jsonify(
+            {
+                "tenant": tenant,
+                "cases": list_recent_cases(tenant=tenant, limit=limit, db_path=active_db_path),
             }
         )
 

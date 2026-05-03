@@ -42,7 +42,7 @@
         </section>
 
         {% if saved %}<section class="success-box" style="margin-top:22px;">本批修改已保存，并已重新校验模板。</section>{% endif %}
-        {% if run_blocked %}<section class="danger-box" style="margin-top:22px;">当前批量模板还有错误，已阻止上传税局。请先修复下方高亮字段，再保存并重新校验。</section>{% endif %}
+        {% if run_blocked %}<section class="danger-box" style="margin-top:22px;">{{ run_block_reason or '当前批量模板还有错误，已阻止上传税局。请先修复下方高亮字段，再保存并重新校验。' }}</section>{% endif %}
         {% if export.error_count %}
           <section class="danger-box" style="margin-top:22px;"><strong>模板校验未通过：{{ export.error_count }} 个错误</strong>{% for issue in export.validation_issues %}{% if issue.level == 'error' %}<p>{{ issue.sheet }} 第 {{ issue.row }} 行 {{ issue.header }}：{{ issue.message }}</p>{% endif %}{% endfor %}</section>
         {% elif export.warning_count %}

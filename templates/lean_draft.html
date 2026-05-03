@@ -53,7 +53,7 @@
 
         {% if saved %}<section class="banner ok"><p>修改已保存。</p></section>{% endif %}
         {% if success_recorded %}<section class="banner ok"><p>已记录本次开票结果。</p></section>{% endif %}
-        {% if run_blocked %}<section class="banner alert"><p>当前草稿还有错误，暂不能发起开票。</p></section>{% endif %}
+        {% if run_blocked %}<section class="banner alert"><p>{{ run_block_reason or '当前草稿还有错误，暂不能发起开票。' }}</p></section>{% endif %}
         {% if applied_failure_repairs and applied_failure_repairs.applied_count %}<section class="banner ok"><p>已应用 {{ applied_failure_repairs.applied_count }} 条税局建议，请确认后保存修改；再次上传前必须人工确认。</p></section>{% endif %}
         {% if export.error_count %}
           <section class="banner alert"><strong>上传前预校验未通过</strong>{% for issue in export.validation_issues %}<p>{{ issue.sheet }} 第 {{ issue.row }} 行 {{ issue.header }}：{{ issue.message }}{% if issue.value %}（当前值：{{ issue.value }}）{% endif %}</p>{% endfor %}</section>

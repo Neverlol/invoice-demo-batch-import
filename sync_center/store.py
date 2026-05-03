@@ -244,6 +244,36 @@ def get_case_timeline(*, tenant: str, case_id: str, db_path: Path | None = None)
     return [_row_to_event(row) for row in rows]
 
 
+def list_recent_cases(*, tenant: str, limit: int = 50, db_path: Path | None = None) -> list[dict]:
+    target = initialize_store(db_path)
+    with _connect(target) as connection:
+        case_rows = connection.execute(
+            """
+            SELECT case_id, MAX(received_at) AS last_received_at, COUNT(*) AS event_count
+            FROM case_events
+            WHERE tenant = ?
+            GROUP BY case_id
+            ORDER BY last_received_at DESC
+            LIMIT ?
+            """,
+            (tenant, limit),
+        ).fetchall()
+        cases: list[dict] = []
+        for case_row in case_rows:
+            events = connection.execute(
+                """
+                SELECT event_id, tenant, case_id, draft_id, batch_id, event_type, event_created_at,
+                       received_at, request_id, payload_json
+                FROM case_events
+                WHERE tenant = ? AND case_id = ?
+                ORDER BY received_at ASC, rowid ASC
+                """,
+                (tenant, case_row["case_id"]),
+            ).fetchall()
+            cases.append(_summarize_case(case_row["case_id"], [_row_to_event(row) for row in events]))
+    return cases
+
+
 def get_store_stats(*, db_path: Path | None = None) -> dict:
     target = initialize_store(db_path)
     with _connect(target) as connection:
@@ -651,6 +681,112 @@ def list_rule_candidates(*, tenant: str, db_path: Path | None = None, limit: int
             }
         )
     return sorted(candidates, key=lambda item: (-int(item["evidence_count"]), item["raw_alias"]))
+
+
+def _summarize_case(case_id: str, events: list[dict]) -> dict:
+    record = {
+        "case_id": case_id,
+        "draft_id": "",
+        "batch_id": "",
+        "created_at": events[0].get("event_created_at", "") if events else "",
+        "last_at": events[-1].get("event_created_at", "") if events else "",
+        "last_received_at": events[-1].get("received_at", "") if events else "",
+        "company_name": "",
+        "buyer_name": "",
+        "material_type": "未记录",
+        "invoice_count": 1,
+        "line_count": 0,
+        "extract_strategy": "",
+        "llm_provider": "",
+        "manual_edit_count": 0,
+        "export_error_count": 0,
+        "export_warning_count": 0,
+        "run_id": "",
+        "run_status": "",
+        "failure_count": 0,
+        "preview_reached": False,
+        "assistant_confirmed": False,
+        "status": "created",
+        "status_label": "已创建",
+        "last_event_type": events[-1].get("event_type", "") if events else "",
+        "event_count": len(events),
+    }
+    for event in events:
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        event_type = str(event.get("event_type") or "")
+        record["draft_id"] = str(event.get("draft_id") or record["draft_id"] or payload.get("draft_id") or "")
+        record["batch_id"] = str(event.get("batch_id") or record["batch_id"] or payload.get("batch_id") or "")
+        _merge_case_identity(record, payload)
+        _merge_case_material(record, payload)
+        if event_type in {"draft_created", "platform_screenshot_child_draft_created", "split_child_draft_created"}:
+            record["status"] = "draft_generated"
+            record["status_label"] = "草稿已生成"
+        elif event_type in {"platform_screenshot_draft_batch_created", "draft_batch_created"}:
+            record["status"] = "draft_generated"
+            record["status_label"] = "批量草稿"
+            record["invoice_count"] = int(payload.get("item_count") or len(payload.get("items") or []) or record["invoice_count"])
+        elif event_type == "manual_edits_recorded":
+            diffs = payload.get("diffs") if isinstance(payload.get("diffs"), list) else []
+            record["manual_edit_count"] += len(diffs)
+        elif event_type in {"template_exported", "batch_template_exported"}:
+            record["status"] = "template_ready" if not payload.get("error_count") else "needs_review"
+            record["status_label"] = "模板已生成" if not payload.get("error_count") else "待修正"
+            record["export_error_count"] = int(payload.get("error_count") or 0)
+            record["export_warning_count"] = int(payload.get("warning_count") or 0)
+        elif event_type == "batch_run_queued":
+            record["run_id"] = str(payload.get("run_id") or record["run_id"])
+            if payload.get("subject_match"):
+                record["subject_match"] = payload.get("subject_match")
+            record["status"] = "tax_run_queued"
+            record["status_label"] = "税局执行中"
+        elif event_type == "tax_subject_mismatch_blocked":
+            record["status"] = "subject_mismatch_blocked"
+            record["status_label"] = "主体不一致阻断"
+            record["subject_match"] = payload
+        elif event_type == "batch_run_finished":
+            record["run_id"] = str(payload.get("run_id") or record["run_id"])
+            record["run_status"] = str(payload.get("status") or "")
+            record["failure_count"] = int(payload.get("failure_count") or 0)
+            record["preview_reached"] = bool(payload.get("preview_clicked"))
+            if payload.get("status") == "done":
+                record["status"] = "tax_preview_reached" if record["preview_reached"] else "tax_run_done"
+                record["status_label"] = "已到预览" if record["preview_reached"] else "执行完成"
+            else:
+                record["status"] = "tax_run_failed"
+                record["status_label"] = "税局失败"
+        elif event_type in {"success_recorded", "batch_success_recorded"}:
+            record["assistant_confirmed"] = True
+            record["status"] = "assistant_confirmed"
+            record["status_label"] = "已人工确认"
+    return record
+
+
+def _merge_case_identity(record: dict, payload: dict) -> None:
+    record["company_name"] = str(payload.get("company_name") or record.get("company_name") or "")
+    buyer = payload.get("buyer") if isinstance(payload.get("buyer"), dict) else {}
+    record["buyer_name"] = str(buyer.get("name") or payload.get("buyer_name") or record.get("buyer_name") or "")
+    record["extract_strategy"] = str(payload.get("extract_strategy") or record.get("extract_strategy") or "")
+    record["llm_provider"] = str(payload.get("llm_provider") or record.get("llm_provider") or "")
+    lines = payload.get("lines") if isinstance(payload.get("lines"), list) else []
+    if lines:
+        record["line_count"] = len(lines)
+
+
+def _merge_case_material(record: dict, payload: dict) -> None:
+    material_summary = payload.get("material_summary") if isinstance(payload.get("material_summary"), dict) else {}
+    attachment_count = int(payload.get("attachment_count") or material_summary.get("file_count") or 0)
+    if attachment_count:
+        file_types = material_summary.get("file_types") if isinstance(material_summary.get("file_types"), dict) else {}
+        type_text = "/".join(sorted(key.lstrip(".") for key in file_types.keys())) if file_types else "附件"
+        record["material_type"] = f"{type_text} {attachment_count} 个"
+    if payload.get("item_count"):
+        record["material_type"] = "批量材料"
+    if payload.get("source_doc_status") and payload.get("source_doc_status") != "not_requested":
+        record["material_type"] = "文档材料"
+    if payload.get("ocr_status") and payload.get("ocr_status") not in {"not_requested", "vision_deferred"}:
+        record["material_type"] = "图片/OCR"
+    if payload.get("extract_strategy") == "rules_plus_vision":
+        record["material_type"] = "图片/视觉识别"
 
 
 def _row_to_event(row: sqlite3.Row) -> dict:
