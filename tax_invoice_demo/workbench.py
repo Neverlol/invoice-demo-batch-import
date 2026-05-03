@@ -48,7 +48,8 @@ def create_draft_from_workbench(
     draft_dir.mkdir(parents=True, exist_ok=True)
     attachments = _save_uploads(draft_dir, uploaded_files)
     document_result = _run_document_extraction(draft_dir, attachments)
-    ocr_result = _run_draft_ocr(draft_dir, attachments)
+    vision_image_paths = [] if force_batch else _image_attachment_paths(draft_dir, attachments)
+    ocr_result = _run_draft_ocr(draft_dir, attachments, defer_to_vision=bool(vision_image_paths))
     early_parse_source = _compose_parse_source(raw_text, document_result.combined_text, ocr_result.combined_text)
     invoice_profile = _infer_invoice_profile(early_parse_source, note=note)
     platform_requests = extract_platform_invoice_requests(early_parse_source)
@@ -75,6 +76,7 @@ def create_draft_from_workbench(
         note=note,
         document_text=document_result.combined_text,
         ocr_text=ocr_result.combined_text,
+        image_paths=vision_image_paths,
     )
     parse_source = extraction.parse_source
     buyer = extraction.buyer
@@ -1419,12 +1421,26 @@ def _build_draft_issues(
     return issues
 
 
-def _run_draft_ocr(draft_dir: Path, attachments: list[DraftAttachment]):
-    image_paths = [
+def _image_attachment_paths(draft_dir: Path, attachments: list[DraftAttachment]) -> list[Path]:
+    return [
         draft_dir / item.stored_name
         for item in attachments
         if Path(item.stored_name).suffix.lower() in {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
     ]
+
+
+def _run_draft_ocr(draft_dir: Path, attachments: list[DraftAttachment], *, defer_to_vision: bool = False):
+    image_paths = _image_attachment_paths(draft_dir, attachments)
+    if defer_to_vision and image_paths:
+        from .llm_adapter import get_llm_adapter
+        from .ocr import OptionalOcrResult
+
+        if not get_llm_adapter().is_enabled:
+            return run_optional_ocr(image_paths)
+        return OptionalOcrResult(
+            status="vision_deferred",
+            note="图片材料将直接交给视觉大模型结构化识别，不先走本地 OCR。",
+        )
     return run_optional_ocr(image_paths)
 
 

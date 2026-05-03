@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from .llm_adapter import (
     LLMAdapterError,
@@ -34,6 +35,7 @@ def extract_invoice_structured_data(
     note: str,
     document_text: str,
     ocr_text: str,
+    image_paths: list[Path] | None = None,
 ) -> ExtractionOutcome:
     parse_source = compose_parse_source(raw_text, document_text, ocr_text)
     buyer = extract_buyer_info_from_text(parse_source)
@@ -45,26 +47,35 @@ def extract_invoice_structured_data(
     )
 
     adapter = get_llm_adapter()
-    if not adapter.is_enabled or not _should_try_llm(
+    should_try_vision = _should_try_vision_extract(image_paths or [])
+    should_try_text_llm = _should_try_llm(
         buyer,
         lines,
         parse_source,
         raw_text=raw_text,
         document_text=document_text,
         ocr_text=ocr_text,
-    ):
+    )
+    if not adapter.is_enabled or not (should_try_vision or should_try_text_llm):
         return outcome
 
     llm_errors: list[str] = []
     llm_metrics: list[dict] = []
-    for attempt in range(1, min(adapter.max_retries, 1) + 1):
+    candidate_tasks: list[tuple[str, object]] = []
+    if _should_try_vision_extract(image_paths or []):
+        candidate_tasks.append(("vision_extract_invoice", list(image_paths or [])))
+    candidate_tasks.append(("extract_invoice", None))
+    for attempt, (task_type, task_payload) in enumerate(candidate_tasks, start=1):
         started_at = time.monotonic()
         try:
-            response = adapter.extract_invoice_info(f"{parse_source}\n\n备注：{note}".strip())
+            if task_type == "vision_extract_invoice":
+                response = adapter.extract_invoice_info_from_images(f"{parse_source}\n\n备注：{note}".strip(), task_payload)  # type: ignore[arg-type]
+            else:
+                response = adapter.extract_invoice_info(f"{parse_source}\n\n备注：{note}".strip())
             elapsed_seconds = round(time.monotonic() - started_at, 3)
             llm_metrics.append(
                 {
-                    "task_type": "extract_invoice",
+                    "task_type": task_type,
                     "provider": response.provider,
                     "model": response.model,
                     "status": "success",
@@ -85,7 +96,7 @@ def extract_invoice_structured_data(
                 buyer=merged_buyer,
                 lines=merged_lines,
                 parse_source=parse_source,
-                strategy="rules_plus_llm",
+                strategy="rules_plus_vision" if task_type == "vision_extract_invoice" else "rules_plus_llm",
                 llm_provider=response.provider,
                 warnings=[*llm_errors, f"LLM 结构化识别耗时 {elapsed_seconds:.1f} 秒。", *conflict_warnings],
                 llm_metrics=llm_metrics,
@@ -94,7 +105,7 @@ def extract_invoice_structured_data(
             elapsed_seconds = round(time.monotonic() - started_at, 3)
             llm_metrics.append(
                 {
-                    "task_type": "extract_invoice",
+                    "task_type": task_type,
                     "provider": getattr(adapter, "provider_name", ""),
                     "model": getattr(adapter, "model", ""),
                     "status": "failed",
@@ -103,10 +114,23 @@ def extract_invoice_structured_data(
                     "error": str(exc),
                 }
             )
-            llm_errors.append(f"第 {attempt} 次 LLM 调用失败，耗时 {elapsed_seconds:.1f} 秒: {exc}")
+            llm_errors.append(f"{task_type} 调用失败，耗时 {elapsed_seconds:.1f} 秒: {exc}")
     outcome.warnings = llm_errors
     outcome.llm_metrics = llm_metrics
     return outcome
+
+
+def _should_try_vision_extract(image_paths: list[Path]) -> bool:
+    if not image_paths:
+        return False
+    toggle = os.environ.get("TAX_INVOICE_LLM_VISION_EXTRACT", "auto").strip().lower()
+    if toggle in {"0", "off", "false", "disabled"}:
+        return False
+    try:
+        max_images = int(os.environ.get("TAX_INVOICE_LLM_VISION_MAX_IMAGES", "3") or "3")
+    except ValueError:
+        max_images = 3
+    return len(image_paths) <= max(1, max_images)
 
 
 def _should_try_llm(

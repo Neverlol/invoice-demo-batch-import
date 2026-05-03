@@ -82,6 +82,9 @@ class BaseLLMAdapter:
     def extract_invoice_info(self, text: str) -> LLMResponse:
         raise LLMAdapterError("LLM adapter is disabled.")
 
+    def extract_invoice_info_from_images(self, text: str, image_paths: list[Path]) -> LLMResponse:
+        raise LLMAdapterError("Vision invoice extraction adapter is disabled.")
+
     def classify_tax_code(self, item_name: str, candidates: list[str]) -> LLMResponse:
         raise LLMAdapterError("Tax code classification adapter is disabled.")
 
@@ -127,6 +130,32 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
             f"{text}"
         )
         return self._chat_json(prompt, timeout_seconds=_task_timeout_seconds("TAX_INVOICE_LLM_EXTRACT_TIMEOUT", self.timeout_seconds, 8))
+
+    def extract_invoice_info_from_images(self, text: str, image_paths: list[Path]) -> LLMResponse:
+        if not image_paths:
+            raise LLMAdapterError("No images provided for vision invoice extraction.")
+        prompt = (
+            "请直接阅读图片中的开票材料，并结合补充文字提取结构化开票信息。\n"
+            "必须只返回 JSON，不要输出解释。\n"
+            "若字段缺失，请返回空字符串；不要臆造税号、金额或购买方。\n"
+            "税率统一返回百分比字符串，例如 1%、3%、13%、免税。\n"
+            "项目列表至少包含：项目名称、规格型号、单位、数量、单价、金额、税率；如果图片里有税收编码，也放入每一行的税收编码字段。\n"
+            "JSON 顶层字段必须包含：客户名称、纳税人识别号、地址电话、开户行及账号、项目列表、价税合计、备注；若能识别发票类型，也返回发票类型。\n"
+            "补充文字如下：\n"
+            f"{text or '无'}"
+        )
+        content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+        for image_path in image_paths:
+            mime_type = mimetypes.guess_type(str(image_path))[0] or "image/png"
+            encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+            content.append({"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{encoded}"}})
+        return self._chat_json_messages(
+            [
+                {"role": "system", "content": "You are a careful invoice vision extraction assistant. Output JSON only."},
+                {"role": "user", "content": content},
+            ],
+            timeout_seconds=_task_timeout_seconds("TAX_INVOICE_LLM_VISION_EXTRACT_TIMEOUT", self.timeout_seconds, 18),
+        )
 
     def classify_tax_code(self, item_name: str, candidates: list[str]) -> LLMResponse:
         prompt = (

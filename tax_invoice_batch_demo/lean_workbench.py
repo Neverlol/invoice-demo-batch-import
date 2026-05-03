@@ -373,6 +373,28 @@ def record_success_to_ledger(draft: InvoiceDraft) -> Path:
     return SUCCESS_LEDGER_XLSX
 
 
+def record_batch_success_to_ledger(batch: DraftBatch) -> Path:
+    recorded = 0
+    for item in batch.items:
+        draft = load_draft(item.draft_id)
+        if draft is None:
+            continue
+        record_success_to_ledger(draft)
+        recorded += 1
+    record_case_event(
+        case_id=batch.case_id,
+        batch_id=batch.batch_id,
+        event_type="batch_success_recorded",
+        payload={
+            "batch_id": batch.batch_id,
+            "invoice_count": len(batch.items),
+            "recorded_count": recorded,
+            "recorded_at": datetime.now().isoformat(timespec="seconds"),
+        },
+    )
+    return SUCCESS_LEDGER_XLSX
+
+
 def draft_preview(draft: InvoiceDraft) -> dict[str, Any]:
     amount_total = Decimal("0")
     tax_total = Decimal("0")

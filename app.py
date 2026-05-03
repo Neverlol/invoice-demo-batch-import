@@ -35,6 +35,7 @@ from tax_invoice_batch_demo.lean_workbench import (
     load_draft,
     load_draft_batch,
     parse_failure_file,
+    record_batch_success_to_ledger,
     record_success_to_ledger,
     save_failure_report_for_draft,
     save_lean_draft_from_form,
@@ -552,6 +553,29 @@ def run_detail(run_id: str):
         run = RUNS.get(run_id)
     if run is None:
         abort(404)
+    return render_template("lean_run.html", run=run)
+
+
+@app.post("/runs/<run_id>/record-success")
+def run_record_success(run_id: str):
+    with RUN_LOCK:
+        run = RUNS.get(run_id)
+    if run is None:
+        abort(404)
+    if run.get("status") != "done":
+        return render_template("lean_run.html", run={**run, "error": "只有税局执行完成后，才能记录成功。"}), 400
+    draft_or_batch_id = str(run.get("draft_id") or "")
+    draft = load_draft(draft_or_batch_id) if draft_or_batch_id else None
+    if draft is not None:
+        record_success_to_ledger(draft)
+    else:
+        batch = load_draft_batch(draft_or_batch_id) if draft_or_batch_id else None
+        if batch is None:
+            abort(404)
+        record_batch_success_to_ledger(batch)
+    with RUN_LOCK:
+        RUNS[run_id] = {**RUNS[run_id], "success_recorded": True}
+        run = RUNS[run_id]
     return render_template("lean_run.html", run=run)
 
 

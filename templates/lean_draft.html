@@ -150,7 +150,6 @@
                 <button class="btn primary" data-invoice-action formaction="{{ url_for('execute_draft', draft_id=draft.draft_id) }}" type="submit">启动开票</button>
                 <button class="btn" data-save-action type="submit">保存修改</button>
                 <a class="btn" href="{{ url_for('download_template', draft_id=draft.draft_id) }}">下载税局文件</a>
-                <button class="btn" formaction="{{ url_for('mark_success', draft_id=draft.draft_id) }}" type="submit">标记成功并累计</button>
               </div>
               <details class="mini-details"><summary>浏览器连接设置</summary><label class="review-field"><span>本机浏览器地址</span><input name="cdp_endpoint" value="http://127.0.0.1:9222"></label></details>
             </section>

@@ -73,6 +73,7 @@
         {% if run.status == "done" %}
           <section class="banner ok"><p>执行完成。{% if run.preview_clicked %}系统已尝试进入预览发票页。{% else %}未自动点击预览，请在税局页面手动查看。{% endif %}</p></section>
         {% endif %}
+        {% if run.success_recorded %}<section class="banner ok"><p>已记录到发票记录。</p></section>{% endif %}
         {% if run.status == "failed" %}
           <section class="banner alert">
             {% if run.downloaded_failure_path %}
@@ -162,7 +163,8 @@
                   <a class="secondary button-like" href="{{ url_for('draft_detail', draft_id=run.draft_id) }}">回到本次草稿修改</a>
                 {% elif run.status == 'done' %}
                   <div class="hy-panel-item"><span class="hy-badge ok">核对预览</span><p>请在税局页面核对金额、税额、购买方和明细。</p></div>
-                  <div class="hy-panel-item"><span class="hy-badge warn">人工决策</span><p>系统不会点击最终开具，请助理确认后操作。</p></div>
+                  <div class="hy-panel-item"><span class="hy-badge warn">人工决策</span><p>系统不会点击最终开具；助理确认后再记录成功。</p></div>
+                  <form method="post" action="{{ url_for('run_record_success', run_id=run.run_id) }}"><button class="primary" type="submit" {% if run.success_recorded %}disabled{% endif %}>{% if run.success_recorded %}已记录成功{% else %}已人工确认，记录为成功{% endif %}</button></form>
                 {% else %}
                   <div class="hy-panel-item"><span class="hy-badge info">执行中</span><p>保持 Edge 与税局页面打开，等待税局返回处理结果。</p></div>
                 {% endif %}

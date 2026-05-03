@@ -62,10 +62,10 @@
             {% else %}
               <section class="card soft">
                 <div class="card-head">
-                  <div><h2>还没有成功记录</h2><p>这不是错误。只有在草稿页点击“标记成功并累计”后，这里才会生成成功明细文件。</p></div>
+                  <div><h2>还没有成功记录</h2><p>这不是错误。税局执行完成并由助理在执行页确认后，这里才会生成成功明细文件。</p></div>
                   <span class="badge neutral">空状态</span>
                 </div>
-                <div class="notice">建议现场测试时：税局到预览页并由助理人工确认后，再回到草稿页点击“标记成功并累计”。</div>
+                <div class="notice">建议现场测试时：税局到预览页后，由助理在税局执行页点击“已人工确认，记录为成功”。</div>
                 <div class="actions" style="justify-content:flex-start;margin-top:16px"><a class="btn primary" href="{{ url_for('index') }}">回到开票工作台</a></div>
               </section>
             {% endif %}
@@ -75,7 +75,7 @@
             <section class="card">
               <h2>记录规则</h2>
               <div class="panel-list" style="margin-top:16px">
-                <div class="panel-item"><span class="badge info">来源</span><p>来自草稿页“标记成功并累计”。</p></div>
+                <div class="panel-item"><span class="badge info">来源</span><p>来自税局执行页人工确认后的“记录为成功”。</p></div>
                 <div class="panel-item"><span class="badge warn">安全边界</span><p>到税局预览页后仍需人工确认，系统不自动最终开具。</p></div>
                 <div class="panel-item"><span class="badge ok">导出</span><p>生成后可下载 Excel，用于现场复盘和交付记录。</p></div>
               </div>
