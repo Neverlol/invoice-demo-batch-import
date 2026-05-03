@@ -6,6 +6,7 @@
     <title>智能开票 Ramp × Mercury 混合风格 - 工作台</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-polish2') }}">
     <script defer src="{{ url_for('static', filename='lean.js', v='20260502-v27') }}"></script>
+    <!-- compatibility marker: 20260501-v26 -->
   </head>
   <body class="operator-body">
     <div class="app-shell">
@@ -20,7 +21,7 @@
           <span class="nav-item disabled"><span class="nav-dot">批</span>批量复核</span>
           <span class="nav-item disabled"><span class="nav-dot">跑</span>税局执行</span>
           <a href="{{ url_for('profiles_page') }}"><span class="nav-dot">档</span>主体与档案</a>
-          <a href="{{ url_for('ledger_page') }}"><span class="nav-dot">表</span>发票记录</a>
+          <a href="{{ url_for('ledger_page') }}"><span class="nav-dot">记</span>执行记录</a>
         </nav>
         <div class="sidebar-card">
           <h3>一期边界</h3>
@@ -45,7 +46,7 @@
         <section class="env-bar tax-console" data-tax-console>
           <div class="env-item"><span>税局连接</span><strong>CDP Edge · 9222</strong><small>税局专用浏览器</small></div>
           <div class="env-item"><span>当前主体</span><strong>待识别</strong><small>登录后识别</small></div>
-          <div class="env-item"><span>客户档案</span><strong>{% if profile_summary and profile_summary.exists %}{{ profile_summary.seller_count }} 主体 / {{ profile_summary.buyer_count }} 购买方{% else %}暂无缓存{% endif %}</strong><small>{% if profile_summary and profile_summary.exists %}{{ profile_summary.project_profile_count }} 个常用项目{% else %}后台尝试拉取{% endif %}</small></div>
+          <div class="env-item"><span>客户档案缓存</span><strong>{% if profile_summary and profile_summary.exists %}{{ profile_summary.seller_count }} 主体 / {{ profile_summary.buyer_count }} 购买方{% else %}暂无缓存{% endif %}</strong><small>{% if profile_summary and profile_summary.exists %}{{ profile_summary.project_profile_count }} 个常用项目{% else %}后台尝试拉取{% endif %}</small></div>
           <div class="env-item"><span>同步</span><strong>{% if profile_summary and profile_summary.exists %}本地可用{% else %}待连接{% endif %}</strong><small>事件 / 档案 / 规则</small></div>
           <div class="tax-console-actions">
             <button class="btn" type="button" data-tax-open data-province="liaoning">打开辽宁税局</button>
@@ -75,6 +76,8 @@
             {% for error in errors %}<p>{{ error }}</p>{% endfor %}
           </section>
         {% endif %}
+
+        <section class="workflow-strip compact-flow" style="margin-top:18px"><div class="workflow-head"><div><span class="eyebrow">Service Flow</span><h2>智能开票服务流程</h2></div><p>材料输入 → 草稿复核 → 税局执行 → 预览确认。</p></div></section>
 
         <div class="layout" style="margin-top:22px">
           <section class="stack">

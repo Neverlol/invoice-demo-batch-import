@@ -20,14 +20,14 @@
           <a class="active" href="{{ url_for('batch_detail', batch_id=batch.batch_id) }}"><span class="nav-dot">批</span>批量复核</a>
           <span class="nav-item disabled"><span class="nav-dot">跑</span>税局执行</span>
           <a href="{{ url_for('profiles_page') }}"><span class="nav-dot">档</span>主体与档案</a>
-          <a href="{{ url_for('ledger_page') }}"><span class="nav-dot">表</span>发票记录</a>
+          <a href="{{ url_for('ledger_page') }}"><span class="nav-dot">记</span>执行记录</a>
         </nav>
         <div class="sidebar-card"><h3>批量页目标</h3><p>贴近税局模板，但比 Excel 更清楚地标记缺字段、阻断错误和推荐来源。</p></div>
       </aside>
 
       <main class="page">
         <div class="topline">
-          <div><div class="eyebrow">Batch {{ batch.batch_id }}</div><h1>批量导入模板复核</h1><p>本页集中处理 Sheet 1 基本信息、Sheet 2 明细赋码、Sheet 3 异常项。</p></div>
+          <div><div class="eyebrow">Batch {{ batch.batch_id }}</div><h1>批量导入模板复核</h1><p>批量开票工作表：{{ batch.items|length }} 张发票。本页集中处理 Sheet 1 基本信息、Sheet 2 明细赋码、Sheet 3 异常项。</p></div>
           <div class="actions">
             <button class="btn" type="submit" form="batch-sheet-form">保存并重新校验</button>
             <a class="btn primary" href="{{ url_for('download_batch_template', batch_id=batch.batch_id) }}">下载税局 Excel</a>
@@ -75,7 +75,7 @@
           </div>
 
           <div class="card">
-            <div class="card-head"><div><h2>Sheet 2：明细与税收编码</h2><p>集中复核项目、税收分类、税收编码和税率。</p></div><span class="badge info">规则 / 档案推荐</span></div>
+            <div class="card-head"><div><h2>Sheet 2：发票明细信息</h2><p>集中复核项目、税收分类、税收编码和税率。</p></div><span class="badge info">规则 / 档案推荐</span></div>
             <div class="table-wrap"><table class="sheet-table"><thead><tr><th>#</th><th>项目名称</th><th>税收分类</th><th>税收编码</th><th>税率</th><th>单位</th><th>数量</th><th>推荐来源</th></tr></thead><tbody>
               {% for row in batch_rows %}
                 <tr class="{% if row.has_issues %}row-needs-review{% endif %}">

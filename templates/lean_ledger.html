@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>发票记录</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-polish2') }}">
+    <title>执行记录</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-exec-records') }}">
   </head>
   <body class="operator-body">
     <div class="app-shell">
@@ -19,65 +19,107 @@
           <span class="nav-item disabled"><span class="nav-dot">批</span>批量复核</span>
           <span class="nav-item disabled"><span class="nav-dot">跑</span>税局执行</span>
           <a href="{{ url_for('profiles_page') }}"><span class="nav-dot">档</span>主体与档案</a>
-          <a class="active" href="{{ url_for('ledger_page') }}"><span class="nav-dot">表</span>发票记录</a>
+          <a class="active" href="{{ url_for('ledger_page') }}"><span class="nav-dot">记</span>执行记录</a>
         </nav>
         <div class="sidebar-card">
-          <h3>记录边界</h3>
-          <p>这里只记录已由助理确认并标记成功的开票结果；不代表系统自动最终开具。</p>
+          <h3>观测边界</h3>
+          <p>执行记录用于排障、复盘和产品优化；客户历史发票档案以“主体与档案”为准。</p>
         </div>
       </aside>
 
-      <main class="page">
+      <main class="page execution-page">
         <div class="topline">
           <div>
-            <div class="eyebrow">Success ledger</div>
-            <h1>发票记录</h1>
-            <p>导出已确认成功的开票明细；无记录时显示空状态。</p>
+            <div class="eyebrow">Execution telemetry</div>
+            <h1>执行记录</h1>
+            <p>记录材料识别、草稿修改、模板生成、税局执行和人工确认，方便现场后回推问题。</p>
           </div>
           <div class="actions">
             <a class="btn" href="{{ url_for('index') }}">返回工作台</a>
             {% if ledger_exists %}
-              <a class="btn primary" href="{{ url_for('success_ledger') }}">下载成功明细 Excel</a>
+              <a class="btn primary" href="{{ url_for('success_ledger') }}">下载确认明细 Excel</a>
             {% endif %}
           </div>
         </div>
 
-        <section class="metric-grid">
-          <div class="metric"><span>记录文件</span><strong>{% if ledger_exists %}已生成{% else %}暂无{% endif %}</strong><small>{{ ledger_filename }}</small></div>
-          <div class="metric"><span>明细行数</span><strong>{{ row_count }}</strong><small>按明细行累计</small></div>
-          <div class="metric"><span>当前用途</span><strong>复盘</strong><small>现场测试与客户交付留痕</small></div>
-          <div class="metric"><span>最终开具</span><strong>人工确认</strong><small>系统不会自动最终开具</small></div>
+        <section class="metric-grid execution-metrics">
+          <div class="metric"><span>案例数</span><strong>{{ execution_metrics.case_count }}</strong><small>本机执行链路</small></div>
+          <div class="metric"><span>事件数</span><strong>{{ execution_metrics.event_count }}</strong><small>{{ execution_metrics.pending_count }} 条待同步云端</small></div>
+          <div class="metric"><span>到预览</span><strong>{{ execution_metrics.preview_count }}</strong><small>系统链路边界</small></div>
+          <div class="metric"><span>人工确认</span><strong>{{ execution_metrics.confirmed_count }}</strong><small>确认后才写入成功明细</small></div>
         </section>
 
-        <div class="layout" style="margin-top:22px">
+        <div class="layout execution-layout" style="margin-top:18px">
           <section class="stack">
+            <section class="card execution-table-card">
+              <div class="card-head">
+                <div><h2>最近执行记录</h2><p>按 case 聚合展示，帮助定位问题发生在识别、复核、模板还是税局执行。</p></div>
+                <span class="badge info">{{ execution_records|length }} 条</span>
+              </div>
+              {% if execution_records %}
+                <div class="table-wrap execution-table-wrap">
+                  <table class="execution-table">
+                    <thead>
+                      <tr>
+                        <th>时间</th>
+                        <th>Case</th>
+                        <th>主体 / 购买方</th>
+                        <th>材料</th>
+                        <th>识别</th>
+                        <th>人工修改</th>
+                        <th>模板</th>
+                        <th>税局执行</th>
+                        <th>状态</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for record in execution_records %}
+                        <tr>
+                          <td><span class="mono">{{ record.last_at[5:16] if record.last_at else '-' }}</span></td>
+                          <td><span class="mono">{{ record.case_id }}</span><small>{{ record.draft_id or record.batch_id }}</small></td>
+                          <td><strong>{{ record.company_name or '未记录主体' }}</strong><small>{{ record.buyer_name or (record.invoice_count ~ ' 张票') }}</small></td>
+                          <td>{{ record.material_type }}<small>{% if record.invoice_count and record.invoice_count > 1 %}{{ record.invoice_count }} 张{% else %}{{ record.line_count }} 行{% endif %}</small></td>
+                          <td>{{ record.extract_strategy or '未记录' }}<small>{{ record.llm_provider or '-' }}</small></td>
+                          <td>{{ record.manual_edit_count }} 处<small>字段 diff</small></td>
+                          <td>{% if record.export_error_count %}<span class="badge error">{{ record.export_error_count }} 阻断</span>{% elif record.export_warning_count %}<span class="badge warn">{{ record.export_warning_count }} 提醒</span>{% else %}<span class="badge neutral">{{ record.export_error_count }} 错误</span>{% endif %}</td>
+                          <td>{% if record.run_id %}<span class="mono">{{ record.run_id }}</span><small>{{ record.run_status or 'queued' }}{% if record.failure_count %} / {{ record.failure_count }} 失败{% endif %}</small>{% else %}<span class="muted">未执行</span>{% endif %}</td>
+                          <td><span class="badge {% if record.status == 'assistant_confirmed' %}ok{% elif record.status == 'tax_preview_reached' %}info{% elif record.status == 'tax_run_failed' or record.status == 'needs_review' %}error{% else %}neutral{% endif %}">{{ record.status_label }}</span></td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              {% else %}
+                <div class="notice">暂无执行记录。生成草稿、保存、导出模板或发起税局执行后，这里会自动出现记录。</div>
+              {% endif %}
+            </section>
+
             {% if ledger_exists %}
               <section class="card">
                 <div class="card-head">
-                  <div><h2>成功明细文件已生成</h2><p>点击下载可获取当前累计的成功开票明细。</p></div>
+                  <div><h2>人工确认明细</h2><p>税局执行页人工确认后生成，用于现场交付留痕；不作为客户历史档案来源。</p></div>
                   <span class="badge ok">可下载</span>
                 </div>
                 <div class="table-wrap"><table><thead><tr><th>文件</th><th>行数</th><th>保存位置</th><th>操作</th></tr></thead><tbody><tr><td>{{ ledger_filename }}</td><td>{{ row_count }}</td><td>{{ ledger_path }}</td><td><a href="{{ url_for('success_ledger') }}">下载 Excel</a></td></tr></tbody></table></div>
-              </section>
-            {% else %}
-              <section class="card soft">
-                <div class="card-head">
-                  <div><h2>还没有成功记录</h2><p>这不是错误。税局执行完成并由助理在执行页确认后，这里才会生成成功明细文件。</p></div>
-                  <span class="badge neutral">空状态</span>
-                </div>
-                <div class="notice">建议现场测试时：税局到预览页后，由助理在税局执行页点击“已人工确认，记录为成功”。</div>
-                <div class="actions" style="justify-content:flex-start;margin-top:16px"><a class="btn primary" href="{{ url_for('index') }}">回到开票工作台</a></div>
               </section>
             {% endif %}
           </section>
 
           <aside class="stack">
             <section class="card">
-              <h2>记录规则</h2>
-              <div class="panel-list" style="margin-top:16px">
-                <div class="panel-item"><span class="badge info">来源</span><p>来自税局执行页人工确认后的“记录为成功”。</p></div>
-                <div class="panel-item"><span class="badge warn">安全边界</span><p>到税局预览页后仍需人工确认，系统不自动最终开具。</p></div>
-                <div class="panel-item"><span class="badge ok">导出</span><p>生成后可下载 Excel，用于现场复盘和交付记录。</p></div>
+              <h2>如何使用</h2>
+              <div class="panel-list" style="margin-top:14px">
+                <div class="panel-item"><span class="badge info">排障</span><p>助理说不清问题时，先看最近 case 停在哪个状态：识别、复核、模板或税局。</p></div>
+                <div class="panel-item"><span class="badge warn">边界</span><p>执行记录是产品观测数据；客户历史档案仍以“主体与档案”的税局历史明细为准。</p></div>
+                <div class="panel-item"><span class="badge ok">云端</span><p>这些事件会进入同步队列，网络可用时上传云端，方便后续按字段、材料类型和失败步骤分析。</p></div>
+              </div>
+            </section>
+            <section class="card">
+              <h2>优化指标</h2>
+              <div class="panel-list" style="margin-top:14px">
+                <div class="panel-item"><span class="badge neutral">识别</span><p>材料类型、识别策略、LLM/OCR 状态、缺失字段和人工修改次数。</p></div>
+                <div class="panel-item"><span class="badge neutral">税局</span><p>CDP 执行状态、失败明细、是否到预览、是否由助理确认。</p></div>
+                <div class="panel-item"><span class="badge neutral">产品</span><p>高频修改字段和失败步骤会反推到具体功能优化。</p></div>
               </div>
             </section>
           </aside>

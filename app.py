@@ -41,7 +41,7 @@ from tax_invoice_batch_demo.lean_workbench import (
     save_lean_draft_from_form,
 )
 from tax_invoice_demo import workbench as workbench_module
-from tax_invoice_demo.case_events import record_case_event
+from tax_invoice_demo.case_events import execution_record_summary, record_case_event
 from tax_invoice_demo.customer_profiles import PROFILE_CACHE_PATH, profile_cache_summary, profile_counts_for_seller
 from tax_invoice_demo.models import BuyerInfo, DraftBatchItem, InvoiceLine
 from tax_invoice_demo.sync_service import schedule_background_customer_profile_pull, schedule_background_rule_pull
@@ -531,12 +531,15 @@ def _form_list_value(form, name: str, index: int) -> str:
 
 @app.get("/ledger")
 def ledger_page():
+    execution_summary = execution_record_summary(limit=200)
     return render_template(
         "lean_ledger.html",
         ledger_exists=SUCCESS_LEDGER_XLSX.exists(),
         ledger_filename=SUCCESS_LEDGER_XLSX.name,
         ledger_path=str(SUCCESS_LEDGER_XLSX),
         row_count=_success_ledger_row_count(),
+        execution_records=execution_summary["records"],
+        execution_metrics=execution_summary["metrics"],
     )
 
 

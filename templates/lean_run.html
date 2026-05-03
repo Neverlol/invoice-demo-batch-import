@@ -30,7 +30,7 @@
           <span class="nav-item disabled"><span class="nav-dot">批</span><span>批量复核</span></span>
           <a class="nav-item active" href="{{ url_for('run_detail', run_id=run.run_id) }}"><span class="nav-dot">跑</span><span>税局执行</span></a>
           <a class="nav-item" href="{{ url_for('profiles_page') }}"><span class="nav-dot">档</span><span>主体与档案</span></a>
-          <a class="nav-item" href="{{ url_for('ledger_page') }}"><span class="nav-dot">表</span><span>发票记录</span></a>
+          <a class="nav-item" href="{{ url_for('ledger_page') }}"><span class="nav-dot">记</span><span>执行记录</span></a>
         </nav>
 
         <section class="sidebar-panel">
@@ -73,7 +73,7 @@
         {% if run.status == "done" %}
           <section class="banner ok"><p>执行完成。{% if run.preview_clicked %}系统已尝试进入预览发票页。{% else %}未自动点击预览，请在税局页面手动查看。{% endif %}</p></section>
         {% endif %}
-        {% if run.success_recorded %}<section class="banner ok"><p>已记录到发票记录。</p></section>{% endif %}
+        {% if run.success_recorded %}<section class="banner ok"><p>已记录到执行记录。</p></section>{% endif %}
         {% if run.status == "failed" %}
           <section class="banner alert">
             {% if run.downloaded_failure_path %}
@@ -91,7 +91,7 @@
                 <div class="card-title">
                   <span class="card-icon">进</span>
                   <div>
-                    <h2>执行步骤</h2>
+                    <h2>当前进度与下一步</h2>
                     <p>{% if run.status == 'failed' %}本次未通过税局校验，请先处理失败原因，再由助理确认后重新发起开票。{% elif run.status == 'done' %}本次已到达处理完成状态，请只预览核对，不要自动最终开具。{% else %}正在执行，请保持 Edge 和税局页面打开。{% endif %}</p>
                   </div>
                 </div>

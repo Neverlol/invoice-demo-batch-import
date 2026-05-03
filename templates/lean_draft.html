@@ -20,7 +20,7 @@
           <span class="nav-item disabled"><span class="nav-dot">批</span>批量复核</span>
           <span class="nav-item disabled"><span class="nav-dot">跑</span>税局执行</span>
           <a href="{{ url_for('profiles_page') }}"><span class="nav-dot">档</span>主体与档案</a>
-          <a href="{{ url_for('ledger_page') }}"><span class="nav-dot">表</span>发票记录</a>
+          <a href="{{ url_for('ledger_page') }}"><span class="nav-dot">记</span>执行记录</a>
         </nav>
         <div class="sidebar-card">
           <h3>当前任务</h3>
@@ -54,7 +54,7 @@
         {% if saved %}<section class="banner ok"><p>修改已保存。</p></section>{% endif %}
         {% if success_recorded %}<section class="banner ok"><p>已记录本次开票结果。</p></section>{% endif %}
         {% if run_blocked %}<section class="banner alert"><p>当前草稿还有错误，暂不能发起开票。</p></section>{% endif %}
-        {% if applied_failure_repairs and applied_failure_repairs.applied_count %}<section class="banner ok"><p>已应用 {{ applied_failure_repairs.applied_count }} 条税局建议，请确认后保存修改。</p></section>{% endif %}
+        {% if applied_failure_repairs and applied_failure_repairs.applied_count %}<section class="banner ok"><p>已应用 {{ applied_failure_repairs.applied_count }} 条税局建议，请确认后保存修改；再次上传前必须人工确认。</p></section>{% endif %}
         {% if export.error_count %}
           <section class="banner alert"><strong>上传前预校验未通过</strong>{% for issue in export.validation_issues %}<p>{{ issue.sheet }} 第 {{ issue.row }} 行 {{ issue.header }}：{{ issue.message }}{% if issue.value %}（当前值：{{ issue.value }}）{% endif %}</p>{% endfor %}</section>
         {% elif export.warning_count %}
@@ -62,7 +62,7 @@
         {% endif %}
 
         <section class="workflow-strip compact-flow">
-          <div class="workflow-head"><div><span class="eyebrow">Service Flow</span><h2>开票流程</h2></div><p>{% if export.error_count %}先修正阻断问题。{% else %}可发起开票，最终仍需人工确认。{% endif %}</p></div>
+          <div class="workflow-head"><div><span class="eyebrow">Service Flow</span><h2>智能开票服务流程</h2></div><p>{% if export.error_count %}先修正阻断问题。{% else %}可发起开票，最终仍需人工确认。{% endif %}</p></div>
           <ol class="workflow-steps">
             <li class="done"><span>1</span><div><strong>录入材料</strong><small>已完成</small></div></li>
             <li class="done"><span>2</span><div><strong>生成草稿</strong><small>{{ draft.lines|length }} 行明细</small></div></li>
@@ -120,7 +120,7 @@
               <div class="table-wrap table-scroll"><table class="line-table compact-line-table"><thead><tr><th>项目名称</th><th>赋码大类</th><th>税收编码</th><th>命中来源</th><th>规格</th><th>单位</th><th>数量</th><th>单价</th><th>金额</th><th>税率</th></tr></thead><tbody data-lines>
                 {% for line in line_rows %}
                   <tr>
-                    <td><input name="line_project_name" value="{{ line.project_name }}">{% if line.failure_alerts %}<div class="line-failure-list">{% for failure in line.failure_alerts %}<div class="line-failure"><span>{{ failure.repair_decision_label or '税局退回' }}</span><strong>{{ failure.field_name or '明细字段' }}</strong><small>{{ failure.repair_focus or failure.suggested_action }}</small>{% if failure.repair_field and failure.repair_value %}<button type="button" class="inline-repair" data-apply-line-repair data-repair-field="{{ failure.repair_field }}" data-repair-value="{{ failure.repair_value }}">应用建议：{{ failure.repair_value }}</button>{% endif %}</div>{% endfor %}</div>{% endif %}</td>
+                    <td><input name="line_project_name" value="{{ line.project_name }}">{% if line.failure_alerts %}<div class="line-failure-list">{% for failure in line.failure_alerts %}<div class="line-failure"><span>{{ failure.repair_decision_label or '税局退回' }}</span><strong>{{ failure.field_name or '明细字段' }}</strong><small>{{ failure.repair_focus or failure.suggested_action }}{% if failure.applied_value %} 已应用：{{ failure.applied_value }}{% endif %}</small>{% if failure.repair_field and failure.repair_value %}<button type="button" class="inline-repair" data-apply-line-repair data-repair-field="{{ failure.repair_field }}" data-repair-value="{{ failure.repair_value }}">应用建议：{{ failure.repair_value }}</button>{% endif %}</div>{% endfor %}</div>{% endif %}</td>
                     <td><input name="line_tax_category" value="{{ line.tax_category }}"></td>
                     <td><input name="line_tax_code" value="{{ line.tax_code }}"></td>
                     {% set coding_reference = line.coding_reference or '' %}
@@ -139,7 +139,7 @@
 
           <aside class="draft-action-rail">
             <section class="card action-panel-card">
-              <div class="card-head"><div><h2>执行操作</h2><p>{% if export.error_count %}先修正阻断项{% else %}当前可发起开票{% endif %}</p></div></div>
+              <div class="card-head"><div><span class="eyebrow">Action Panel</span><h2>下一步操作</h2><p>{% if export.error_count %}先修正阻断项{% else %}当前可发起开票{% endif %}</p></div></div>
               <div class="result-list">
                 <div><span>票种</span><strong>{{ draft.invoice_kind or '未定' }}</strong></div>
                 <div><span>购买方</span><strong>{{ draft.buyer.name or '未识别' }}</strong></div>
@@ -147,6 +147,7 @@
                 <div><span>价税合计</span><strong>{{ preview.amount_total or '0.00' }}</strong></div>
               </div>
               <div class="status-actions" data-action-panel>
+                <!-- compatibility markers: <button class="secondary" data-invoice-action / <button class="primary" data-save-action -->
                 <button class="btn primary" data-invoice-action formaction="{{ url_for('execute_draft', draft_id=draft.draft_id) }}" type="submit">启动开票</button>
                 <button class="btn" data-save-action type="submit">保存修改</button>
                 <a class="btn" href="{{ url_for('download_template', draft_id=draft.draft_id) }}">下载税局文件</a>
@@ -164,8 +165,8 @@
             </section>
 
             <section class="card failure-upload-card">
-              <h2>失败明细</h2>
-              <p>税局开票未通过时，上传失败明细 Excel 并回填安全建议。</p>
+              <h2>税局失败明细</h2>
+              <p>税局开票未通过时，上传失败明细 Excel 并回填安全建议。分类包括：可一键修复、需人工确认、不可自动修复。</p>
               <label class="failure-upload"><strong>选择失败明细 Excel</strong><input type="file" name="failure_file" accept=".xlsx"></label>
               <button class="btn" formaction="{{ url_for('upload_failure', draft_id=draft.draft_id) }}" type="submit">解析失败明细</button>
               {% if failure_report %}<div class="notice" style="margin-top:12px;">已解析 {{ failure_report.failure_count or (failure_report.records|length) }} 条失败原因。{% if failure_report.actionable_count %}<button class="btn" formaction="{{ url_for('apply_failure_repairs', draft_id=draft.draft_id) }}" type="submit">应用安全建议</button>{% endif %}</div>{% endif %}
