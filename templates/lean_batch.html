@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>批量模板 {{ batch.batch_id }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-polish2') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-neverlol-logo') }}">
   </head>
   <body class="operator-body">
     {% set ns = namespace(review=0, ready=0) %}
@@ -13,7 +13,7 @@
     {% endfor %}
     <div class="app-shell">
       <aside class="sidebar">
-        <div class="brand"><div class="brand-mark">AI</div><div class="brand-title"><strong>智能开票助手</strong><span>Invoice Ops</span></div></div>
+        <div class="brand">{% include "_terminal_logo.html" %}<div class="brand-title"><strong>智能开票助手</strong><span>Invoice Ops</span></div></div>
         <nav class="nav">
           <a href="{{ url_for('index') }}"><span class="nav-dot">台</span>开票工作台</a>
           <span class="nav-item disabled"><span class="nav-dot">稿</span>发票草稿</span>

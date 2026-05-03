@@ -7,13 +7,13 @@
       <meta http-equiv="refresh" content="2">
     {% endif %}
     <title>执行 {{ run.run_id }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-polish2') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-neverlol-logo') }}">
   </head>
   <body class="operator-body">
     <main class="dashboard-shell run-shell">
       <aside class="sidebar">
         <div class="brand-block">
-          <div class="brand-logo">AI</div>
+          {% include "_terminal_logo.html" %}
           <div>
             <strong>智能开票助手</strong>
             <small>执行 {{ run.run_id }}</small>

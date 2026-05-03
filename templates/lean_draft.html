@@ -4,14 +4,14 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>发票草稿 {{ draft.draft_id }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-polish2') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-neverlol-logo') }}">
     <script defer src="{{ url_for('static', filename='lean.js', v='20260429-v23') }}"></script>
   </head>
   <body class="operator-body">
     <div class="app-shell draft-console-shell">
       <aside class="sidebar">
         <div class="brand">
-          <div class="brand-mark">AI</div>
+          {% include "_terminal_logo.html" %}
           <div class="brand-title"><strong>智能开票助手</strong><span>Invoice Ops</span></div>
         </div>
         <nav class="nav">

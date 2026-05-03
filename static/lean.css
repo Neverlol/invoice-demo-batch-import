@@ -85,6 +85,54 @@ h1,h2,h3,p,span,strong,td,th,a,button,input,textarea,select,small { overflow-wra
   flex: 0 0 auto;
   box-shadow: 0 12px 26px rgba(0,0,0,.16);
 }
+.terminal-logo {
+  position: relative;
+  width: 40px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  overflow: hidden;
+  background: #000;
+  border: 1px solid rgba(255,255,255,.2);
+  box-shadow: 0 12px 26px rgba(0,0,0,.18);
+  transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease;
+}
+.brand:hover .terminal-logo,
+.brand-block:hover .terminal-logo {
+  border-color: rgba(255,255,255,.42);
+  box-shadow: 0 14px 30px rgba(0,0,0,.24), 0 0 0 1px rgba(0,102,255,.12);
+}
+.terminal-logo-prompt {
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #0066ff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+.terminal-logo-n { width: 24px; height: 24px; display: block; }
+.terminal-logo-cursor {
+  position: absolute;
+  right: 4px;
+  top: 55%;
+  transform: translateY(-50%);
+  color: #0066ff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  animation: terminalLogoBlink 1s step-end infinite;
+}
+@keyframes terminalLogoBlink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
 .brand-title strong, .brand-title span, .brand-block strong, .brand-block small { display: block; }
 .brand-title strong, .brand-block strong { font-size: 16px; line-height: 1.2; color: #fff; }
 .brand-title span, .brand-block small { color: #b7c4ba; font-size: 12px; margin-top: 2px; }

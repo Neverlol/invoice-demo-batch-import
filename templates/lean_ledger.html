@@ -4,13 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>执行记录</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-exec-records') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-neverlol-logo') }}">
   </head>
   <body class="operator-body">
     <div class="app-shell">
       <aside class="sidebar">
         <div class="brand">
-          <div class="brand-mark">AI</div>
+          {% include "_terminal_logo.html" %}
           <div class="brand-title"><strong>智能开票助手</strong><span>Invoice Ops</span></div>
         </div>
         <nav class="nav">
