@@ -1422,3 +1422,243 @@ body:has(#batch-sheet-form) .card-head p {
   .work-card,
   .status-card { padding: 15px; border-radius: 18px; }
 }
+
+/* UI polish v2: remaining pages density pass */
+.draft-console {
+  padding: 24px 28px;
+  gap: 14px;
+  max-width: 1580px;
+  width: 100%;
+}
+.draft-console-head {
+  margin-bottom: 2px;
+}
+.draft-env-bar {
+  margin-bottom: 0;
+}
+.compact-flow {
+  padding: 14px 16px;
+}
+.compact-flow .workflow-head {
+  margin-bottom: 10px;
+}
+.compact-flow .workflow-steps {
+  gap: 8px;
+}
+.compact-flow .workflow-steps li {
+  padding: 9px 10px;
+  border-radius: 14px;
+}
+.compact-flow .workflow-steps li > span {
+  width: 24px;
+  height: 24px;
+  font-size: 12px;
+}
+.draft-three-col {
+  gap: 14px;
+}
+.draft-left-rail,
+.draft-action-rail,
+.draft-center-stage {
+  gap: 14px;
+}
+.draft-left-rail .card,
+.draft-action-rail .card,
+.draft-center-stage .card {
+  padding: 16px;
+}
+.review-field {
+  gap: 5px;
+}
+.review-field span {
+  font-size: 12px;
+  font-weight: 650;
+}
+.review-field input,
+.review-field select,
+.invoice-chip-row input,
+.invoice-chip-row select {
+  min-height: 34px;
+  border-radius: 10px;
+  padding: 7px 9px;
+  font-size: 13px;
+}
+.invoice-chip-row {
+  gap: 10px;
+}
+.review-total {
+  border-radius: 14px;
+  padding: 11px 12px;
+}
+.review-total span {
+  font-size: 12px;
+  font-weight: 650;
+}
+.review-total strong {
+  font-size: 22px;
+  font-weight: 720;
+}
+.taxonomy-results {
+  border-radius: 12px;
+}
+.bulk-coding-card .bulk-actions,
+.action-panel-card .status-actions {
+  gap: 8px;
+}
+.line-table.compact-line-table th,
+.line-table.compact-line-table td {
+  padding: 8px 9px;
+  vertical-align: middle;
+}
+.line-table.compact-line-table input {
+  min-height: 30px;
+  border-radius: 9px;
+  padding: 5px 8px;
+  font-size: 13px;
+}
+.line-table.compact-line-table .coding-note {
+  white-space: nowrap;
+  max-width: 108px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.result-list {
+  gap: 6px;
+}
+.result-list div {
+  padding-bottom: 6px;
+}
+.result-list span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.result-list strong {
+  font-size: 13px;
+}
+.failure-upload-card .failure-upload {
+  margin-top: 10px;
+  padding: 12px;
+}
+.mini-details summary {
+  font-size: 12px;
+  font-weight: 650;
+}
+/* Run page */
+.run-shell .main-stage {
+  padding: 24px 28px;
+  max-width: 1480px;
+}
+.run-shell .hy-grid-2 {
+  margin-top: 14px \!important;
+}
+.run-shell .timeline,
+.run-shell .compact-timeline {
+  gap: 8px;
+}
+.run-shell .timeline li {
+  padding: 9px 10px;
+  border-radius: 14px;
+}
+.run-shell .timeline li > span {
+  width: 24px;
+  height: 24px;
+  font-size: 12px;
+}
+.run-shell .card-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 12px;
+  font-size: 13px;
+}
+.run-shell .failure-summary-grid > div {
+  min-height: 86px;
+}
+.logs {
+  border-radius: 14px;
+  padding: 12px;
+  max-height: 260px;
+  font-size: 12px;
+}
+.hy-safe-boundary {
+  line-height: 1.45;
+}
+/* Ledger page */
+[href$="/ledger"] .nav-dot { }
+/* Profiles page polish */
+.profiles-hero {
+  grid-template-columns: minmax(0, 1fr) 400px;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+.profiles-hero-copy {
+  padding: 22px;
+  border-radius: var(--radius-xl);
+  background: linear-gradient(135deg, #fffdfa, #faf3e8);
+}
+.profile-action-card {
+  padding: 16px;
+}
+.profile-action-form {
+  gap: 8px;
+}
+.profile-secondary-actions {
+  gap: 8px;
+  margin-top: 10px;
+}
+.profile-range-select {
+  height: 36px;
+  border-radius: 11px;
+  font-weight: 650;
+}
+.profile-metrics {
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.profile-metric {
+  border-radius: 18px;
+  padding: 14px;
+  min-height: 92px;
+}
+.profile-metric span,
+.profile-status-card span {
+  font-size: 12px;
+  font-weight: 650;
+}
+.profile-metric strong {
+  font-size: 22px;
+  font-weight: 720;
+}
+.profile-metric small {
+  margin-top: 6px;
+  font-size: 12px;
+}
+.profile-status-card,
+.profile-result-card {
+  border-radius: 16px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  gap: 10px;
+}
+.result-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+}
+.profile-help-grid {
+  gap: 10px;
+}
+.profile-help-grid > div {
+  border-radius: 14px;
+  padding: 12px;
+}
+.profile-help-grid strong {
+  margin-top: 5px;
+}
+.profile-side-rail .panel-item p,
+.profile-debug-details ol {
+  font-size: 12px;
+}
+@media (max-width: 1320px) {
+  .draft-console,
+  .run-shell .main-stage { max-width: none; }
+}

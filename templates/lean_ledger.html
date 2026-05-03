@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>发票记录</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260502-hybrid4') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-polish2') }}">
   </head>
   <body class="operator-body">
     <div class="app-shell">
@@ -32,7 +32,7 @@
           <div>
             <div class="eyebrow">Success ledger</div>
             <h1>发票记录</h1>
-            <p>用于现场复盘和导出已确认成功的开票明细。没有记录时会显示空状态，不再 Not Found。</p>
+            <p>导出已确认成功的开票明细；无记录时显示空状态。</p>
           </div>
           <div class="actions">
             <a class="btn" href="{{ url_for('index') }}">返回工作台</a>

@@ -7,7 +7,7 @@
       <meta http-equiv="refresh" content="2">
     {% endif %}
     <title>执行 {{ run.run_id }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260502-hybrid3') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-polish2') }}">
   </head>
   <body class="operator-body">
     <main class="dashboard-shell run-shell">
@@ -44,7 +44,7 @@
           <div>
             <p class="hy-eyebrow">Run {{ run.run_id }}</p>
             <h1>税局执行监控</h1>
-            <p>让助理清楚知道系统当前步骤、税局返回结果，以及下一步该做什么。</p>
+            <p>查看当前步骤、税局结果和下一步动作。</p>
           </div>
           <div class="hy-actions">
             {% if run.draft_id %}
@@ -64,9 +64,9 @@
             <strong>{% if run.status == 'done' %}已处理完成{% elif run.status == 'failed' %}税局校验未通过{% elif run.status == 'running' %}正在执行{% else %}排队中{% endif %}</strong>
             <small>{{ run.current_step or 'queued' }}</small>
           </div>
-          <div class="hy-env-item"><span>浏览器连接</span><strong>CDP Edge</strong><small>请保持 127.0.0.1:9222 税局窗口开启</small></div>
-          <div class="hy-env-item"><span>失败明细</span><strong>{% if run.failure_report %}已解析{% elif run.downloaded_failure_path %}已下载{% else %}暂无{% endif %}</strong><small>失败时可回填到草稿并生成安全建议</small></div>
-          <div class="hy-env-item"><span>人工确认边界</span><strong>只到预览页</strong><small>最终开具必须由助理人工确认</small></div>
+          <div class="hy-env-item"><span>浏览器连接</span><strong>CDP Edge</strong><small>保持 9222 税局窗口开启</small></div>
+          <div class="hy-env-item"><span>失败明细</span><strong>{% if run.failure_report %}已解析{% elif run.downloaded_failure_path %}已下载{% else %}暂无{% endif %}</strong><small>失败后回填草稿</small></div>
+          <div class="hy-env-item"><span>确认边界</span><strong>只到预览页</strong><small>最终开具人工确认</small></div>
         </section>
 
         {% if run.error %}<section class="banner alert"><p>{{ run.error }}</p></section>{% endif %}

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>主体与档案</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260502-profiles2') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-polish2') }}">
     <script defer src="{{ url_for('static', filename='lean.js', v='20260502-v27') }}"></script>
   </head>
   <body class="operator-body">
@@ -33,11 +33,11 @@
           <div class="profiles-hero-copy">
             <div class="eyebrow">Mercury-like trust layer</div>
             <h1>主体与客户档案</h1>
-            <p>集中管理当前税局主体、历史购买方、常用项目规则和云端同步状态。</p>
+            <p>管理税局主体、历史购买方、常用项目和同步状态。</p>
           </div>
           <section class="card profile-action-card">
             <div class="card-head compact-head">
-              <div><h2>自动更新客户档案</h2><p>从当前税局主体下载历史明细，结构化后同步云端。</p></div>
+              <div><h2>自动更新客户档案</h2><p>下载历史明细，结构化同步云端。</p></div>
               <span class="badge info">P0</span>
             </div>
             <form class="profile-action-form" method="post" action="{{ url_for('download_profile_history') }}">
@@ -65,7 +65,7 @@
         <section class="profile-status-card" data-tax-status>
           <span class="badge neutral">主体识别</span>
           <strong>待识别</strong>
-          <p>上传历史明细或自动更新前，建议先识别当前税局主体；如果当前主体暂无历史发票，会显示安全空状态。</p>
+          <p>建议先识别当前税局主体；无历史发票时显示安全空状态。</p>
         </section>
 
         {% if download_result %}
