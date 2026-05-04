@@ -81,6 +81,7 @@ def create_draft_from_workbench(
         document_text=document_result.combined_text,
         ocr_text=ocr_result.combined_text,
         image_paths=vision_image_paths,
+        force_llm_review=bool(attachments) and not force_batch,
     )
     parse_source = extraction.parse_source
     buyer = extraction.buyer
@@ -260,12 +261,15 @@ def update_draft_from_form(
     else:
         attachments = [*existing.source_images, *_save_uploads(draft_directory(draft_id), uploaded_files)]
         document_result = _run_document_extraction(draft_directory(draft_id), attachments)
-        ocr_result = _run_draft_ocr(draft_directory(draft_id), attachments)
+        image_attachment_paths = _image_attachment_paths(draft_directory(draft_id), attachments)
+        ocr_result = _run_draft_ocr(draft_directory(draft_id), attachments, defer_to_vision=bool(image_attachment_paths))
         extraction = extract_invoice_structured_data(
             raw_text=raw_text,
             note=note,
             document_text=document_result.combined_text,
             ocr_text=ocr_result.combined_text,
+            image_paths=image_attachment_paths,
+            force_llm_review=bool(attachments),
         )
         parse_source = extraction.parse_source
         inferred_buyer = extraction.buyer

@@ -36,6 +36,7 @@ def extract_invoice_structured_data(
     document_text: str,
     ocr_text: str,
     image_paths: list[Path] | None = None,
+    force_llm_review: bool = False,
 ) -> ExtractionOutcome:
     parse_source = compose_parse_source(raw_text, document_text, ocr_text)
     buyer = extract_buyer_info_from_text(parse_source)
@@ -55,6 +56,7 @@ def extract_invoice_structured_data(
         raw_text=raw_text,
         document_text=document_text,
         ocr_text=ocr_text,
+        force_llm_review=force_llm_review,
     )
     if not adapter.is_enabled or not (should_try_vision or should_try_text_llm):
         return outcome
@@ -141,9 +143,12 @@ def _should_try_llm(
     raw_text: str,
     document_text: str,
     ocr_text: str,
+    force_llm_review: bool = False,
 ) -> bool:
     if not parse_source.strip():
         return False
+    if force_llm_review:
+        return True
     blocking_review_mode = os.environ.get("TAX_INVOICE_LLM_BLOCKING_REVIEW", "fast").strip().lower()
     if _rules_are_strong_enough_for_fast_draft(buyer, lines) and blocking_review_mode in {
         "",

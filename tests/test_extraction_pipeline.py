@@ -311,6 +311,37 @@ class ExtractionPipelineTest(unittest.TestCase):
         self.assertEqual(outcome.lines[0].normalized_tax_rate(), "13%")
         self.assertTrue(any("识别差异需确认：第 1 行税率" in warning for warning in outcome.warnings))
 
+    def test_attachment_review_forces_llm_even_when_rules_are_strong(self):
+        os.environ["TAX_INVOICE_LLM_PROVIDER"] = "minimax"
+        os.environ["TAX_INVOICE_LLM_API_KEY"] = "fake-key"
+        content = json.dumps(
+            {
+                "客户名称": "辽宁恒润电力科技有限公司",
+                "纳税人识别号": "91210102MABWM3X12T",
+                "地址电话": "",
+                "开户行及账号": "",
+                "项目列表": [
+                    {"项目名称": "A4复印纸", "规格型号": "", "单位": "包", "数量": "10", "单价": "24", "金额": "240", "税率": "1%"}
+                ],
+                "价税合计": "240",
+                "备注": "",
+            },
+            ensure_ascii=False,
+        )
+
+        with patch.object(llm_adapter_module, "urlopen", return_value=_FakeHTTPResponse({"choices": [{"message": {"content": content}}]})) as fake_urlopen:
+            outcome = extract_invoice_structured_data(
+                raw_text="辽宁恒润电力科技有限公司 91210102MABWM3X12T 开普票 A4复印纸 240元 1%",
+                note="",
+                document_text="附件中提取到的文字",
+                ocr_text="",
+                force_llm_review=True,
+            )
+
+        fake_urlopen.assert_called_once()
+        self.assertEqual(outcome.strategy, "rules_plus_llm")
+        self.assertEqual(outcome.llm_provider, "minimax_openai")
+
     def test_fast_draft_skips_blocking_llm_when_rules_are_strong(self):
         os.environ["TAX_INVOICE_LLM_PROVIDER"] = "minimax"
         os.environ["TAX_INVOICE_LLM_API_KEY"] = "fake-key"
