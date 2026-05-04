@@ -98,6 +98,19 @@
           </aside>
 
           <main class="draft-center-stage">
+            {% set coding_stats = namespace(local_hit=0, missing=0, smart=0, failed=0) %}
+            {% for stat_line in line_rows %}
+              {% set stat_ref = stat_line.coding_reference or '' %}
+              {% if stat_ref.startswith('智能推荐') %}
+                {% set coding_stats.smart = coding_stats.smart + 1 %}
+              {% elif stat_ref.startswith('智能赋码调用失败') or stat_ref.startswith('智能赋码返回结果未命中') %}
+                {% set coding_stats.failed = coding_stats.failed + 1 %}
+              {% elif stat_ref.startswith('未命中') or not stat_line.tax_category or not stat_line.tax_code %}
+                {% set coding_stats.missing = coding_stats.missing + 1 %}
+              {% else %}
+                {% set coding_stats.local_hit = coding_stats.local_hit + 1 %}
+              {% endif %}
+            {% endfor %}
             <section class="card invoice-review-card">
               <div class="card-head"><div><h2>发票复核</h2><p>请按发票视图核对票种、金额、税率和项目明细。</p></div><span class="badge {% if export.error_count %}error{% elif export.warning_count %}warn{% else %}ok{% endif %}">{% if export.error_count %}待修正{% elif export.warning_count %}待复核{% else %}可开票{% endif %}</span></div>
               <div class="invoice-chip-row">
@@ -109,14 +122,19 @@
             </section>
 
             <section class="card bulk-coding-card" id="bulk-coding">
-              <div class="card-head"><div><h2>一键赋码</h2><p>如果多行项目使用同一税率或编码，可以在这里统一调整。</p></div></div>
-              <div class="taxonomy-picker" data-taxonomy-picker><label class="review-field"><span>查找税收编码</span><input data-taxonomy-query placeholder="输入关键词，如：医疗、注射、器械；选择后自动填入下方"></label><div class="taxonomy-results" data-taxonomy-results hidden></div></div>
-              <div class="bulk-fields"><label>赋码大类<input data-bulk-source="line_tax_category" placeholder="选择官方编码后自动填入，也可手动改"></label><label>税收编码<input data-bulk-source="line_tax_code" placeholder="选择官方编码后自动填入"></label><label>税率<input data-bulk-source="line_tax_rate" placeholder="例如：13%"></label></div>
-              <div class="bulk-actions"><button type="button" class="btn" data-bulk-apply="line_tax_rate">只改税率</button><button type="button" class="btn" data-bulk-apply="line_tax_category">只改大类</button><button type="button" class="btn" data-bulk-apply="line_tax_code">只改编码</button><button type="button" class="btn primary" data-bulk-apply-all>应用到全部明细</button><button class="btn smart-code-btn" formaction="{{ url_for('smart_code_draft', draft_id=draft.draft_id) }}" name="smart_code_scope" value="missing" type="submit">一键智能赋码未命中行</button><button class="btn" formaction="{{ url_for('smart_code_draft', draft_id=draft.draft_id) }}" name="smart_code_scope" value="all" type="submit">智能复核全部明细</button></div>
+              <div class="card-head"><div><h2>智能赋码</h2><p>草稿已先按本地规则快速生成。建议一次处理所有未命中行，减少等待和大模型调用次数；逐行按钮只用于重试或复核本行。</p></div></div>
+              <div class="coding-summary"><div><span>本地命中</span><strong>{{ coding_stats.local_hit }}</strong></div><div><span>未命中规则</span><strong>{{ coding_stats.missing }}</strong></div><div><span>智能推荐</span><strong>{{ coding_stats.smart }}</strong></div>{% if coding_stats.failed %}<div><span>需重试</span><strong>{{ coding_stats.failed }}</strong></div>{% endif %}</div>
+              <div class="bulk-actions smart-coding-actions"><button class="btn primary smart-code-btn" formaction="{{ url_for('smart_code_draft', draft_id=draft.draft_id) }}" name="smart_code_scope" value="missing" type="submit">智能赋码未命中 {{ coding_stats.missing }} 行</button><button class="btn" formaction="{{ url_for('smart_code_draft', draft_id=draft.draft_id) }}" name="smart_code_scope" value="all" type="submit">智能复核全部明细</button></div>
+              <div class="cost-hint">成本与等待建议：多行未命中时优先点上面的主按钮，系统会合并为一次智能赋码请求；不要逐行重复点击。</div>
+              <details class="mini-details manual-code-details"><summary>备用：手工查找并批量填同一编码</summary>
+                <div class="taxonomy-picker" data-taxonomy-picker><label class="review-field"><span>查找税收编码</span><input data-taxonomy-query placeholder="输入关键词，如：医疗、注射、器械；选择后自动填入下方"></label><div class="taxonomy-results" data-taxonomy-results hidden></div></div>
+                <div class="bulk-fields"><label>赋码大类<input data-bulk-source="line_tax_category" placeholder="选择官方编码后自动填入，也可手动改"></label><label>税收编码<input data-bulk-source="line_tax_code" placeholder="选择官方编码后自动填入"></label><label>税率<input data-bulk-source="line_tax_rate" placeholder="例如：13%"></label></div>
+                <div class="bulk-actions"><button type="button" class="btn" data-bulk-apply="line_tax_rate">只改税率</button><button type="button" class="btn" data-bulk-apply="line_tax_category">只改大类</button><button type="button" class="btn" data-bulk-apply="line_tax_code">只改编码</button><button type="button" class="btn" data-bulk-apply-all>应用到全部明细</button></div>
+              </details>
             </section>
 
             <section class="card line-review-card" data-edit-scope="line-board">
-              <div class="card-head"><div><h2>开票明细</h2><p>你可以直接在表格里修改；保存修改不会重新识别原始材料。</p></div><button type="button" class="btn" data-add-line>新增项目</button></div>
+              <div class="card-head"><div><h2>开票明细</h2><p>你可以直接在表格里修改；多行未命中时先用上方“一键智能赋码”，逐行入口只用于重试或复核。</p></div><button type="button" class="btn" data-add-line>新增项目</button></div>
               <div class="table-wrap table-scroll"><table class="line-table compact-line-table"><thead><tr><th>项目名称</th><th>赋码大类</th><th>税收编码</th><th>命中来源</th><th>规格</th><th>单位</th><th>数量</th><th>单价</th><th>金额</th><th>税率</th></tr></thead><tbody data-lines>
                 {% for line in line_rows %}
                   <tr>
@@ -124,7 +142,7 @@
                     <td><input name="line_tax_category" value="{{ line.tax_category }}"></td>
                     <td><input name="line_tax_code" value="{{ line.tax_code }}"></td>
                     {% set coding_reference = line.coding_reference or '' %}
-                    <td><span class="coding-note{% if coding_reference.startswith('智能推荐') %} smart-suggestion{% elif coding_reference.startswith('未命中') %} missed-rule{% endif %}" data-coding-note title="{{ coding_reference }}">{{ coding_reference.split(':', 1)[0] if coding_reference else '待你核对' }}</span><input type="hidden" name="line_coding_reference" value="{{ line.coding_reference }}"><button class="smart-line-btn" formaction="{{ url_for('smart_code_draft', draft_id=draft.draft_id) }}" name="smart_code_scope" value="line:{{ loop.index0 }}" type="submit">智能赋码</button></td>
+                    <td><span class="coding-note{% if coding_reference.startswith('智能推荐') %} smart-suggestion{% elif coding_reference.startswith('未命中') %} missed-rule{% elif coding_reference.startswith('智能赋码调用失败') or coding_reference.startswith('智能赋码返回结果未命中') %} smart-failed{% endif %}" data-coding-note title="{{ coding_reference }}">{{ coding_reference.split(':', 1)[0] if coding_reference else '待你核对' }}</span><input type="hidden" name="line_coding_reference" value="{{ line.coding_reference }}"><button class="smart-line-btn" formaction="{{ url_for('smart_code_draft', draft_id=draft.draft_id) }}" name="smart_code_scope" value="line:{{ loop.index0 }}" type="submit">{% if coding_reference.startswith('智能赋码调用失败') or coding_reference.startswith('智能赋码返回结果未命中') %}重试本行{% elif coding_reference.startswith('未命中') or not line.tax_category or not line.tax_code %}本行赋码{% elif coding_reference.startswith('智能推荐') %}重新复核{% else %}复核本行{% endif %}</button></td>
                     <td><input name="line_specification" value="{{ line.specification }}"></td>
                     <td><input name="line_unit" value="{{ line.unit }}"></td>
                     <td><input name="line_quantity" value="{{ line.quantity }}"></td>

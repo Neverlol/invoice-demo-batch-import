@@ -1618,13 +1618,57 @@ body:has(#batch-sheet-form) .card-head p {
   margin-top: 6px;
   cursor: pointer;
 }
+.smart-line-btn {
+  border-color: rgba(148, 163, 184, .45);
+  background: #fff;
+  color: #475569;
+  font-weight: 700;
+  padding: 4px 8px;
+}
 .smart-code-btn {
   margin-top: 0;
+}
+.coding-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+.coding-summary div {
+  border: 1px solid rgba(15, 23, 42, .08);
+  border-radius: 14px;
+  background: #f8fafc;
+  padding: 10px;
+}
+.coding-summary span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+.coding-summary strong {
+  font-size: 18px;
+}
+.smart-coding-actions {
+  margin-top: 10px;
+}
+.cost-hint {
+  margin-top: 10px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.manual-code-details {
+  margin-top: 12px;
 }
 .coding-note.missed-rule {
   background: #fff7ed;
   color: #c2410c;
   border-color: rgba(249, 115, 22, .28);
+}
+.coding-note.smart-failed {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: rgba(239, 68, 68, .25);
 }
 .mini-details summary {
   font-size: 12px;
