@@ -251,6 +251,12 @@ class TextInputParsingTest(unittest.TestCase):
         with patch.object(tax_rule_engine_module, "get_llm_adapter", return_value=fake_adapter):
             draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", text, "", [])
 
+        self.assertEqual(fake_adapter.call_count, 0)
+        self.assertTrue(all(line.coding_reference.startswith("未命中规则") for line in draft.lines))
+
+        with patch.object(tax_rule_engine_module, "get_llm_adapter", return_value=fake_adapter):
+            tax_rule_engine_module.smart_code_invoice_lines(draft.lines)
+
         self.assertEqual([line.tax_category for line in draft.lines], ["医疗仪器器械", "医疗仪器器械"])
         self.assertEqual([line.tax_code for line in draft.lines], ["1090245030000000000", "1090245030000000000"])
         self.assertTrue(all(line.coding_reference.startswith("智能推荐，需人工复核") for line in draft.lines))
@@ -258,8 +264,9 @@ class TextInputParsingTest(unittest.TestCase):
         self.assertTrue(tax_rule_engine_module.LLM_TAX_CODE_CACHE_PATH.exists())
 
         cached_fake_adapter = _FakeTaxCodeLLMAdapter()
+        cached_draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", text, "", [])
         with patch.object(tax_rule_engine_module, "get_llm_adapter", return_value=cached_fake_adapter):
-            cached_draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", text, "", [])
+            tax_rule_engine_module.smart_code_invoice_lines(cached_draft.lines)
 
         self.assertEqual(cached_fake_adapter.call_count, 0)
         self.assertEqual([line.tax_code for line in cached_draft.lines], ["1090245030000000000", "1090245030000000000"])
@@ -432,7 +439,7 @@ A3复印纸 8包 192元
         self.assertTrue(all(line.coding_reference for line in draft.lines))
         self.assertFalse(any("代理记账" in line.coding_reference for line in draft.lines))
 
-    def test_uncoded_new_items_trigger_tax_code_llm_candidates(self):
+    def test_uncoded_new_items_wait_for_manual_smart_coding_trigger(self):
         text = """沈阳嘉禾空间设计有限公司
 91210103MA9K2P7Q8R
 开普通发票
@@ -449,8 +456,14 @@ LED灯带 5卷 425元
         with patch.object(tax_rule_engine_module, "get_llm_adapter", return_value=fake_adapter):
             draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", text, "", [])
 
-        self.assertEqual(fake_adapter.call_count, 5)
+        self.assertEqual(fake_adapter.call_count, 0)
         self.assertEqual([line.project_name for line in draft.lines], ["亚克力展示牌", "LED灯带", "不锈钢挂钩", "玻璃清洁剂", "防滑地垫"])
+        self.assertTrue(any(line.coding_reference.startswith("未命中规则") for line in draft.lines))
+
+        with patch.object(tax_rule_engine_module, "get_llm_adapter", return_value=fake_adapter):
+            tax_rule_engine_module.smart_code_invoice_lines(draft.lines)
+
+        self.assertEqual(fake_adapter.call_count, 1)
         self.assertEqual(
             [line.tax_code for line in draft.lines],
             [
@@ -1246,6 +1259,26 @@ class _FakeTaxCodeLLMAdapter:
         assert any("1090245030000000000" in candidate for candidate in candidates)
         return _FakeTaxCodeLLMResponse()
 
+    def classify_tax_codes(self, items):
+        self.call_count += 1
+        for item in items:
+            assert any("1090245030000000000" in candidate for candidate in item["候选"])
+        return _FakeGenericBatchTaxCodeLLMResponse(
+            [
+                {
+                    "项目名称": item["项目名称"],
+                    "候选分类": [
+                        {
+                            "分类名称": "注射穿刺器械",
+                            "税收编码": "1090245030000000000",
+                            "置信度": "0.82",
+                        }
+                    ],
+                }
+                for item in items
+            ]
+        )
+
 
 class _FakeGenericTaxCodeLLMResponse:
     def __init__(self, code: str, name: str):
@@ -1260,6 +1293,11 @@ class _FakeGenericTaxCodeLLMResponse:
         }
 
 
+class _FakeGenericBatchTaxCodeLLMResponse:
+    def __init__(self, items: list[dict[str, str]]):
+        self.parsed_json = {"项目赋码": items}
+
+
 class _FakeGenericTaxCodeLLMAdapter:
     is_enabled = True
 
@@ -1267,9 +1305,7 @@ class _FakeGenericTaxCodeLLMAdapter:
         self.call_count = 0
         self.calls = []
 
-    def classify_tax_code(self, item_name, candidates):
-        self.call_count += 1
-        self.calls.append((item_name, candidates))
+    def _choice_for(self, item_name, candidates):
         mapping = [
             ("亚克力展示牌", "1070601020000000000", "塑料板、片"),
             ("LED灯带", "1090424000000000000", "灯具及照明装置"),
@@ -1280,8 +1316,25 @@ class _FakeGenericTaxCodeLLMAdapter:
         for keyword, code, name in mapping:
             if keyword in item_name:
                 assert any(code in candidate for candidate in candidates), (item_name, code, candidates[:8])
-                return _FakeGenericTaxCodeLLMResponse(code, name)
+                return code, name
         raise AssertionError(f"unexpected item for fake tax code LLM: {item_name}")
+
+    def classify_tax_code(self, item_name, candidates):
+        self.call_count += 1
+        self.calls.append((item_name, candidates))
+        code, name = self._choice_for(item_name, candidates)
+        return _FakeGenericTaxCodeLLMResponse(code, name)
+
+    def classify_tax_codes(self, items):
+        self.call_count += 1
+        result = []
+        for item in items:
+            item_name = item["项目名称"]
+            candidates = item["候选"]
+            self.calls.append((item_name, candidates))
+            code, name = self._choice_for(item_name, candidates)
+            result.append({"项目名称": item_name, "候选分类": [{"分类名称": name, "税收编码": code, "置信度": "0.78"}]})
+        return _FakeGenericBatchTaxCodeLLMResponse(result)
 
 
 

@@ -77,7 +77,6 @@ class TaxRuleEngine:
     ) -> list[InvoiceLine]:
         enriched: list[InvoiceLine] = []
         context_text = f"{raw_text}\n{note}".strip()
-        smart_coding_cache: dict[str, TaxonomyEntry | None] = {}
         for line in lines:
             _normalize_inline_tax_category(line)
             suggestion = self.suggest_line(line, context_text=context_text)
@@ -100,19 +99,8 @@ class TaxRuleEngine:
                 elif line.tax_category and not line.coding_reference:
                     line.coding_reference = f"来源表格/材料识别税目大类: {line.tax_category}"
                 _apply_taxonomy_code(line)
-                if not line.tax_category or not line.tax_code:
-                    smart_entry = _suggest_taxonomy_with_llm(line, cache=smart_coding_cache)
-                    if smart_entry is not None:
-                        if not line.tax_category:
-                            line.tax_category = smart_entry.category_short_name
-                        if not line.tax_code:
-                            line.tax_code = smart_entry.official_code
-                        line.coding_reference = (
-                            "智能推荐，需人工复核: "
-                            f"大类 {smart_entry.category_short_name} / "
-                            f"细分 {smart_entry.official_name} / "
-                            f"编码 {smart_entry.official_code}"
-                        )
+                if (not line.tax_category or not line.tax_code) and not line.coding_reference:
+                    line.coding_reference = "未命中规则，可点击智能赋码"
                 enriched.append(line)
                 continue
 
@@ -136,6 +124,8 @@ class TaxRuleEngine:
                     f"{rate_hint}"
                 )
             _apply_taxonomy_code(line)
+            if (not line.tax_category or not line.tax_code) and not line.coding_reference:
+                line.coding_reference = "未命中规则，可点击智能赋码"
             enriched.append(line)
         return enriched
 
@@ -186,6 +176,12 @@ def enrich_invoice_lines(
 
 def suggest_line(line: InvoiceLine, *, context_text: str = "") -> CodingSuggestion | None:
     return _TAX_RULE_ENGINE.suggest_line(line, context_text=context_text)
+
+
+def smart_code_invoice_lines(lines: list[InvoiceLine]) -> list[InvoiceLine]:
+    """Manually trigger LLM taxonomy suggestions for selected draft lines."""
+    _apply_smart_taxonomy_to_lines(lines, cache={})
+    return lines
 
 
 def write_learned_rules_from_manual_update(
@@ -718,7 +714,137 @@ def _apply_local_safe_coding_hint(line: InvoiceLine) -> None:
 
 
 
-def _suggest_taxonomy_with_llm(line: InvoiceLine, *, cache: dict[str, TaxonomyEntry | None]) -> TaxonomyEntry | None:
+def _can_replace_smart_status(line: InvoiceLine) -> bool:
+    return not line.coding_reference or line.coding_reference.startswith("未命中规则") or line.coding_reference.startswith("待智能赋码")
+
+
+
+def _apply_smart_taxonomy_result(line: InvoiceLine, entry: TaxonomyEntry) -> None:
+    if not line.tax_category:
+        line.tax_category = entry.category_short_name
+    if not line.tax_code:
+        line.tax_code = entry.official_code
+    line.coding_reference = (
+        "智能推荐，需人工复核: "
+        f"大类 {entry.category_short_name} / "
+        f"细分 {entry.official_name} / "
+        f"编码 {entry.official_code}"
+    )
+
+
+
+def _apply_smart_taxonomy_to_lines(lines: list[InvoiceLine], *, cache: dict[str, TaxonomyEntry | None]) -> None:
+    if not lines:
+        return
+    adapter = get_llm_adapter()
+    batch_items: list[tuple[InvoiceLine, str, list[TaxonomyEntry], list[str]]] = []
+    for line in lines:
+        key = _smart_coding_cache_key(line)
+        if key in cache and cache[key] is not None:
+            _apply_smart_taxonomy_result(line, cache[key])
+            continue
+        persistent_entry = _load_cached_llm_taxonomy_choice(key)
+        if persistent_entry is not None:
+            cache[key] = persistent_entry
+            _apply_smart_taxonomy_result(line, persistent_entry)
+            continue
+        cache[key] = None
+        candidates = _llm_taxonomy_candidates(line)
+        if not candidates:
+            if _can_replace_smart_status(line):
+                line.coding_reference = "待智能赋码: 官方分类库暂无可用候选，请人工确认"
+            continue
+        if not adapter.is_enabled:
+            if _can_replace_smart_status(line):
+                line.coding_reference = "待智能赋码: 本地规则未命中，LLM 未启用，请人工选择税收分类"
+            continue
+        candidate_text = _taxonomy_candidate_text(candidates)
+        item_name = " / ".join(part for part in [line.project_name.strip(), line.specification.strip()] if part)
+        batch_items.append((line, item_name, candidates, candidate_text))
+
+    if not batch_items:
+        return
+    if len(batch_items) == 1 or not hasattr(adapter, "classify_tax_codes"):
+        for line, item_name, candidates, candidate_text in batch_items:
+            try:
+                response = adapter.classify_tax_code(item_name, candidate_text)
+            except LLMAdapterError as exc:
+                if _can_replace_smart_status(line):
+                    line.coding_reference = f"智能赋码调用失败，需人工确认: {str(exc)[:80]}"
+                continue
+            entry = _resolve_llm_taxonomy_choice(response.parsed_json, candidates)
+            key = _smart_coding_cache_key(line)
+            cache[key] = entry
+            if entry is not None:
+                _save_cached_llm_taxonomy_choice(key, entry)
+                _apply_smart_taxonomy_result(line, entry)
+            elif _can_replace_smart_status(line):
+                line.coding_reference = "智能赋码返回结果未命中官方候选，需人工确认"
+        return
+
+    payload_items = [
+        {
+            "项目名称": item_name,
+            "候选": candidate_text,
+        }
+        for _, item_name, _, candidate_text in batch_items
+    ]
+    try:
+        response = adapter.classify_tax_codes(payload_items)
+    except LLMAdapterError as exc:
+        for line, _, _, _ in batch_items:
+            if _can_replace_smart_status(line):
+                line.coding_reference = f"智能赋码调用失败，需人工确认: {str(exc)[:80]}"
+        return
+
+    choices = _extract_batch_llm_taxonomy_payload(response.parsed_json)
+    for line, item_name, candidates, _ in batch_items:
+        entry = _resolve_llm_taxonomy_choice(choices.get(item_name, {}), candidates)
+        key = _smart_coding_cache_key(line)
+        cache[key] = entry
+        if entry is not None:
+            _save_cached_llm_taxonomy_choice(key, entry)
+            _apply_smart_taxonomy_result(line, entry)
+        elif _can_replace_smart_status(line):
+            line.coding_reference = "智能赋码返回结果未命中官方候选，需人工确认"
+
+
+
+def _taxonomy_candidate_text(candidates: list[TaxonomyEntry]) -> list[str]:
+    return [
+        "｜".join(
+            part
+            for part in [
+                entry.official_name,
+                entry.category_short_name,
+                entry.official_code,
+                entry.description[:120],
+            ]
+            if part
+        )
+        for entry in candidates
+    ]
+
+
+
+def _extract_batch_llm_taxonomy_payload(payload: dict) -> dict[str, dict]:
+    if not isinstance(payload, dict):
+        return {}
+    items = payload.get("项目赋码") or payload.get("items") or payload.get("结果")
+    if not isinstance(items, list):
+        return {}
+    result: dict[str, dict] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("项目名称") or item.get("item_name") or item.get("名称") or "").strip()
+        if name:
+            result[name] = item
+    return result
+
+
+
+def _suggest_taxonomy_with_llm(line: InvoiceLine, *, cache: dict[str, TaxonomyEntry | None], adapter=None) -> TaxonomyEntry | None:
     key = _smart_coding_cache_key(line)
     if key in cache:
         return cache[key]
@@ -732,24 +858,12 @@ def _suggest_taxonomy_with_llm(line: InvoiceLine, *, cache: dict[str, TaxonomyEn
         if not line.coding_reference:
             line.coding_reference = "待智能赋码: 官方分类库暂无可用候选，请人工确认"
         return None
-    adapter = get_llm_adapter()
+    adapter = adapter or get_llm_adapter()
     if not adapter.is_enabled:
         if not line.coding_reference:
             line.coding_reference = "待智能赋码: 本地规则未命中，LLM 未启用，请人工选择税收分类"
         return None
-    candidate_text = [
-        "｜".join(
-            part
-            for part in [
-                entry.official_name,
-                entry.category_short_name,
-                entry.official_code,
-                entry.description[:120],
-            ]
-            if part
-        )
-        for entry in candidates
-    ]
+    candidate_text = _taxonomy_candidate_text(candidates)
     item_name = " / ".join(part for part in [line.project_name.strip(), line.specification.strip()] if part)
     try:
         response = adapter.classify_tax_code(item_name, candidate_text)

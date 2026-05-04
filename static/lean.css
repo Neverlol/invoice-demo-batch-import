@@ -813,8 +813,7 @@ input[name="line_amount_with_tax"] { text-align: right; font-variant-numeric: ta
   margin: 12px 0;
 }
 .failure-upload-card .failure-upload input {
-  display: block;
-  margin-top: 8px;
+  display: none;
 }
 @media (max-width: 1480px) {
   .draft-three-col {
@@ -1606,6 +1605,26 @@ body:has(#batch-sheet-form) .card-head p {
 .failure-upload-card .failure-upload {
   margin-top: 10px;
   padding: 12px;
+}
+.smart-line-btn,
+.smart-code-btn {
+  border: 1px solid rgba(37, 99, 235, .35);
+  background: #eef5ff;
+  color: #1d4ed8;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 800;
+  margin-top: 6px;
+  cursor: pointer;
+}
+.smart-code-btn {
+  margin-top: 0;
+}
+.coding-note.missed-rule {
+  background: #fff7ed;
+  color: #c2410c;
+  border-color: rgba(249, 115, 22, .28);
 }
 .mini-details summary {
   font-size: 12px;

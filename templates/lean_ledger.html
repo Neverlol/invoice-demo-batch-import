@@ -15,7 +15,7 @@
         </div>
         <nav class="nav">
           <a href="{{ url_for('index') }}"><span class="nav-dot">台</span>开票工作台</a>
-          <span class="nav-item disabled"><span class="nav-dot">稿</span>发票草稿</span>
+          {% if current_draft_id %}<a href="{{ url_for('draft_detail', draft_id=current_draft_id) }}"><span class="nav-dot">稿</span>发票草稿</a>{% else %}<span class="nav-item disabled"><span class="nav-dot">稿</span>发票草稿</span>{% endif %}
           <span class="nav-item disabled"><span class="nav-dot">批</span>批量复核</span>
           <span class="nav-item disabled"><span class="nav-dot">跑</span>税局执行</span>
           <a href="{{ url_for('profiles_page') }}"><span class="nav-dot">档</span>主体与档案</a>
@@ -35,7 +35,7 @@
             <p>这里会记录材料识别、草稿修改、模板生成、税局执行和你的人工确认，方便你回看每一单走到了哪一步。</p>
           </div>
           <div class="actions">
-            <a class="btn" href="{{ url_for('index') }}">返回工作台</a>
+            {% if current_draft_id %}<a class="btn" href="{{ url_for('draft_detail', draft_id=current_draft_id) }}">返回当前草稿</a>{% endif %}<a class="btn" href="{{ url_for('index') }}">返回工作台</a>
             {% if ledger_exists %}
               <a class="btn primary" href="{{ url_for('success_ledger') }}">下载确认明细 Excel</a>
             {% endif %}

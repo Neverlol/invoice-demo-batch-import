@@ -47,6 +47,7 @@ from tax_invoice_demo.customer_profiles import PROFILE_CACHE_PATH, profile_cache
 from tax_invoice_demo.models import BuyerInfo, DraftBatchItem, InvoiceLine
 from tax_invoice_demo.sync_service import schedule_background_customer_profile_pull, schedule_background_rule_pull
 from tax_invoice_demo.taxonomy_search import search_taxonomy
+from tax_invoice_demo.tax_rule_engine import smart_code_invoice_lines
 from tools.ingest_customer_profile_inbox import (
     DEFAULT_PROFILE_ROOT,
     ensure_dirs as ensure_profile_dirs,
@@ -146,6 +147,7 @@ def draft_detail(draft_id: str):
         success_recorded=False,
         applied_failure_repairs=None,
         needs_rebuild=bool(failure_report and failure_report.get("needs_confirmation_rebuild")),
+        current_draft_id=draft.draft_id,
     )
 
 
@@ -169,6 +171,43 @@ def save_draft(draft_id: str):
         success_recorded=False,
         applied_failure_repairs=None,
         needs_rebuild=False,
+        current_draft_id=draft.draft_id,
+    )
+
+
+@app.post("/drafts/<draft_id>/smart-code")
+def smart_code_draft(draft_id: str):
+    draft = save_lean_draft_from_form(draft_id, request.form, [])
+    scope = (request.form.get("smart_code_scope") or "missing").strip()
+    target_lines: list[InvoiceLine] = []
+    if scope.startswith("line:"):
+        try:
+            index = int(scope.split(":", 1)[1])
+        except ValueError:
+            index = -1
+        if 0 <= index < len(draft.lines):
+            target_lines = [draft.lines[index]]
+    elif scope == "all":
+        target_lines = list(draft.lines)
+    else:
+        target_lines = [line for line in draft.lines if not line.tax_category or not line.tax_code]
+    if target_lines:
+        smart_code_invoice_lines(target_lines)
+        workbench_module.save_draft(draft)
+    export = export_draft_template(draft)
+    failure_report = load_failure_report_for_draft(draft_id, draft=draft)
+    return render_template(
+        "lean_draft.html",
+        draft=draft,
+        preview=draft_preview(draft),
+        line_rows=line_form_rows(draft, failure_report=failure_report),
+        export=export,
+        failure_report=failure_report,
+        saved=True,
+        success_recorded=False,
+        applied_failure_repairs=None,
+        needs_rebuild=False,
+        current_draft_id=draft.draft_id,
     )
 
 
@@ -189,6 +228,7 @@ def upload_failure(draft_id: str):
         success_recorded=False,
         applied_failure_repairs=None,
         needs_rebuild=False,
+        current_draft_id=draft.draft_id,
     )
 
 
@@ -210,12 +250,13 @@ def apply_failure_repairs(draft_id: str):
         success_recorded=False,
         applied_failure_repairs=result,
         needs_rebuild=bool(result.get("applied_count")),
+        current_draft_id=draft.draft_id,
     )
 
 
 @app.get("/profiles")
 def profiles_page():
-    return _render_profiles_page()
+    return _render_profiles_page(current_draft_id=_valid_nav_draft_id(request.args.get("draft_id") or ""))
 
 
 @app.post("/profiles/download-history")
@@ -310,6 +351,7 @@ def mark_success(draft_id: str):
         success_recorded=True,
         applied_failure_repairs=None,
         needs_rebuild=False,
+        current_draft_id=draft.draft_id,
     )
 
 
@@ -670,9 +712,17 @@ def _form_list_value(form, name: str, index: int) -> str:
     return (values[index] or "").strip()
 
 
+def _valid_nav_draft_id(raw: str) -> str:
+    draft_id = (raw or "").strip()
+    if not draft_id:
+        return ""
+    return draft_id if load_draft(draft_id) is not None else ""
+
+
 @app.get("/ledger")
 def ledger_page():
     execution_summary = execution_record_summary(limit=200)
+    current_draft_id = _valid_nav_draft_id(request.args.get("draft_id") or "")
     return render_template(
         "lean_ledger.html",
         ledger_exists=SUCCESS_LEDGER_XLSX.exists(),
@@ -681,6 +731,7 @@ def ledger_page():
         row_count=_success_ledger_row_count(),
         execution_records=execution_summary["records"],
         execution_metrics=execution_summary["metrics"],
+        current_draft_id=current_draft_id,
     )
 
 
@@ -746,7 +797,7 @@ def run_apply_failure_repairs(run_id: str):
     return redirect(url_for("draft_detail", draft_id=draft.draft_id))
 
 
-def _render_profiles_page(*, upload_result: dict[str, object] | None = None, download_result: dict[str, object] | None = None):
+def _render_profiles_page(*, upload_result: dict[str, object] | None = None, download_result: dict[str, object] | None = None, current_draft_id: str = ""):
     sellers = _cached_profile_sellers()
     summary = profile_cache_summary()
     return render_template(
@@ -758,6 +809,7 @@ def _render_profiles_page(*, upload_result: dict[str, object] | None = None, dow
         profile_cache_path=str(PROFILE_CACHE_PATH),
         profile_root=str(DEFAULT_PROFILE_ROOT),
         pending_event_count=0,
+        current_draft_id=current_draft_id,
     )
 
 

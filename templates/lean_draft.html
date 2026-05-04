@@ -19,8 +19,8 @@
           <a class="active" href="{{ url_for('draft_detail', draft_id=draft.draft_id) }}"><span class="nav-dot">稿</span>发票草稿</a>
           <span class="nav-item disabled"><span class="nav-dot">批</span>批量复核</span>
           <span class="nav-item disabled"><span class="nav-dot">跑</span>税局执行</span>
-          <a href="{{ url_for('profiles_page') }}"><span class="nav-dot">档</span>主体与档案</a>
-          <a href="{{ url_for('ledger_page') }}"><span class="nav-dot">记</span>执行记录</a>
+          <a href="{{ url_for('profiles_page', draft_id=draft.draft_id) }}"><span class="nav-dot">档</span>主体与档案</a>
+          <a href="{{ url_for('ledger_page', draft_id=draft.draft_id) }}"><span class="nav-dot">记</span>执行记录</a>
         </nav>
         <div class="sidebar-card">
           <h3>当前任务</h3>
@@ -112,7 +112,7 @@
               <div class="card-head"><div><h2>一键赋码</h2><p>如果多行项目使用同一税率或编码，可以在这里统一调整。</p></div></div>
               <div class="taxonomy-picker" data-taxonomy-picker><label class="review-field"><span>查找税收编码</span><input data-taxonomy-query placeholder="输入关键词，如：医疗、注射、器械；选择后自动填入下方"></label><div class="taxonomy-results" data-taxonomy-results hidden></div></div>
               <div class="bulk-fields"><label>赋码大类<input data-bulk-source="line_tax_category" placeholder="选择官方编码后自动填入，也可手动改"></label><label>税收编码<input data-bulk-source="line_tax_code" placeholder="选择官方编码后自动填入"></label><label>税率<input data-bulk-source="line_tax_rate" placeholder="例如：13%"></label></div>
-              <div class="bulk-actions"><button type="button" class="btn" data-bulk-apply="line_tax_rate">只改税率</button><button type="button" class="btn" data-bulk-apply="line_tax_category">只改大类</button><button type="button" class="btn" data-bulk-apply="line_tax_code">只改编码</button><button type="button" class="btn primary" data-bulk-apply-all>应用到全部明细</button></div>
+              <div class="bulk-actions"><button type="button" class="btn" data-bulk-apply="line_tax_rate">只改税率</button><button type="button" class="btn" data-bulk-apply="line_tax_category">只改大类</button><button type="button" class="btn" data-bulk-apply="line_tax_code">只改编码</button><button type="button" class="btn primary" data-bulk-apply-all>应用到全部明细</button><button class="btn smart-code-btn" formaction="{{ url_for('smart_code_draft', draft_id=draft.draft_id) }}" name="smart_code_scope" value="missing" type="submit">一键智能赋码未命中行</button><button class="btn" formaction="{{ url_for('smart_code_draft', draft_id=draft.draft_id) }}" name="smart_code_scope" value="all" type="submit">智能复核全部明细</button></div>
             </section>
 
             <section class="card line-review-card" data-edit-scope="line-board">
@@ -124,7 +124,7 @@
                     <td><input name="line_tax_category" value="{{ line.tax_category }}"></td>
                     <td><input name="line_tax_code" value="{{ line.tax_code }}"></td>
                     {% set coding_reference = line.coding_reference or '' %}
-                    <td><span class="coding-note{% if coding_reference.startswith('智能推荐') %} smart-suggestion{% endif %}" data-coding-note title="{{ coding_reference }}">{{ coding_reference.split(':', 1)[0] if coding_reference else '待你核对' }}</span><input type="hidden" name="line_coding_reference" value="{{ line.coding_reference }}"></td>
+                    <td><span class="coding-note{% if coding_reference.startswith('智能推荐') %} smart-suggestion{% elif coding_reference.startswith('未命中') %} missed-rule{% endif %}" data-coding-note title="{{ coding_reference }}">{{ coding_reference.split(':', 1)[0] if coding_reference else '待你核对' }}</span><input type="hidden" name="line_coding_reference" value="{{ line.coding_reference }}"><button class="smart-line-btn" formaction="{{ url_for('smart_code_draft', draft_id=draft.draft_id) }}" name="smart_code_scope" value="line:{{ loop.index0 }}" type="submit">智能赋码</button></td>
                     <td><input name="line_specification" value="{{ line.specification }}"></td>
                     <td><input name="line_unit" value="{{ line.unit }}"></td>
                     <td><input name="line_quantity" value="{{ line.quantity }}"></td>
@@ -165,10 +165,12 @@
             </section>
 
             <section class="card failure-upload-card">
-              <h2>税局失败明细</h2>
-              <p>税局开票未通过时，上传失败明细 Excel 并回填安全建议。分类包括：可一键修复、需人工确认、不可自动修复。</p>
-              <label class="failure-upload"><strong>选择失败明细 Excel</strong><input type="file" name="failure_file" accept=".xlsx"></label>
-              <button class="btn" formaction="{{ url_for('upload_failure', draft_id=draft.draft_id) }}" type="submit">解析失败明细</button>
+              <h2>税局退回处理</h2>
+              <p>正常流程会在“启动开票”后自动记录税局退回信息。这里保留手工导入入口，只用于税局已下载失败明细 Excel、但系统没有自动带回时的备用处理；失败原因会区分可一键修复、需人工确认、不可自动修复。</p>
+              <details class="mini-details"><summary>备用：手工导入税局失败明细</summary>
+                <label class="failure-upload"><strong>选择失败明细 Excel</strong><span>仅在自动执行没有带回失败原因时使用</span><input type="file" name="failure_file" accept=".xlsx"></label>
+                <button class="btn" formaction="{{ url_for('upload_failure', draft_id=draft.draft_id) }}" type="submit">解析失败明细</button>
+              </details>
               {% if failure_report %}<div class="notice" style="margin-top:12px;">已解析 {{ failure_report.failure_count or (failure_report.records|length) }} 条失败原因。{% if failure_report.actionable_count %}<button class="btn" formaction="{{ url_for('apply_failure_repairs', draft_id=draft.draft_id) }}" type="submit">应用安全建议</button>{% endif %}</div>{% endif %}
             </section>
 

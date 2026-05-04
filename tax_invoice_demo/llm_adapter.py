@@ -172,6 +172,19 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
         )
         return self._chat_json(prompt, timeout_seconds=_task_timeout_seconds("TAX_INVOICE_LLM_TAX_CODE_TIMEOUT", self.timeout_seconds, 20))
 
+    def classify_tax_codes(self, items: list[dict[str, Any]]) -> LLMResponse:
+        prompt = (
+            "你只做税收分类候选推荐，不做最终决定。\n"
+            "请分别根据每个项目名称，从各自给定候选中选择最合适的官方税收分类。\n"
+            "必须只返回 JSON，不要输出解释。\n"
+            "JSON 顶层字段必须包含：项目赋码。\n"
+            "项目赋码必须是数组；每个元素包含：项目名称、候选分类。\n"
+            "候选分类必须是数组，元素包含：分类名称、税收编码、置信度。\n"
+            "只能从对应项目的候选中选择；没有把握也返回最接近候选并降低置信度，不能创造候选外编码。\n"
+            f"待赋码项目：{json.dumps(items, ensure_ascii=False)}"
+        )
+        return self._chat_json(prompt, timeout_seconds=_task_timeout_seconds("TAX_INVOICE_LLM_TAX_CODE_TIMEOUT", self.timeout_seconds, 20))
+
     def extract_text_from_image(self, image_path: Path) -> LLMResponse:
         mime_type = mimetypes.guess_type(str(image_path))[0] or "image/png"
         encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
