@@ -59,26 +59,26 @@
             <div class="actions" style="justify-content:flex-start"><button class="btn" type="submit">保存本批修改 / 重新校验</button><a class="btn primary" href="{{ url_for('download_batch_template', batch_id=batch.batch_id) }}">下载本批税局 Excel</a></div>
           </div>
 
-          {% if line_recommendation %}
           <div class="card recommendation-card">
-            <div class="card-head"><div><h2>推荐明细</h2><p>如果确认本批发票都是同一类项目，可以把销售方常用项目一键导入到 Sheet 2；金额、购买方和税号不会被改动。</p></div><span class="badge info">需你确认</span></div>
-            <div class="notice">推荐：{{ line_recommendation.project_name or '未记录项目' }} / {{ line_recommendation.tax_category or '未记录分类' }} / {{ line_recommendation.tax_code or '未记录编码' }} / {{ line_recommendation.tax_rate or '未记录税率' }}。来源：{{ line_recommendation.source or '销售方历史档案' }}。</div>
+            <div class="card-head"><div><h2>批量明细填充</h2><p>如果确认本批发票都是同一类项目，可以先在这里确认或修改项目、税收分类、编码和税率，再一键导入到 Sheet 2。金额、购买方和税号不会被改动。</p></div><span class="badge info">需你确认</span></div>
+            {% if line_recommendation %}
+              <div class="notice">系统已按销售方历史习惯预填推荐值；如果本批不是这个项目，请先在下方修改。来源：{{ line_recommendation.source or '销售方历史档案' }}。</div>
+            {% else %}
+              <div class="notice">当前没有可直接推荐的销售方常用项目。你可以手动填写，比如“餐费 / 餐饮服务 / 税收编码 / 1%”，再一键导入到 Sheet 2。</div>
+            {% endif %}
+            <div class="form-grid" style="margin-top:14px">
+              <div class="field"><label>项目名称</label><input class="input" data-batch-recommendation-field="project_name" value="{{ line_recommendation.project_name if line_recommendation else '' }}" placeholder="例如：餐费"></div>
+              <div class="field"><label>税收分类</label><input class="input" data-batch-recommendation-field="tax_category" value="{{ line_recommendation.tax_category if line_recommendation else '' }}" placeholder="例如：餐饮服务"></div>
+              <div class="field"><label>税收编码</label><input class="input" data-batch-recommendation-field="tax_code" value="{{ line_recommendation.tax_code if line_recommendation else '' }}" placeholder="例如：3070401000000000000"></div>
+              <div class="field"><label>税率</label><input class="input" data-batch-recommendation-field="tax_rate" value="{{ line_recommendation.tax_rate if line_recommendation else '' }}" placeholder="例如：1%"></div>
+              <div class="field"><label>单位</label><input class="input" data-batch-recommendation-field="unit" value="{{ line_recommendation.unit if line_recommendation else '项' }}" placeholder="项"></div>
+              <div class="field"><label>数量</label><input class="input" data-batch-recommendation-field="quantity" value="{{ line_recommendation.quantity if line_recommendation else '1' }}" placeholder="1"></div>
+            </div>
             <div class="actions" style="justify-content:flex-start;margin-top:14px">
-              <button class="btn" type="button" data-apply-batch-recommendation
-                data-project-name="{{ line_recommendation.project_name }}"
-                data-tax-category="{{ line_recommendation.tax_category }}"
-                data-tax-code="{{ line_recommendation.tax_code }}"
-                data-tax-rate="{{ line_recommendation.tax_rate }}"
-                data-unit="{{ line_recommendation.unit }}"
-                data-quantity="{{ line_recommendation.quantity }}">一键导入品类明细及税收编码</button>
+              <button class="btn" type="button" data-apply-batch-recommendation>一键导入品类明细及税收编码</button>
               <small data-batch-recommendation-status>导入后请保存并重新校验。</small>
             </div>
           </div>
-          {% else %}
-          <div class="card recommendation-card">
-            <div class="card-head"><div><h2>推荐明细</h2><p>当前没有可直接推荐的销售方常用项目。你可以先在 Sheet 2 填好一行，再复制到其它行。</p></div><span class="badge neutral">暂无推荐</span></div>
-          </div>
-          {% endif %}
 
           <div class="card">
             <div class="card-head"><div><h2>Sheet 1：发票基本信息</h2><p>一行代表一张发票；缺失或不确定的字段会高亮，方便你补全。</p></div><span class="badge warn">{{ ns.review }} 项待复核</span></div>

@@ -173,14 +173,10 @@ if (applyAllButton) {
 const batchRecommendationButton = document.querySelector("[data-apply-batch-recommendation]");
 if (batchRecommendationButton) {
   batchRecommendationButton.addEventListener("click", () => {
-    const fieldMap = {
-      project_name: batchRecommendationButton.dataset.projectName || "",
-      tax_category: batchRecommendationButton.dataset.taxCategory || "",
-      tax_code: batchRecommendationButton.dataset.taxCode || "",
-      tax_rate: batchRecommendationButton.dataset.taxRate || "",
-      unit: batchRecommendationButton.dataset.unit || "",
-      quantity: batchRecommendationButton.dataset.quantity || "",
-    };
+    const fieldMap = {};
+    document.querySelectorAll("[data-batch-recommendation-field]").forEach((input) => {
+      fieldMap[input.dataset.batchRecommendationField] = input.value.trim();
+    });
     Object.entries(fieldMap).forEach(([name, value]) => {
       if (!value) {
         return;
