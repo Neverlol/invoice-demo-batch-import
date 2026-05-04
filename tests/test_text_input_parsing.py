@@ -404,6 +404,56 @@ A4复印纸 10包 240元
         self.assertEqual(draft.lines[1].tax_code, "1060401020000000000")
         self.assertEqual(draft.lines[2].tax_code, "1060401030000000000")
 
+    def test_context_learned_proxy_rule_does_not_override_specific_office_items(self):
+        tax_rule_engine_module.LEARNED_RULES_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with tax_rule_engine_module.LEARNED_RULES_PATH.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=tax_rule_engine_module.LEARNED_RULE_HEADERS)
+            writer.writeheader()
+            writer.writerow(
+                {
+                    "rule_id": "learned-proxy-context",
+                    "status": "ready",
+                    "raw_alias": "代理记账和税务申报",
+                    "normalized_invoice_name": "代理记账和税务申报",
+                    "tax_category": "纳税申报代办",
+                    "tax_code": "3040802000000000000",
+                    "tax_treatment_or_rate": "3%",
+                    "decision_basis": "测试：历史学习规则不能覆盖明确文具明细",
+                    "confidence": "local_confirmed",
+                    "source_case_ids": "learned:test",
+                    "company_name": "吉林省风生水起商贸有限公司",
+                    "source_operator": "seed-assistant",
+                    "original_project_name": "代理记账和税务申报",
+                    "final_project_name": "代理记账和税务申报",
+                    "conflict_with_rule_id": "",
+                    "created_at": "2026-05-04T10:00:00",
+                    "updated_at": "2026-05-04T10:00:00",
+                    "hit_count": "0",
+                }
+            )
+        tax_rule_engine_module.load_learned_coding_library.cache_clear()
+        text = """辽宁恒润电力科技有限公司
+91210102MABWM3X12T
+明细：
+A4复印纸 10包 240元
+蓝色文件夹 20个 160元
+桌面文件架 5个 100元
+"""
+
+        draft = workbench_module.create_draft_from_workbench(
+            "吉林省风生水起商贸有限公司",
+            text,
+            "之前测试过代理记账和税务申报，但本次是办公室文具。",
+            [],
+        )
+
+        self.assertEqual([line.project_name for line in draft.lines], ["A4复印纸", "蓝色文件夹", "桌面文件架"])
+        self.assertEqual([line.tax_category for line in draft.lines], ["纸制品", "文具", "文具"])
+        self.assertEqual(draft.lines[0].tax_code, "1060105020000000000")
+        self.assertEqual(draft.lines[1].tax_code, "1060401020000000000")
+        self.assertEqual(draft.lines[2].tax_code, "1060401030000000000")
+        self.assertNotIn("代理记账", "\n".join(line.coding_reference for line in draft.lines))
+
     def test_mimo_ocr_medical_screenshot_text_maps_special_invoice_and_safe_codes(self):
         old_provider = os.environ.get("TAX_INVOICE_LLM_PROVIDER")
         os.environ["TAX_INVOICE_LLM_PROVIDER"] = "off"

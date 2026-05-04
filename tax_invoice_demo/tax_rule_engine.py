@@ -150,6 +150,11 @@ class TaxRuleEngine:
                 score, matched_on = _match_alias(alias, project_text, context_text)
                 if score <= 0:
                     continue
+                if matched_on == "context_contains" and not _project_allows_context_coding(project_text):
+                    # 整段材料里出现过某个历史/学习别名，不代表当前明细行就是这个品类。
+                    # 明确的项目名称（如 A4复印纸、蓝色文件夹、桌面文件架）必须按本行语义赋码，
+                    # 不能被上下文中的“代理记账”等历史测试词覆盖。
+                    continue
                 if best is None or score > best[0]:
                     best = (score, entry, alias, matched_on)
         if best is None:
@@ -410,6 +415,22 @@ def _match_alias(alias: str, project_text: str, context_text: str) -> tuple[int,
     if context_norm and alias_norm in context_norm:
         return 55, "context_contains"
     return 0, ""
+
+
+def _project_allows_context_coding(project_text: str) -> bool:
+    """Whether a coding rule may be chosen only because its alias appears in the whole material.
+
+    Context-only matching is useful when the parsed line name is empty/generic (e.g. “服务费”, “商品”).
+    It is unsafe for explicit item names because previous examples, remarks, or test words in the same text
+    can otherwise override the actual line semantics.
+    """
+    stripped = project_text.strip()
+    if not stripped:
+        return True
+    if _looks_like_generic_project_name(stripped):
+        return True
+    return _looks_like_low_confidence_project_name(stripped)
+
 
 
 def _normalize(value: str) -> str:
