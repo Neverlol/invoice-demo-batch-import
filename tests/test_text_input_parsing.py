@@ -404,6 +404,34 @@ A4复印纸 10包 240元
         self.assertEqual(draft.lines[1].tax_code, "1060401020000000000")
         self.assertEqual(draft.lines[2].tax_code, "1060401030000000000")
 
+    def test_unseen_office_items_get_safe_coding_candidates_instead_of_blank(self):
+        text = """沈阳云帆科技有限公司
+91210100MA7K8X6P2Q
+开普通发票
+明细：
+A3复印纸 8包 192元
+档案盒 15个 225元
+中性笔 30支 90元
+订书机 3个 75元
+总共582元，按1个点开。
+"""
+
+        draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", text, "", [])
+
+        self.assertEqual([line.project_name for line in draft.lines], ["A3复印纸", "档案盒", "中性笔", "订书机"])
+        self.assertEqual([line.tax_category for line in draft.lines], ["纸制品", "文具", "文具", "文化办公用设备"])
+        self.assertEqual(
+            [line.tax_code for line in draft.lines],
+            [
+                "1060105020000000000",
+                "1060401020000000000",
+                "1060402010200000000",
+                "1090627030000000000",
+            ],
+        )
+        self.assertTrue(all(line.coding_reference for line in draft.lines))
+        self.assertFalse(any("代理记账" in line.coding_reference for line in draft.lines))
+
     def test_context_learned_proxy_rule_does_not_override_specific_office_items(self):
         tax_rule_engine_module.LEARNED_RULES_PATH.parent.mkdir(parents=True, exist_ok=True)
         with tax_rule_engine_module.LEARNED_RULES_PATH.open("w", encoding="utf-8-sig", newline="") as handle:

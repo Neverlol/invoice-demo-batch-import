@@ -691,6 +691,11 @@ def _apply_local_safe_coding_hint(line: InvoiceLine) -> None:
         line.tax_code = "1060105020000000000"
         line.coding_reference = line.coding_reference or "本地办公用品规则，需人工复核: 纸制文具及用品 / 纸制品 / 1060105020000000000"
         return
+    if re.search(r"(档案盒|文件盒|资料盒|收纳盒)", text):
+        line.tax_category = line.tax_category or "文具"
+        line.tax_code = "1060401020000000000"
+        line.coding_reference = line.coding_reference or "本地办公用品规则，需人工复核: 文件盒/档案盒 / 文具 / 1060401020000000000"
+        return
     if "文件夹" in text:
         line.tax_category = line.tax_category or "文具"
         line.tax_code = "1060401020000000000"
@@ -700,6 +705,16 @@ def _apply_local_safe_coding_hint(line: InvoiceLine) -> None:
         line.tax_category = line.tax_category or "文具"
         line.tax_code = "1060401030000000000"
         line.coding_reference = line.coding_reference or "本地办公用品规则，需人工复核: 文件架 / 文具 / 1060401030000000000"
+        return
+    if re.search(r"(中性笔|圆珠笔|水性笔|签字笔|走珠笔|滚珠笔)", text):
+        line.tax_category = line.tax_category or "文具"
+        line.tax_code = "1060402010200000000"
+        line.coding_reference = line.coding_reference or "本地办公用品规则，需人工复核: 圆珠笔/中性笔 / 文具 / 1060402010200000000"
+        return
+    if re.search(r"(订书机|打孔机|装订机)", text):
+        line.tax_category = line.tax_category or "文化办公用设备"
+        line.tax_code = "1090627030000000000"
+        line.coding_reference = line.coding_reference or "本地办公用品规则，需人工复核: 文件装订用机械 / 文化办公用设备 / 1090627030000000000"
 
 
 
@@ -714,9 +729,13 @@ def _suggest_taxonomy_with_llm(line: InvoiceLine, *, cache: dict[str, TaxonomyEn
     cache[key] = None
     candidates = _llm_taxonomy_candidates(line)
     if not candidates:
+        if not line.coding_reference:
+            line.coding_reference = "待智能赋码: 官方分类库暂无可用候选，请人工确认"
         return None
     adapter = get_llm_adapter()
     if not adapter.is_enabled:
+        if not line.coding_reference:
+            line.coding_reference = "待智能赋码: 本地规则未命中，LLM 未启用，请人工选择税收分类"
         return None
     candidate_text = [
         "｜".join(
@@ -734,12 +753,16 @@ def _suggest_taxonomy_with_llm(line: InvoiceLine, *, cache: dict[str, TaxonomyEn
     item_name = " / ".join(part for part in [line.project_name.strip(), line.specification.strip()] if part)
     try:
         response = adapter.classify_tax_code(item_name, candidate_text)
-    except LLMAdapterError:
+    except LLMAdapterError as exc:
+        if not line.coding_reference:
+            line.coding_reference = f"智能赋码调用失败，需人工确认: {str(exc)[:80]}"
         return None
     entry = _resolve_llm_taxonomy_choice(response.parsed_json, candidates)
     cache[key] = entry
     if entry is not None:
         _save_cached_llm_taxonomy_choice(key, entry)
+    elif not line.coding_reference:
+        line.coding_reference = "智能赋码返回结果未命中官方候选，需人工确认"
     return entry
 
 
