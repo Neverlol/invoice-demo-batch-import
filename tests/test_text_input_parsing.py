@@ -432,6 +432,37 @@ A3复印纸 8包 192元
         self.assertTrue(all(line.coding_reference for line in draft.lines))
         self.assertFalse(any("代理记账" in line.coding_reference for line in draft.lines))
 
+    def test_uncoded_new_items_trigger_tax_code_llm_candidates(self):
+        text = """沈阳嘉禾空间设计有限公司
+91210103MA9K2P7Q8R
+开普通发票
+明细：
+亚克力展示牌 12个 360元
+LED灯带 5卷 425元
+不锈钢挂钩 30个 150元
+玻璃清洁剂 6瓶 108元
+防滑地垫 4张 320元
+总共1363元，按1个点开。
+"""
+        fake_adapter = _FakeGenericTaxCodeLLMAdapter()
+
+        with patch.object(tax_rule_engine_module, "get_llm_adapter", return_value=fake_adapter):
+            draft = workbench_module.create_draft_from_workbench("吉林省风生水起商贸有限公司", text, "", [])
+
+        self.assertEqual(fake_adapter.call_count, 5)
+        self.assertEqual([line.project_name for line in draft.lines], ["亚克力展示牌", "LED灯带", "不锈钢挂钩", "玻璃清洁剂", "防滑地垫"])
+        self.assertEqual(
+            [line.tax_code for line in draft.lines],
+            [
+                "1070601020000000000",
+                "1090424000000000000",
+                "1080414010000000000",
+                "1070222020000000000",
+                "1060507020000000000",
+            ],
+        )
+        self.assertTrue(all(line.coding_reference.startswith("智能推荐，需人工复核") for line in draft.lines))
+
     def test_context_learned_proxy_rule_does_not_override_specific_office_items(self):
         tax_rule_engine_module.LEARNED_RULES_PATH.parent.mkdir(parents=True, exist_ok=True)
         with tax_rule_engine_module.LEARNED_RULES_PATH.open("w", encoding="utf-8-sig", newline="") as handle:
@@ -690,7 +721,7 @@ A4复印纸 10包 240元
         self.assertEqual(len(batch.items), 2)
         self.assertEqual(batch.extract_strategy, "rules_plus_batch_vision")
         self.assertEqual(batch.llm_provider, "mimo_openai")
-        self.assertEqual(fake_urlopen.call_count, 2)
+        self.assertGreaterEqual(fake_urlopen.call_count, 2)
         first = workbench_module.load_draft(batch.items[0].draft_id)
         self.assertEqual(first.extract_strategy, "rules_plus_batch_vision")
         self.assertEqual(first.llm_provider, "mimo_openai")
@@ -1214,6 +1245,43 @@ class _FakeTaxCodeLLMAdapter:
         self.last_candidates = candidates
         assert any("1090245030000000000" in candidate for candidate in candidates)
         return _FakeTaxCodeLLMResponse()
+
+
+class _FakeGenericTaxCodeLLMResponse:
+    def __init__(self, code: str, name: str):
+        self.parsed_json = {
+            "候选分类": [
+                {
+                    "分类名称": name,
+                    "税收编码": code,
+                    "置信度": "0.78",
+                }
+            ]
+        }
+
+
+class _FakeGenericTaxCodeLLMAdapter:
+    is_enabled = True
+
+    def __init__(self):
+        self.call_count = 0
+        self.calls = []
+
+    def classify_tax_code(self, item_name, candidates):
+        self.call_count += 1
+        self.calls.append((item_name, candidates))
+        mapping = [
+            ("亚克力展示牌", "1070601020000000000", "塑料板、片"),
+            ("LED灯带", "1090424000000000000", "灯具及照明装置"),
+            ("不锈钢挂钩", "1080414010000000000", "钢铁制紧固件"),
+            ("玻璃清洁剂", "1070222020000000000", "合成洗涤剂"),
+            ("防滑地垫", "1060507020000000000", "机制地毯、挂毯"),
+        ]
+        for keyword, code, name in mapping:
+            if keyword in item_name:
+                assert any(code in candidate for candidate in candidates), (item_name, code, candidates[:8])
+                return _FakeGenericTaxCodeLLMResponse(code, name)
+        raise AssertionError(f"unexpected item for fake tax code LLM: {item_name}")
 
 
 

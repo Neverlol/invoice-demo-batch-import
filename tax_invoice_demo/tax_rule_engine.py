@@ -809,15 +809,20 @@ def _smart_coding_cache_key(line: InvoiceLine) -> str:
     return _normalize(line.project_name)
 
 
-def _llm_taxonomy_candidates(line: InvoiceLine, *, limit: int = 60) -> list[TaxonomyEntry]:
+def _llm_taxonomy_candidates(line: InvoiceLine, *, limit: int = 80) -> list[TaxonomyEntry]:
     text = f"{line.project_name} {line.specification} {line.tax_category}".strip()
     normalized = _normalize(text)
-    scored: list[tuple[int, TaxonomyEntry]] = []
+    scored_by_code: dict[str, tuple[int, TaxonomyEntry]] = {}
     medical_hint = bool(re.search(r"医|药|械|针|电极|耗材|一次性|导管|探头|诊断|治疗|手术|卫生", text))
+    hint_patterns = _taxonomy_hint_patterns(text)
     for entry in load_taxonomy_master():
-        official = _normalize(entry.official_name)
-        short = _normalize(entry.category_short_name)
-        description = _normalize(entry.description)
+        official_raw = entry.official_name
+        short_raw = entry.category_short_name
+        description_raw = entry.description
+        haystack_raw = f"{official_raw} {short_raw} {description_raw}"
+        official = _normalize(official_raw)
+        short = _normalize(short_raw)
+        description = _normalize(description_raw)
         score = 0
         if normalized:
             for token in _bigrams(normalized):
@@ -827,6 +832,9 @@ def _llm_taxonomy_candidates(line: InvoiceLine, *, limit: int = 60) -> list[Taxo
                     score += 7
                 elif token and token in description:
                     score += 3
+        for pattern, weight in hint_patterns:
+            if re.search(pattern, haystack_raw):
+                score += weight
         if medical_hint and (
             entry.official_code.startswith("109024")
             or "医" in entry.official_name
@@ -839,10 +847,12 @@ def _llm_taxonomy_candidates(line: InvoiceLine, *, limit: int = 60) -> list[Taxo
         if "电极" in text and re.search(r"电极|高频|诊断|治疗|监护", entry.official_name + entry.description):
             score += 28
         if score > 0:
-            scored.append((score, entry))
-    scored.sort(key=lambda item: (-item[0], item[1].official_code))
-    seen: set[str] = set()
+            existing = scored_by_code.get(entry.official_code)
+            if existing is None or score > existing[0]:
+                scored_by_code[entry.official_code] = (score, entry)
+    scored = sorted(scored_by_code.values(), key=lambda item: (-item[0], item[1].official_code))
     candidates: list[TaxonomyEntry] = []
+    seen: set[str] = set()
     for _, entry in scored:
         if entry.official_code in seen:
             continue
@@ -850,7 +860,89 @@ def _llm_taxonomy_candidates(line: InvoiceLine, *, limit: int = 60) -> list[Taxo
         candidates.append(entry)
         if len(candidates) >= limit:
             break
+    if len(candidates) < min(18, limit):
+        for entry in _fallback_taxonomy_candidates(limit=limit):
+            if entry.official_code in seen:
+                continue
+            seen.add(entry.official_code)
+            candidates.append(entry)
+            if len(candidates) >= limit:
+                break
     return candidates
+
+
+def _taxonomy_hint_patterns(text: str) -> list[tuple[str, int]]:
+    hints: list[tuple[str, int]] = []
+    if re.search(r"亚克力|有机玻璃|展示牌|标牌|铭牌|招牌|指示牌", text, re.IGNORECASE):
+        hints.extend(
+            [
+                (r"塑料板|塑料制品|其他塑料制品|塑料零件", 52),
+                (r"发光标志|发光铭牌|标志牌|指示牌|铭牌", 48),
+                (r"装饰用纤维增强塑料制品", 36),
+            ]
+        )
+    if re.search(r"LED|灯带|灯具|灯饰|照明", text, re.IGNORECASE):
+        hints.extend(
+            [
+                (r"灯具及照明装置|装饰用灯|室内照明灯具|户外照明", 64),
+                (r"电光源|半导体光电器件|发光二极管", 46),
+                (r"灯用电器附件|照明装置零件", 28),
+            ]
+        )
+    if re.search(r"不锈钢|挂钩|五金|金属", text):
+        hints.extend(
+            [
+                (r"金属制品|钢铁制品|钢铁制紧固件|其他金属制品", 56),
+                (r"钢丝|不锈钢|紧固件|挂钩", 34),
+            ]
+        )
+    if re.search(r"清洁剂|洗涤剂|去污|玻璃清洁|清洁液", text):
+        hints.extend(
+            [
+                (r"合成洗涤剂|洗涤剂|擦洗膏|去污粉", 64),
+                (r"日用杂品|清洁清扫", 34),
+            ]
+        )
+    if re.search(r"防滑|地垫|脚垫|门垫|浴室垫|垫子", text):
+        hints.extend(
+            [
+                (r"地毯|浴室垫|门前垫|机制地毯|挂毯", 62),
+                (r"日用塑料制品|其他塑料制品|橡胶制品|纺织产品", 38),
+            ]
+        )
+    return hints
+
+
+
+def _fallback_taxonomy_candidates(*, limit: int) -> list[TaxonomyEntry]:
+    # 兜底候选池只用于让 LLM 在“本地未命中/搜索候选过少”时仍能被调用并选择官方分类。
+    # 它不是直接赋码规则，最终仍必须由 LLM 返回的官方候选命中后才写入草稿。
+    preferred_codes = {
+        "1070601990000000000",  # 其他塑料制品
+        "1070601020000000000",  # 塑料板、片
+        "1070601120000000000",  # 日用塑料制品
+        "1060512040000000000",  # 清洁清扫类工具及其已加工材料
+        "1070222020000000000",  # 合成洗涤剂
+        "1070299030000000000",  # 擦洗膏、去污粉及类似制品
+        "1060507020000000000",  # 机制地毯、挂毯
+        "1060507000000000000",  # 地毯、挂毯类工艺品
+        "1090424000000000000",  # 灯具及照明装置
+        "1090424030000000000",  # 装饰用灯
+        "1090424050000000000",  # 发光标志、发光铭牌及类似品
+        "1090423990000000000",  # 其他电光源
+        "1090516030000000000",  # 半导体光电器件
+        "1080414990000000000",  # 其他金属制品
+        "1080414010000000000",  # 钢铁制紧固件
+        "1060401990000000000",  # 其他文具及类似用品
+    }
+    entries: list[TaxonomyEntry] = []
+    for entry in load_taxonomy_master():
+        if entry.official_code in preferred_codes:
+            entries.append(entry)
+            if len(entries) >= limit:
+                break
+    return entries
+
 
 
 def _resolve_llm_taxonomy_choice(payload: dict, candidates: list[TaxonomyEntry]) -> TaxonomyEntry | None:

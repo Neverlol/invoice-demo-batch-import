@@ -170,7 +170,7 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
             f"项目名称：{item_name}\n"
             f"候选：{json.dumps(candidates, ensure_ascii=False)}"
         )
-        return self._chat_json(prompt, timeout_seconds=_task_timeout_seconds("TAX_INVOICE_LLM_TAX_CODE_TIMEOUT", self.timeout_seconds, 5))
+        return self._chat_json(prompt, timeout_seconds=_task_timeout_seconds("TAX_INVOICE_LLM_TAX_CODE_TIMEOUT", self.timeout_seconds, 20))
 
     def extract_text_from_image(self, image_path: Path) -> LLMResponse:
         mime_type = mimetypes.guess_type(str(image_path))[0] or "image/png"
