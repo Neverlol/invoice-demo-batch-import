@@ -12,6 +12,7 @@ from tax_invoice_demo.parsing import extract_buyer_info_from_text, extract_invoi
 import tax_invoice_demo.case_events as case_events_module
 import tax_invoice_demo.coding_library as coding_library_module
 import tax_invoice_demo.ledger as ledger_module
+import tax_invoice_demo.llm_adapter as llm_adapter_module
 import tax_invoice_demo.tax_rule_engine as tax_rule_engine_module
 import tax_invoice_demo.workbench as workbench_module
 import tax_invoice_demo.customer_profiles as customer_profiles_module
@@ -54,6 +55,20 @@ MINIMAL_INLINE_TEXT_INPUT = "辽宁恒润电力科技有限公司 91210102MABWM3
 MINIMAL_LABELED_INLINE_TEXT_INPUT = "给辽宁恒润电力科技有限公司开普通发票，税号91210102MABWM3X12T，项目：代理记账和税务申报，金额500"
 
 MINIMAL_INLINE_TEXT_INPUT_WITH_RATE = "辽宁恒润电力科技有限公司 91210102MABWM3X12T 开普票 代理记账和税务申报 500元 6%"
+
+
+class _FakeHTTPResponse:
+    def __init__(self, payload: dict):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def read(self):
+        return json.dumps(self.payload, ensure_ascii=False).encode("utf-8")
 
 
 class TextInputParsingTest(unittest.TestCase):
@@ -466,7 +481,7 @@ A4复印纸 10包 240元
 订单号: 8011766126836281742
 """
 
-        batch = workbench_module.create_draft_from_workbench(seller, text, "平台截图批量测试", [])
+        batch = workbench_module.create_draft_from_workbench(seller, text, "平台截图批量测试", [], force_batch=True)
 
         self.assertEqual(batch.__class__.__name__, "DraftBatch")
         self.assertEqual(len(batch.items), 3)
@@ -486,13 +501,75 @@ A4复印纸 10包 240元
         self.assertTrue(any("购买方税号" in issue for issue in third.issues))
         self.assertEqual(batch.items[2].buyer_name, "待补全购买方名称")
 
+    def test_single_image_without_batch_uses_vision_llm(self):
+        files = [FileStorage(stream=io.BytesIO(b"fake clear screenshot"), filename="clear.png", content_type="image/png")]
+        response_payload = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "客户名称": "吉林省风生水起商贸有限公司",
+                                "纳税人识别号": "91220100MA00000000",
+                                "地址电话": "",
+                                "开户行及账号": "",
+                                "项目列表": [
+                                    {
+                                        "项目名称": "代理记账和税务申报",
+                                        "规格型号": "",
+                                        "单位": "项",
+                                        "数量": "1",
+                                        "单价": "500",
+                                        "金额": "500",
+                                        "税率": "3%",
+                                    }
+                                ],
+                                "价税合计": "500",
+                                "备注": "",
+                            },
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ]
+        }
+
+        with patch.dict(
+            os.environ,
+            {
+                "TAX_INVOICE_LLM_PROVIDER": "mimo_openai",
+                "TAX_INVOICE_MIMO_API_KEY": "fake-key",
+                "TAX_INVOICE_LLM_VISION_EXTRACT": "auto",
+            },
+        ), patch.object(llm_adapter_module, "urlopen", return_value=_FakeHTTPResponse(response_payload)):
+            draft = workbench_module.create_draft_from_workbench("", "", "单张截图未勾批量", files, force_batch=False)
+
+        self.assertEqual(draft.__class__.__name__, "InvoiceDraft")
+        self.assertEqual(draft.extract_strategy, "rules_plus_vision")
+        self.assertEqual(draft.llm_provider, "mimo_openai")
+        self.assertEqual(draft.buyer.name, "吉林省风生水起商贸有限公司")
+        self.assertEqual(draft.lines[0].project_name, "代理记账和税务申报")
+
+    def test_single_image_with_batch_creates_one_child_draft(self):
+        files = [FileStorage(stream=io.BytesIO(b"fake clear screenshot"), filename="clear.png", content_type="image/png")]
+
+        with patch.dict(os.environ, {"TAX_INVOICE_OCR": "off", "TAX_INVOICE_LLM_PROVIDER": "off"}):
+            batch = workbench_module.create_draft_from_workbench("", "", "单张截图已勾批量", files, force_batch=True)
+
+        self.assertEqual(batch.__class__.__name__, "DraftBatch")
+        self.assertEqual(len(batch.items), 1)
+        child = workbench_module.load_draft(batch.items[0].draft_id)
+        self.assertIn("来源图片：clear.png", child.note)
+        self.assertEqual(child.lines[0].coding_reference, "批量模式待人工补全，需人工复核")
+
     def test_force_batch_mode_creates_one_child_draft_per_uploaded_image_even_without_ocr_fields(self):
         files = [
             FileStorage(stream=io.BytesIO(b"fake image one"), filename="01.png", content_type="image/png"),
             FileStorage(stream=io.BytesIO(b"fake image two"), filename="02.png", content_type="image/png"),
         ]
 
-        batch = workbench_module.create_draft_from_workbench("", "", "批量截图模式", files, force_batch=True)
+        with patch.dict(os.environ, {"TAX_INVOICE_OCR": "off", "TAX_INVOICE_LLM_PROVIDER": "off"}):
+            batch = workbench_module.create_draft_from_workbench("", "", "批量截图模式", files, force_batch=True)
 
         self.assertEqual(batch.__class__.__name__, "DraftBatch")
         self.assertEqual(len(batch.items), 2)
@@ -502,6 +579,27 @@ A4复印纸 10包 240元
         self.assertTrue(any("购买方税号" in issue for issue in first.issues))
         self.assertTrue(any("开票金额" in issue for issue in first.issues))
         self.assertEqual(first.lines[0].coding_reference, "批量模式待人工补全，需人工复核")
+
+    def test_platform_screenshot_text_without_batch_stays_single_draft(self):
+        text = """[01.jpg]
+发票详情
+抬头 林甸县梁小环传媒工作室
+税号 92230623MAEMC84N31
+建议开票金额 14.80
+订单号: 8086410250960608559
+
+[02.jpg]
+发票详情
+抬头 中智关爱通（上海）科技
+建议开票金额 29.88
+订单号: 8011766126836281741
+"""
+
+        draft = workbench_module.create_draft_from_workbench("", text, "未勾批量模式", [], force_batch=False)
+
+        self.assertEqual(draft.__class__.__name__, "InvoiceDraft")
+        self.assertFalse(hasattr(draft, "items"))
+        self.assertEqual(draft.extract_strategy, "rules_only")
 
     def test_force_batch_mode_keeps_uploaded_images_even_when_ocr_finds_only_some_blocks(self):
         files = [

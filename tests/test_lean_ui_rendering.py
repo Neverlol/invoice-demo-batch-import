@@ -187,6 +187,7 @@ class LeanUIRenderingTest(unittest.TestCase):
 """,
             "平台截图批量测试",
             [],
+            force_batch=True,
         )
 
         response = app.test_client().get(f"/batches/{batch.batch_id}")

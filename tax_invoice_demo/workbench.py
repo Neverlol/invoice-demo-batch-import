@@ -48,14 +48,18 @@ def create_draft_from_workbench(
     draft_dir.mkdir(parents=True, exist_ok=True)
     attachments = _save_uploads(draft_dir, uploaded_files)
     document_result = _run_document_extraction(draft_dir, attachments)
-    vision_image_paths = [] if force_batch else _image_attachment_paths(draft_dir, attachments)
+    image_attachment_paths = _image_attachment_paths(draft_dir, attachments)
+    # 是否批量只看用户是否勾选“批量开具发票”：
+    # - 未勾选：所有上传材料都视为同一张发票的材料，图片进入视觉 LLM 识别链路。
+    # - 已勾选：进入批量模式，一张图片生成一个子草稿，不把多张图交给视觉模型合成一张票。
+    vision_image_paths = [] if force_batch else image_attachment_paths
     ocr_result = _run_draft_ocr(draft_dir, attachments, defer_to_vision=bool(vision_image_paths))
     early_parse_source = _compose_parse_source(raw_text, document_result.combined_text, ocr_result.combined_text)
     invoice_profile = _infer_invoice_profile(early_parse_source, note=note)
-    platform_requests = extract_platform_invoice_requests(early_parse_source)
+    platform_requests: list[PlatformInvoiceRequest] = []
     if force_batch:
-        platform_requests = _ensure_requests_cover_uploaded_images(platform_requests, attachments)
-    if platform_requests:
+        platform_requests = _ensure_requests_cover_uploaded_images(extract_platform_invoice_requests(early_parse_source), attachments)
+    if force_batch and platform_requests:
         line_profile = seller_default_line_profile(company_name) or _blank_batch_line_profile()
         return _create_platform_screenshot_draft_batch(
             batch_id=draft_id,
@@ -89,10 +93,10 @@ def create_draft_from_workbench(
         parse_source=parse_source,
     )
     invoice_profile = _infer_invoice_profile(parse_source, note=note)
-    platform_requests = extract_platform_invoice_requests(parse_source)
+    platform_requests = []
     if force_batch:
-        platform_requests = _ensure_requests_cover_uploaded_images(platform_requests, attachments)
-    if platform_requests:
+        platform_requests = _ensure_requests_cover_uploaded_images(extract_platform_invoice_requests(parse_source), attachments)
+    if force_batch and platform_requests:
         line_profile = seller_default_line_profile(company_name) or _blank_batch_line_profile()
         return _create_platform_screenshot_draft_batch(
             batch_id=draft_id,
@@ -118,7 +122,7 @@ def create_draft_from_workbench(
         lines=lines,
         invoice_profile=invoice_profile,
     )
-    if split_lines:
+    if force_batch and split_lines:
         batch = _create_split_draft_batch(
             batch_id=draft_id,
             case_id=case_id,
@@ -569,7 +573,7 @@ def _ensure_requests_cover_uploaded_images(
     原始上传图片为唯一业务单元，不能把 `[02_02.jpg]` 和 `02.jpg` 生成两张票。
     """
     image_attachments = _uploaded_image_attachments(attachments)
-    if len(image_attachments) < 2:
+    if not image_attachments:
         return requests
 
     remaining = list(requests)
