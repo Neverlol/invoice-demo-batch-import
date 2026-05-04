@@ -14,6 +14,13 @@ class PlatformInvoiceRequest:
     email: str = ""
     order_no: str = ""
     source_excerpt: str = ""
+    project_name: str = ""
+    tax_rate: str = ""
+    tax_category: str = ""
+    tax_code: str = ""
+    specification: str = ""
+    unit: str = ""
+    quantity: str = ""
 
 
 def extract_platform_invoice_requests(parse_source: str) -> list[PlatformInvoiceRequest]:

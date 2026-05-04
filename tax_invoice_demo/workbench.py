@@ -24,6 +24,7 @@ from .source_documents import extract_supported_documents, serialize_document_re
 from .tax_rule_engine import write_learned_rules_from_manual_update
 
 WORKBENCH_ROOT = Path(__file__).resolve().parent.parent / "output" / "workbench" / "tax_invoice_demo"
+BATCH_LLM_MAX_ATTACHMENTS = 5
 
 
 def default_workbench_form() -> dict[str, str]:
@@ -51,13 +52,33 @@ def create_draft_from_workbench(
     image_attachment_paths = _image_attachment_paths(draft_dir, attachments)
     # 是否批量只看用户是否勾选“批量开具发票”：
     # - 未勾选：所有上传材料都视为同一张发票的材料，图片进入视觉 LLM 识别链路。
-    # - 已勾选：进入批量模式，一张图片生成一个子草稿，不把多张图交给视觉模型合成一张票。
+    # - 已勾选且图片不超过 5 张：按“一张图一个业务单元”逐张走视觉 LLM。
+    # - 已勾选且图片超过 5 张：回到 OCR/规则/待补全混合模式，控制等待时间和模型成本。
     vision_image_paths = [] if force_batch else image_attachment_paths
-    ocr_result = _run_draft_ocr(draft_dir, attachments, defer_to_vision=bool(vision_image_paths))
+    batch_vision_enabled = force_batch and 0 < len(image_attachment_paths) <= BATCH_LLM_MAX_ATTACHMENTS
+    ocr_result = _run_draft_ocr(
+        draft_dir,
+        attachments,
+        defer_to_vision=bool(vision_image_paths) or batch_vision_enabled,
+    )
     early_parse_source = _compose_parse_source(raw_text, document_result.combined_text, ocr_result.combined_text)
     invoice_profile = _infer_invoice_profile(early_parse_source, note=note)
     platform_requests: list[PlatformInvoiceRequest] = []
-    if force_batch:
+    batch_extract_strategy = "platform_screenshot_batch"
+    batch_llm_provider = ""
+    batch_extract_warnings: list[str] = []
+    if force_batch and batch_vision_enabled:
+        platform_requests, batch_llm_provider, batch_extract_warnings = _batch_vision_requests_from_uploaded_images(
+            draft_dir=draft_dir,
+            attachments=attachments,
+            raw_text=raw_text,
+            note=note,
+            document_text=document_result.combined_text,
+        )
+        if platform_requests:
+            platform_requests = _ensure_requests_cover_uploaded_images(platform_requests, attachments)
+            batch_extract_strategy = "rules_plus_batch_vision"
+    if force_batch and not platform_requests:
         platform_requests = _ensure_requests_cover_uploaded_images(extract_platform_invoice_requests(early_parse_source), attachments)
     if force_batch and platform_requests:
         line_profile = seller_default_line_profile(company_name) or _blank_batch_line_profile()
@@ -74,6 +95,9 @@ def create_draft_from_workbench(
             invoice_profile=invoice_profile,
             requests=platform_requests,
             line_profile=line_profile,
+            extract_strategy=batch_extract_strategy,
+            llm_provider=batch_llm_provider,
+            extract_warnings=batch_extract_warnings,
         )
     extraction = extract_invoice_structured_data(
         raw_text=raw_text,
@@ -592,6 +616,69 @@ def _ensure_requests_cover_uploaded_images(
     return merged
 
 
+def _batch_vision_requests_from_uploaded_images(
+    *,
+    draft_dir: Path,
+    attachments: list[DraftAttachment],
+    raw_text: str,
+    note: str,
+    document_text: str,
+) -> tuple[list[PlatformInvoiceRequest], str, list[str]]:
+    """少量批量图片按“一张图一个业务单元”逐张走视觉 LLM。
+
+    这里故意不把 3-5 张图片一次性交给模型合并处理，避免模型把不同图片的购买方、税号、金额串单。
+    """
+    image_attachments = _uploaded_image_attachments(attachments)
+    if not image_attachments or len(image_attachments) > BATCH_LLM_MAX_ATTACHMENTS:
+        return [], "", []
+
+    from .llm_adapter import get_llm_adapter
+
+    if not get_llm_adapter().is_enabled:
+        return [], "", []
+
+    requests: list[PlatformInvoiceRequest] = []
+    provider = ""
+    warnings: list[str] = []
+    for attachment in image_attachments:
+        source_name = attachment.original_name or Path(attachment.stored_name).name
+        image_path = draft_dir / attachment.stored_name
+        extraction = extract_invoice_structured_data(
+            raw_text=raw_text,
+            note=f"{note}\n来源图片：{source_name}".strip(),
+            document_text=document_text,
+            ocr_text="",
+            image_paths=[image_path],
+            force_llm_review=True,
+        )
+        if extraction.llm_provider:
+            provider = extraction.llm_provider
+        elif extraction.llm_metrics:
+            provider = str(extraction.llm_metrics[-1].get("provider") or provider)
+        warnings.extend(f"{source_name}: {warning}" for warning in extraction.warnings)
+        line = extraction.lines[0] if extraction.lines else InvoiceLine(project_name="", amount_with_tax="")
+        source_excerpt = extraction.parse_source.strip()
+        if not source_excerpt:
+            source_excerpt = f"来源图片：{source_name}\n视觉大模型已按单张图片尝试提取开票信息。"
+        requests.append(
+            PlatformInvoiceRequest(
+                source_name=source_name,
+                buyer=extraction.buyer,
+                amount_with_tax=line.resolved_amount_with_tax(),
+                source_excerpt=source_excerpt,
+                project_name=line.project_name,
+                tax_rate=line.normalized_tax_rate() if line.tax_rate else "",
+                tax_category=line.tax_category,
+                tax_code=line.tax_code,
+                specification=line.specification,
+                unit=line.unit,
+                quantity=line.quantity,
+            )
+        )
+    return requests, provider, warnings
+
+
+
 def _uploaded_image_attachments(attachments: list[DraftAttachment]) -> list[DraftAttachment]:
     image_suffixes = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
     return [
@@ -694,15 +781,17 @@ def _create_platform_screenshot_draft_batch(
     for request in requests:
         child_draft_id = uuid4().hex[:10]
         buyer = request.buyer
+        request_has_line = bool(request.project_name.strip() or request.tax_rate.strip() or request.tax_code.strip())
         line = InvoiceLine(
-            project_name=line_profile.project_name,
+            project_name=request.project_name or line_profile.project_name,
             amount_with_tax=request.amount_with_tax,
-            tax_rate=line_profile.tax_rate or ("1%" if line_profile.tax_code else ""),
-            tax_category=line_profile.tax_category,
-            tax_code=line_profile.tax_code,
-            unit=line_profile.unit or "项",
-            quantity="1",
-            coding_reference=_batch_line_coding_reference(line_profile),
+            tax_rate=request.tax_rate or line_profile.tax_rate or ("1%" if line_profile.tax_code else ""),
+            tax_category=request.tax_category or line_profile.tax_category,
+            tax_code=request.tax_code or line_profile.tax_code,
+            specification=request.specification or line_profile.specification,
+            unit=request.unit or line_profile.unit or "项",
+            quantity=request.quantity or "1",
+            coding_reference="视觉大模型识别，需人工复核" if request_has_line else _batch_line_coding_reference(line_profile),
         )
         child_note_parts = [note.strip(), f"来源图片：{request.source_name}"]
         if request.order_no:

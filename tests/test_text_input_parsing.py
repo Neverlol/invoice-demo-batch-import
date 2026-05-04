@@ -562,6 +562,65 @@ A4复印纸 10包 240元
         self.assertIn("来源图片：clear.png", child.note)
         self.assertEqual(child.lines[0].coding_reference, "批量模式待人工补全，需人工复核")
 
+    def test_small_force_batch_images_use_vision_llm_per_image(self):
+        files = [
+            FileStorage(stream=io.BytesIO(b"fake image one"), filename="01.png", content_type="image/png"),
+            FileStorage(stream=io.BytesIO(b"fake image two"), filename="02.png", content_type="image/png"),
+        ]
+        response_payload = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "客户名称": "黑龙江源速商贸有限公司",
+                                "纳税人识别号": "91230102MA1CDKE47Y",
+                                "地址电话": "",
+                                "开户行及账号": "",
+                                "项目列表": [
+                                    {
+                                        "项目名称": "餐费",
+                                        "规格型号": "",
+                                        "单位": "项",
+                                        "数量": "1",
+                                        "单价": "13.80",
+                                        "金额": "13.80",
+                                        "税率": "1%",
+                                    }
+                                ],
+                                "价税合计": "13.80",
+                                "备注": "",
+                            },
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ]
+        }
+
+        with patch.dict(
+            os.environ,
+            {
+                "TAX_INVOICE_LLM_PROVIDER": "mimo_openai",
+                "TAX_INVOICE_MIMO_API_KEY": "fake-key",
+                "TAX_INVOICE_LLM_VISION_EXTRACT": "auto",
+            },
+        ), patch.object(llm_adapter_module, "urlopen", return_value=_FakeHTTPResponse(response_payload)) as fake_urlopen:
+            batch = workbench_module.create_draft_from_workbench("", "", "少量批量截图", files, force_batch=True)
+
+        self.assertEqual(batch.__class__.__name__, "DraftBatch")
+        self.assertEqual(len(batch.items), 2)
+        self.assertEqual(batch.extract_strategy, "rules_plus_batch_vision")
+        self.assertEqual(batch.llm_provider, "mimo_openai")
+        self.assertEqual(fake_urlopen.call_count, 2)
+        first = workbench_module.load_draft(batch.items[0].draft_id)
+        self.assertEqual(first.extract_strategy, "rules_plus_batch_vision")
+        self.assertEqual(first.llm_provider, "mimo_openai")
+        self.assertEqual(first.buyer.name, "黑龙江源速商贸有限公司")
+        self.assertEqual(first.lines[0].project_name, "餐费")
+        self.assertEqual(first.lines[0].amount_with_tax, "13.80")
+        self.assertEqual(first.lines[0].tax_rate, "1%")
+
     def test_force_batch_mode_creates_one_child_draft_per_uploaded_image_even_without_ocr_fields(self):
         files = [
             FileStorage(stream=io.BytesIO(b"fake image one"), filename="01.png", content_type="image/png"),
