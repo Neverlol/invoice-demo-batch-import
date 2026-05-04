@@ -103,7 +103,7 @@ class LeanUIRenderingTest(unittest.TestCase):
         self.assertIn("识别当前税局主体 / 加载档案", html)
         self.assertIn("客户档案缓存", html)
         self.assertIn("尚未选择材料", html)
-        self.assertIn("正在上传并识别材料", html)
+        self.assertIn("正在生成草稿，请稍等", html)
         self.assertNotIn("placeholder-card", html)
         self.assertNotIn("生成后会在这里显示", html)
         self.assertNotIn("税局操作步骤", html)

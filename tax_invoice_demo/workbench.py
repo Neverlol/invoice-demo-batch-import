@@ -81,7 +81,7 @@ def create_draft_from_workbench(
     if force_batch and not platform_requests:
         platform_requests = _ensure_requests_cover_uploaded_images(extract_platform_invoice_requests(early_parse_source), attachments)
     if force_batch and platform_requests:
-        line_profile = seller_default_line_profile(company_name) or _blank_batch_line_profile()
+        line_profile = _blank_batch_line_profile() if batch_extract_strategy == "rules_plus_batch_vision" else (seller_default_line_profile(company_name) or _blank_batch_line_profile())
         return _create_platform_screenshot_draft_batch(
             batch_id=draft_id,
             case_id=case_id,
@@ -781,7 +781,7 @@ def _create_platform_screenshot_draft_batch(
     for request in requests:
         child_draft_id = uuid4().hex[:10]
         buyer = request.buyer
-        request_has_line = bool(request.project_name.strip() or request.tax_rate.strip() or request.tax_code.strip())
+        request_has_line = bool(request.project_name.strip() or request.amount_with_tax.strip() or request.tax_rate.strip() or request.tax_code.strip())
         line = InvoiceLine(
             project_name=request.project_name or line_profile.project_name,
             amount_with_tax=request.amount_with_tax,
@@ -799,6 +799,13 @@ def _create_platform_screenshot_draft_batch(
         if request.email:
             child_note_parts.append(f"邮箱：{request.email}")
         child_note = "；".join(part for part in child_note_parts if part)
+        if request_has_line:
+            line = enrich_invoice_lines(
+                [line],
+                raw_text=request.source_excerpt or raw_text,
+                note=child_note,
+                preserve_existing_tax_rate=True,
+            )[0]
         child_issues = _build_draft_issues(
             company_name=company_name,
             raw_text=request.source_excerpt or raw_text,

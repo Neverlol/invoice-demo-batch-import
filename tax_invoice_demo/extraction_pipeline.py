@@ -228,7 +228,17 @@ def _buyer_from_llm_payload(payload: dict) -> BuyerInfo:
 
 def _lines_from_llm_payload(payload: dict) -> list[InvoiceLine]:
     lines: list[InvoiceLine] = []
-    for item in payload.get("项目列表", []):
+    top_level_amount = str(
+        payload.get("价税合计", "")
+        or payload.get("开票金额", "")
+        or payload.get("含税金额", "")
+        or payload.get("金额", "")
+        or ""
+    ).strip()
+    items = payload.get("项目列表", [])
+    if isinstance(items, dict):
+        items = [items]
+    for item in items:
         if not isinstance(item, dict):
             continue
         line = InvoiceLine(
@@ -236,9 +246,16 @@ def _lines_from_llm_payload(payload: dict) -> list[InvoiceLine]:
             specification=str(item.get("规格型号", "") or "").strip(),
             unit=str(item.get("单位", "") or "").strip(),
             quantity=str(item.get("数量", "") or "").strip(),
-            unit_price=str(item.get("单价", "") or "").strip(),
-            amount_with_tax=str(item.get("金额", "") or "").strip(),
-            tax_rate=str(item.get("税率", "") or "").strip() or "3%",
+            unit_price=str(item.get("单价", "") or item.get("含税单价", "") or "").strip(),
+            amount_with_tax=str(
+                item.get("金额", "")
+                or item.get("含税金额", "")
+                or item.get("开票金额", "")
+                or item.get("价税合计", "")
+                or (top_level_amount if len(items) == 1 else "")
+                or ""
+            ).strip(),
+            tax_rate=str(item.get("税率", "") or item.get("税点", "") or "").strip() or "3%",
             tax_code=str(item.get("税收编码", "") or item.get("税收分类编码", "") or item.get("商品和服务税收编码", "") or "").strip(),
         )
         if line.project_name or line.amount_with_tax:

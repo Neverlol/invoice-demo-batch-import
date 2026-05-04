@@ -38,12 +38,21 @@ if (createDraftForm) {
   createDraftForm.addEventListener("submit", () => {
     const button = createDraftForm.querySelector("[data-submit-button]");
     const status = createDraftForm.querySelector("[data-submit-status]");
+    const fileInput = createDraftForm.querySelector("[data-file-input]");
+    const batchMode = createDraftForm.querySelector('input[name="batch_mode"]');
+    const files = Array.from(fileInput?.files || []);
+    const imageFiles = files.filter((file) => /\.(png|jpe?g|webp|bmp|gif)$/i.test(file.name || ""));
+    const willUseLlm = files.length > 0 && (!batchMode?.checked || (imageFiles.length > 0 && imageFiles.length <= 5));
     if (button) {
       button.disabled = true;
-      button.textContent = "正在生成草稿…";
+      button.textContent = willUseLlm ? "正在通过大模型识别…" : "正在生成草稿…";
     }
     if (status) {
       status.hidden = false;
+      status.textContent = willUseLlm
+        ? "正在通过大模型识别图片和文件信息，请稍等。完成后请继续复核购买方、税号、金额和项目。"
+        : "正在用本地规则整理草稿，请稍等。";
+      status.classList.toggle("uses-llm", willUseLlm);
     }
   });
 }

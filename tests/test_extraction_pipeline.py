@@ -342,6 +342,35 @@ class ExtractionPipelineTest(unittest.TestCase):
         self.assertEqual(outcome.strategy, "rules_plus_llm")
         self.assertEqual(outcome.llm_provider, "minimax_openai")
 
+    def test_llm_single_line_uses_top_level_amount_when_line_amount_is_missing(self):
+        os.environ["TAX_INVOICE_LLM_PROVIDER"] = "minimax"
+        os.environ["TAX_INVOICE_LLM_API_KEY"] = "fake-key"
+        content = json.dumps(
+            {
+                "客户名称": "黑龙江源速商贸有限公司",
+                "纳税人识别号": "91230102MA1CDKE47Y",
+                "地址电话": "",
+                "开户行及账号": "",
+                "项目列表": [{"项目名称": "餐费", "规格型号": "", "单位": "项", "数量": "1", "单价": "", "金额": "", "税率": "1%"}],
+                "价税合计": "13.80",
+                "备注": "",
+            },
+            ensure_ascii=False,
+        )
+
+        with patch.object(llm_adapter_module, "urlopen", return_value=_FakeHTTPResponse({"choices": [{"message": {"content": content}}]})):
+            outcome = extract_invoice_structured_data(
+                raw_text="",
+                note="",
+                document_text="平台截图 OCR 文本",
+                ocr_text="",
+                force_llm_review=True,
+            )
+
+        self.assertEqual(outcome.strategy, "rules_plus_llm")
+        self.assertEqual(outcome.lines[0].project_name, "餐费")
+        self.assertEqual(outcome.lines[0].amount_with_tax, "13.80")
+
     def test_fast_draft_skips_blocking_llm_when_rules_are_strong(self):
         os.environ["TAX_INVOICE_LLM_PROVIDER"] = "minimax"
         os.environ["TAX_INVOICE_LLM_API_KEY"] = "fake-key"

@@ -621,6 +621,60 @@ A4复印纸 10包 240元
         self.assertEqual(first.lines[0].amount_with_tax, "13.80")
         self.assertEqual(first.lines[0].tax_rate, "1%")
 
+    def test_batch_vision_does_not_use_seller_default_when_llm_line_is_incomplete(self):
+        _seed_history_profile_row(
+            company_name="吉林省风生水起商贸有限公司",
+            buyer_name="历史购买方",
+            buyer_tax_id="91210102MABWM3X12T",
+            project_name="A4复印纸",
+            tax_category="纸制品",
+            tax_code="1060105020000000000",
+            tax_rate="3%",
+        )
+        files = [FileStorage(stream=io.BytesIO(b"fake food image"), filename="08.jpg", content_type="image/jpeg")]
+        response_payload = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "客户名称": "黑龙江源速商贸有限公司",
+                                "纳税人识别号": "91230102MA1CDKE47Y",
+                                "地址电话": "",
+                                "开户行及账号": "",
+                                "项目列表": [{"项目名称": "", "规格型号": "", "单位": "项", "数量": "1", "单价": "", "金额": "", "税率": "1%"}],
+                                "价税合计": "13.80",
+                                "备注": "",
+                            },
+                            ensure_ascii=False,
+                        )
+                    }
+                }
+            ]
+        }
+
+        with patch.dict(
+            os.environ,
+            {
+                "TAX_INVOICE_LLM_PROVIDER": "mimo_openai",
+                "TAX_INVOICE_MIMO_API_KEY": "fake-key",
+                "TAX_INVOICE_LLM_VISION_EXTRACT": "auto",
+            },
+        ), patch.object(llm_adapter_module, "urlopen", return_value=_FakeHTTPResponse(response_payload)):
+            batch = workbench_module.create_draft_from_workbench(
+                "吉林省风生水起商贸有限公司",
+                "",
+                "少量餐饮平台截图",
+                files,
+                force_batch=True,
+            )
+
+        child = workbench_module.load_draft(batch.items[0].draft_id)
+        self.assertEqual(child.lines[0].amount_with_tax, "13.80")
+        self.assertEqual(child.lines[0].project_name, "")
+        self.assertEqual(child.lines[0].tax_category, "")
+        self.assertNotEqual(child.lines[0].project_name, "A4复印纸")
+
     def test_force_batch_mode_creates_one_child_draft_per_uploaded_image_even_without_ocr_fields(self):
         files = [
             FileStorage(stream=io.BytesIO(b"fake image one"), filename="01.png", content_type="image/png"),
