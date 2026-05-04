@@ -43,7 +43,7 @@ from tax_invoice_batch_demo.lean_workbench import (
 )
 from tax_invoice_demo import workbench as workbench_module
 from tax_invoice_demo.case_events import execution_record_summary, record_case_event
-from tax_invoice_demo.customer_profiles import PROFILE_CACHE_PATH, profile_cache_summary, profile_counts_for_seller
+from tax_invoice_demo.customer_profiles import PROFILE_CACHE_PATH, profile_cache_summary, profile_counts_for_seller, seller_default_line_profile
 from tax_invoice_demo.models import BuyerInfo, DraftBatchItem, InvoiceLine
 from tax_invoice_demo.sync_service import schedule_background_customer_profile_pull, schedule_background_rule_pull
 from tax_invoice_demo.taxonomy_search import search_taxonomy
@@ -387,7 +387,13 @@ def batch_detail(batch_id: str):
     if batch is None:
         abort(404)
     export = export_batch_template(batch_id)
-    return render_template("lean_batch.html", batch=batch, export=export, batch_rows=_batch_sheet_rows(batch))
+    return render_template(
+        "lean_batch.html",
+        batch=batch,
+        export=export,
+        batch_rows=_batch_sheet_rows(batch),
+        line_recommendation=_batch_line_recommendation(batch),
+    )
 
 
 @app.post("/batches/<batch_id>/save")
@@ -397,7 +403,14 @@ def save_batch_sheet(batch_id: str):
         abort(404)
     _save_batch_sheet_form(batch, request.form)
     export = export_batch_template(batch_id)
-    return render_template("lean_batch.html", batch=batch, export=export, batch_rows=_batch_sheet_rows(batch), saved=True)
+    return render_template(
+        "lean_batch.html",
+        batch=batch,
+        export=export,
+        batch_rows=_batch_sheet_rows(batch),
+        line_recommendation=_batch_line_recommendation(batch),
+        saved=True,
+    )
 
 
 @app.get("/batches/<batch_id>/download-template")
@@ -416,7 +429,14 @@ def execute_batch(batch_id: str):
         abort(404)
     export = export_batch_template(batch_id)
     if export["error_count"]:
-        return render_template("lean_batch.html", batch=batch, export=export, batch_rows=_batch_sheet_rows(batch), run_blocked=True), 400
+        return render_template(
+            "lean_batch.html",
+            batch=batch,
+            export=export,
+            batch_rows=_batch_sheet_rows(batch),
+            line_recommendation=_batch_line_recommendation(batch),
+            run_blocked=True,
+        ), 400
     cdp_endpoint = request.form.get("cdp_endpoint", "http://127.0.0.1:9222")
     subject_check = _check_tax_subject_before_submit(
         expected_seller=batch.company_name,
@@ -430,6 +450,7 @@ def execute_batch(batch_id: str):
             batch=batch,
             export=export,
             batch_rows=_batch_sheet_rows(batch),
+            line_recommendation=_batch_line_recommendation(batch),
             run_blocked=True,
             run_block_reason=subject_check["message"],
         ), 400
@@ -505,6 +526,29 @@ def _normalize_subject_name(value: str) -> str:
     text = (value or "").split("/", 1)[0]
     text = re.sub(r"[0-9A-Z]{15,20}", "", text.upper())
     return "".join(ch for ch in text if ch.isalnum() or "\u4e00" <= ch <= "\u9fff")
+
+
+def _batch_line_recommendation(batch) -> dict[str, str] | None:
+    """Return an optional seller-level line recommendation for operator-triggered batch import.
+
+    This is deliberately not auto-applied: the operator must confirm the batch uses the same category before
+    importing it into Sheet 2.
+    """
+    profile = seller_default_line_profile(batch.company_name or "")
+    if profile is None:
+        return None
+    if not (profile.project_name or profile.tax_category or profile.tax_code or profile.tax_rate):
+        return None
+    return {
+        "project_name": profile.project_name,
+        "tax_category": profile.tax_category,
+        "tax_code": profile.tax_code,
+        "tax_rate": profile.tax_rate,
+        "unit": profile.unit or "项",
+        "quantity": profile.quantity or "1",
+        "source": profile.matched_source,
+    }
+
 
 
 def _batch_sheet_rows(batch):
@@ -586,6 +630,8 @@ def _save_batch_sheet_form(batch, form):
         line.tax_rate = _form_list_value(form, "tax_rate", index) or line.tax_rate
         line.unit = _form_list_value(form, "unit", index) or line.unit
         line.quantity = _form_list_value(form, "quantity", index) or line.quantity
+        if form.get("batch_recommendation_applied") == "1" and (line.project_name or line.tax_category or line.tax_code):
+            line.coding_reference = "批量页一键导入推荐，需人工复核"
         if draft.lines:
             draft.lines[0] = line
         else:

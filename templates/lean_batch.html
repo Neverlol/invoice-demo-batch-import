@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>批量模板 {{ batch.batch_id }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-assistant-copy') }}">
+    <script defer src="{{ url_for('static', filename='lean.js', v='20260504-batch-recommendation') }}"></script>
   </head>
   <body class="operator-body">
     {% set ns = namespace(review=0, ready=0) %}
@@ -52,10 +53,32 @@
         {% endif %}
 
         <form method="post" action="{{ url_for('save_batch_sheet', batch_id=batch.batch_id) }}" id="batch-sheet-form" class="stack" style="margin-top:22px">
+          <input type="hidden" name="batch_recommendation_applied" value="0" data-batch-recommendation-applied>
           <div class="card">
             <div class="card-head"><div><h2>整批处理</h2><p>请先保存本页修改并重新校验，再下载或上传同一个税局批量模板。</p></div><span class="badge {% if export.error_count %}error{% elif ns.review %}warn{% else %}ok{% endif %}">{% if export.error_count %}有阻断{% elif ns.review %}待补全{% else %}可上传{% endif %}</span></div>
             <div class="actions" style="justify-content:flex-start"><button class="btn" type="submit">保存本批修改 / 重新校验</button><a class="btn primary" href="{{ url_for('download_batch_template', batch_id=batch.batch_id) }}">下载本批税局 Excel</a></div>
           </div>
+
+          {% if line_recommendation %}
+          <div class="card recommendation-card">
+            <div class="card-head"><div><h2>推荐明细</h2><p>如果确认本批发票都是同一类项目，可以把销售方常用项目一键导入到 Sheet 2；金额、购买方和税号不会被改动。</p></div><span class="badge info">需你确认</span></div>
+            <div class="notice">推荐：{{ line_recommendation.project_name or '未记录项目' }} / {{ line_recommendation.tax_category or '未记录分类' }} / {{ line_recommendation.tax_code or '未记录编码' }} / {{ line_recommendation.tax_rate or '未记录税率' }}。来源：{{ line_recommendation.source or '销售方历史档案' }}。</div>
+            <div class="actions" style="justify-content:flex-start;margin-top:14px">
+              <button class="btn" type="button" data-apply-batch-recommendation
+                data-project-name="{{ line_recommendation.project_name }}"
+                data-tax-category="{{ line_recommendation.tax_category }}"
+                data-tax-code="{{ line_recommendation.tax_code }}"
+                data-tax-rate="{{ line_recommendation.tax_rate }}"
+                data-unit="{{ line_recommendation.unit }}"
+                data-quantity="{{ line_recommendation.quantity }}">一键导入品类明细及税收编码</button>
+              <small data-batch-recommendation-status>导入后请保存并重新校验。</small>
+            </div>
+          </div>
+          {% else %}
+          <div class="card recommendation-card">
+            <div class="card-head"><div><h2>推荐明细</h2><p>当前没有可直接推荐的销售方常用项目。你可以先在 Sheet 2 填好一行，再复制到其它行。</p></div><span class="badge neutral">暂无推荐</span></div>
+          </div>
+          {% endif %}
 
           <div class="card">
             <div class="card-head"><div><h2>Sheet 1：发票基本信息</h2><p>一行代表一张发票；缺失或不确定的字段会高亮，方便你补全。</p></div><span class="badge warn">{{ ns.review }} 项待复核</span></div>
@@ -75,7 +98,7 @@
           </div>
 
           <div class="card">
-            <div class="card-head"><div><h2>Sheet 2：发票明细信息</h2><p>请集中核对项目名称、税收分类、税收编码和税率。</p></div><span class="badge info">规则 / 档案推荐</span></div>
+            <div class="card-head"><div><h2>Sheet 2：发票明细信息</h2><p>请集中核对项目名称、税收分类、税收编码和税率；如果本批项目一致，可先用上方推荐一键导入。</p></div><span class="badge info">规则 / 档案推荐</span></div>
             <div class="table-wrap"><table class="sheet-table"><thead><tr><th>#</th><th>项目名称</th><th>税收分类</th><th>税收编码</th><th>税率</th><th>单位</th><th>数量</th><th>推荐来源</th></tr></thead><tbody>
               {% for row in batch_rows %}
                 <tr class="{% if row.has_issues %}row-needs-review{% endif %}">
@@ -103,7 +126,7 @@
         </form>
 
         <section class="card" style="margin-top:18px">
-          <div class="card-head"><div><h2>Sheet 3：待补全 / 异常项</h2><p>请先处理红色阻断错误，再处理黄色建议项；高级编辑只是备用入口。</p></div><span class="badge {% if ns.review %}warn{% else %}ok{% endif %}">{{ ns.review }} 项需处理</span></div>
+          <div class="card-head"><div><h2>Sheet 3：待补全 / 异常项</h2><p>这是本批检查清单，不是开票表。请按提示回到 Sheet 1 / Sheet 2 补字段；高级编辑只是备用入口。</p></div><span class="badge {% if ns.review %}warn{% else %}ok{% endif %}">{{ ns.review }} 项需处理</span></div>
           <div class="table-wrap"><table class="sheet-table"><thead><tr><th>#</th><th>来源</th><th>状态</th><th>提示</th><th>备用入口</th></tr></thead><tbody>
             {% for row in batch_rows %}
               <tr class="{% if row.has_issues %}row-needs-review{% endif %}"><td>{{ row.index }}</td><td>{{ row.source_name or row.draft_id }}</td><td>{% if row.has_issues %}<span class="badge warn">待修补</span>{% else %}<span class="badge ok">可入模板</span>{% endif %}</td><td>{% if row.issues %}{% for issue in row.issues[:3] %}<p class="issue-line">{{ issue }}</p>{% endfor %}{% else %}<p>暂无异常。</p>{% endif %}</td><td><a href="{{ url_for('draft_detail', draft_id=row.draft_id) }}">高级编辑</a></td></tr>

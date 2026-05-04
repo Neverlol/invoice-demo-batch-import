@@ -170,6 +170,37 @@ if (applyAllButton) {
   });
 }
 
+const batchRecommendationButton = document.querySelector("[data-apply-batch-recommendation]");
+if (batchRecommendationButton) {
+  batchRecommendationButton.addEventListener("click", () => {
+    const fieldMap = {
+      project_name: batchRecommendationButton.dataset.projectName || "",
+      tax_category: batchRecommendationButton.dataset.taxCategory || "",
+      tax_code: batchRecommendationButton.dataset.taxCode || "",
+      tax_rate: batchRecommendationButton.dataset.taxRate || "",
+      unit: batchRecommendationButton.dataset.unit || "",
+      quantity: batchRecommendationButton.dataset.quantity || "",
+    };
+    Object.entries(fieldMap).forEach(([name, value]) => {
+      if (!value) {
+        return;
+      }
+      document.querySelectorAll(`input[name="${name}"]`).forEach((input) => {
+        input.value = value;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    });
+    const appliedInput = document.querySelector("[data-batch-recommendation-applied]");
+    if (appliedInput) {
+      appliedInput.value = "1";
+    }
+    const status = document.querySelector("[data-batch-recommendation-status]");
+    if (status) {
+      status.textContent = "已导入到 Sheet 2，请保存本批修改并重新校验。";
+    }
+  });
+}
+
 const taxonomyPicker = document.querySelector("[data-taxonomy-picker]");
 if (taxonomyPicker) {
   const queryInput = taxonomyPicker.querySelector("[data-taxonomy-query]");
