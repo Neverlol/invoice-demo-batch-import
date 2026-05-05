@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>智能开票助手｜产品使用说明</title>
+  <title>智能开票助手｜产品交付说明</title>
   <style>
     :root {
       --bg: #f6f7fb;
@@ -49,6 +49,84 @@
       box-shadow: var(--shadow);
     }
     .hero-card { padding: 34px; }
+    .product-mark {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+    .product-logo {
+      width: 54px;
+      height: 54px;
+      border-radius: 16px;
+      box-shadow: 0 14px 30px rgba(15, 23, 42, .18);
+      background: #000;
+    }
+    .product-name strong { display: block; font-size: 18px; }
+    .product-name span { color: var(--muted); font-size: 13px; }
+    .value-strip {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 18px;
+    }
+    .value-pill {
+      background: rgba(248, 250, 252, .92);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 12px;
+    }
+    .value-pill strong { display: block; font-size: 15px; }
+    .value-pill span { display: block; color: var(--muted); font-size: 12px; line-height: 1.45; margin-top: 4px; }
+    .feature-showcase {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+    .feature-card {
+      border: 1px solid rgba(37, 99, 235, .12);
+      background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+      border-radius: 20px;
+      padding: 18px;
+      min-height: 174px;
+    }
+    .feature-card .mini-icon {
+      width: 38px; height: 38px;
+      border-radius: 12px;
+      display: grid; place-items: center;
+      background: var(--blue-2);
+      color: var(--blue);
+      font-weight: 900;
+      margin-bottom: 10px;
+    }
+    .evolution-bar {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 16px;
+    }
+    .evolution-step {
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: 16px;
+      padding: 14px;
+      min-height: 116px;
+    }
+    .evolution-step span { color: #93c5fd; font-size: 12px; font-weight: 900; }
+    .evolution-step strong { display: block; margin: 6px 0 4px; }
+    .evolution-step small { color: #cbd5e1; line-height: 1.45; }
+    .contact-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin-top: 18px;
+      padding: 14px 16px;
+      border: 1px solid rgba(37, 99, 235, .22);
+      border-radius: 16px;
+      background: linear-gradient(90deg, #eff6ff, #f8fafc);
+    }
     .eyebrow {
       display: inline-flex;
       align-items: center;
@@ -211,11 +289,12 @@
     .check::before { content: "✓"; color: var(--green); font-weight: 900; margin-right: 8px; }
     .footer { margin-top: 34px; color: var(--muted); text-align: center; font-size: 13px; }
     @media (max-width: 900px) {
-      .hero, .grid-2, .grid-3, .grid-4, .toc, .flow { grid-template-columns: 1fr; }
+      .hero, .grid-2, .grid-3, .grid-4, .toc, .flow, .value-strip, .feature-showcase, .evolution-bar { grid-template-columns: 1fr; }
       .flow .node:not(:last-child)::after { content: "↓"; right: 50%; top: auto; bottom: -18px; }
       .mock-body { grid-template-columns: 1fr; }
       .mock-side { display: none; }
       .checklist { grid-template-columns: 1fr; }
+      .contact-banner { align-items: flex-start; flex-direction: column; }
     }
     @media print {
       body { background: #fff; }
@@ -230,34 +309,66 @@
   <main class="page">
     <section class="hero">
       <div class="hero-card">
-        <span class="eyebrow">智能开票助手｜现场版产品说明</span>
-        <h1>把客户开票材料整理成可复核的发票草稿</h1>
-        <p class="lead">这套工具会帮您把客户发来的文字、截图、表格或 PDF 整理成发票草稿和税局批量模板。如果您负责日常开票，它可以减少重复录入；如果您负责现场管理，它可以让每一步处理、复核和更新都有记录可查。</p>
-        <div class="badges">
-          <span class="badge b-blue">单张草稿</span>
-          <span class="badge b-green">批量截图</span>
-          <span class="badge b-purple">智能赋码</span>
-          <span class="badge b-orange">执行记录</span>
-          <span class="badge b-red">不自动最终开具</span>
+        <div class="product-mark">
+          <img class="product-logo" src="../static/invoice_assistant_logo.svg" alt="智能开票助手 Logo">
+          <div class="product-name"><strong>智能开票助手</strong><span>Invoice Assistant｜沈阳现场测试版</span></div>
         </div>
-        <p class="meta">建议浏览器：Microsoft Edge｜工作台地址：<strong>http://127.0.0.1:5012</strong>｜适用现场：沈阳种子客户测试</p>
+        <span class="eyebrow">产品交付说明｜测试版本</span>
+        <h1>越用越懂您业务的开票工作台</h1>
+        <p class="lead">这不是一个简单的录入工具，而是一套会沉淀客户档案、学习开票习惯、统计处理效率，并通过大模型辅助赋码的开票作业系统。它会帮您把客户发来的文字、截图、表格或 PDF 整理成可复核的发票草稿和税局批量模板。</p>
+        <div class="value-strip">
+          <div class="value-pill"><strong>减少重复录入</strong><span>客户信息、历史开票项目和常用税编可持续沉淀。</span></div>
+          <div class="value-pill"><strong>降低赋码压力</strong><span>本地规则 + 大模型智能赋码 + 手动赋码库查询。</span></div>
+          <div class="value-pill"><strong>看见效率变化</strong><span>记录从材料到草稿、上传、预览的端到端处理数据。</span></div>
+        </div>
+        <div class="badges">
+          <span class="badge b-blue">客户档案建立</span>
+          <span class="badge b-green">简称识别</span>
+          <span class="badge b-purple">智能赋码</span>
+          <span class="badge b-orange">效率统计</span>
+          <span class="badge b-red">人工最终确认</span>
+        </div>
+        <p class="meta">建议浏览器：Microsoft Edge｜工作台地址：<strong>http://127.0.0.1:5012</strong>｜当前为测试版本；如有任何疑问或现场问题，可以随时联系我。</p>
       </div>
       <div class="hero-visual panel">
         <div class="terminal">
           <div class="terminal-top"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
-<pre><span class="prompt">&gt;</span> start invoice assistant
-<span class="ok">✓</span> 打开税局专用浏览器
-<span class="ok">✓</span> 启动本地开票工作台
-<span class="ok">✓</span> 加载主体与客户档案
-<span class="warn">!</span> 请复核购买方、税号、金额、税率、税收编码
+<pre><span class="prompt">&gt;</span> invoice assistant value
+<span class="ok">✓</span> 客户档案：简称识别、历史购买方和常用项目沉淀
+<span class="ok">✓</span> 智能赋码：本地规则优先，未命中再由大模型推荐
+<span class="ok">✓</span> 手动赋码库：可随时查询官方税收分类编码
+<span class="ok">✓</span> 数据统计：记录开票数量、处理效率、执行结果
+<span class="warn">!</span> 测试版本：任何疑问或现场问题可随时联系
 
-工作台流程：
-材料输入 → 生成草稿 → 智能赋码 → 下载税局 Excel → 上传税局 → 预览确认</pre>
+产品会随使用进化：
+客户档案 → 常用规则 → 效率统计 → 更懂本地业务的开票系统</pre>
         </div>
       </div>
     </section>
 
+    <section class="panel section" id="value">
+      <span class="eyebrow">为什么这套系统值得持续试用</span>
+      <h2>从“开一张票”进化到“沉淀一套客户开票能力”</h2>
+      <p>每一次真实使用，都不只是完成一次开票动作。系统会把客户、项目、赋码、执行结果和效率数据逐步沉淀下来，让后续开票更快、更稳、更容易复核。</p>
+      <div class="feature-showcase">
+        <div class="feature-card"><div class="mini-icon">档</div><h3>客户档案建立</h3><p>系统会围绕客户建立购买方、销售方、常用项目和历史明细档案。后续遇到同一客户或相似简称时，可以更快召回历史信息，减少重复录入。</p></div>
+        <div class="feature-card"><div class="mini-icon">简</div><h3>客户简称识别</h3><p>面对日常口头简称、平台简称或不完整客户名称，系统可以结合档案辅助识别，帮助您更快定位正确购买方和历史开票信息。</p></div>
+        <div class="feature-card"><div class="mini-icon">导</div><h3>客户历史开票一键导入</h3><p>对重复开票、周期性客户或常用项目，可一键导入客户历史开票信息，快速带出项目、税率、税收编码等内容，再由现场人员复核确认。</p></div>
+        <div class="feature-card"><div class="mini-icon">码</div><h3>大模型智能赋码</h3><p>本地规则优先，未命中时可对所有未命中明细一次性发起智能赋码。大模型只在官方候选池内推荐，并标记“需人工复核”。</p></div>
+        <div class="feature-card"><div class="mini-icon">库</div><h3>内置手动赋码库</h3><p>即使不使用大模型，也可以在草稿页手动查询官方税收分类编码，选中后批量填入税目大类、税收编码和税率。</p></div>
+        <div class="feature-card"><div class="mini-icon">数</div><h3>端到端数据统计</h3><p>系统记录材料识别、草稿生成、模板下载、税局上传、预览结果等过程，后续可统计开票数量、处理效率、失败原因和改进空间。</p></div>
+      </div>
+      <div class="evolution-bar">
+        <div class="evolution-step"><span>第 1 阶段</span><strong>减少重复录入</strong><small>把文字、截图、表格整理成草稿，统一复核后再进税局。</small></div>
+        <div class="evolution-step"><span>第 2 阶段</span><strong>形成客户档案</strong><small>沉淀购买方、简称、历史项目、常用税率和税收编码。</small></div>
+        <div class="evolution-step"><span>第 3 阶段</span><strong>优化赋码与复核</strong><small>本地规则、官方赋码库和大模型协同，降低查码压力。</small></div>
+        <div class="evolution-step"><span>持续使用后</span><strong>成为经营数据资产</strong><small>看到开票数量、效率、退回原因和客户结构变化。</small></div>
+      </div>
+      <div class="contact-banner"><div><strong>当前为测试版本</strong><p>如果您在安装、使用、赋码、批量开票或更新过程中有任何疑问，可以随时联系我。现场反馈会继续进入产品优化。</p></div><span class="badge b-blue">持续迭代中</span></div>
+    </section>
+
     <nav class="toc">
+      <a href="#value">00 产品优势</a>
       <a href="#install">01 安装准备</a>
       <a href="#start">02 每天启动</a>
       <a href="#single">03 单张开票</a>
