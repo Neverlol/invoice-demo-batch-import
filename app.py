@@ -45,6 +45,7 @@ from tax_invoice_batch_demo.lean_workbench import (
 from tax_invoice_demo import workbench as workbench_module
 from tax_invoice_demo.case_events import execution_record_summary, record_case_event
 from tax_invoice_demo.customer_profiles import PROFILE_CACHE_PATH, profile_cache_summary, profile_counts_for_seller, seller_default_line_profile
+from tax_invoice_demo.llm_adapter import diagnose_llm_config
 from tax_invoice_demo.models import BuyerInfo, DraftBatchItem, InvoiceLine
 from tax_invoice_demo.sync_service import schedule_background_customer_profile_pull, schedule_background_rule_pull
 from tax_invoice_demo.taxonomy_search import search_taxonomy
@@ -192,9 +193,12 @@ def smart_code_draft(draft_id: str):
         target_lines = list(draft.lines)
     else:
         target_lines = [line for line in draft.lines if not line.tax_category or not line.tax_code]
+    before_refs = [line.coding_reference or "" for line in target_lines]
+    before_codes = [(line.tax_category or "", line.tax_code or "") for line in target_lines]
     if target_lines:
         smart_code_invoice_lines(target_lines)
         workbench_module.save_draft(draft)
+    smart_code_result = _smart_code_result_message(scope, target_lines, before_refs, before_codes)
     export = export_draft_template(draft)
     failure_report = load_failure_report_for_draft(draft_id, draft=draft)
     return render_template(
@@ -207,9 +211,99 @@ def smart_code_draft(draft_id: str):
         saved=True,
         success_recorded=False,
         applied_failure_repairs=None,
+        smart_code_result=smart_code_result,
         needs_rebuild=False,
         current_draft_id=draft.draft_id,
     )
+
+
+def _smart_code_result_message(
+    scope: str,
+    target_lines: list[InvoiceLine],
+    before_refs: list[str],
+    before_codes: list[tuple[str, str]],
+) -> dict[str, str | int]:
+    total = len(target_lines)
+    scope_label = "全部明细复核" if scope == "all" else "智能赋码"
+    if scope.startswith("line:"):
+        scope_label = "本行智能复核"
+    if total == 0:
+        return {
+            "level": "ok",
+            "title": "当前没有需要智能赋码的明细",
+            "message": "所有明细已有税收分类和税收编码，请继续核对发票内容。",
+            "total": 0,
+            "smart": 0,
+            "failed": 0,
+            "changed": 0,
+        }
+
+    after_refs = [line.coding_reference or "" for line in target_lines]
+    after_codes = [(line.tax_category or "", line.tax_code or "") for line in target_lines]
+    smart_count = sum(1 for ref in after_refs if ref.startswith("智能推荐"))
+    failed_count = sum(
+        1
+        for ref in after_refs
+        if ref.startswith("智能赋码调用失败")
+        or ref.startswith("智能赋码返回结果未命中")
+        or ref.startswith("待智能赋码")
+    )
+    changed_count = sum(
+        1
+        for before_ref, after_ref, before_code, after_code in zip(before_refs, after_refs, before_codes, after_codes)
+        if before_ref != after_ref or before_code != after_code
+    )
+    if failed_count:
+        return {
+            "level": "warn",
+            "title": f"{scope_label}已完成，{failed_count} 行需要人工确认",
+            "message": f"本次处理 {total} 行，生成智能推荐 {smart_count} 行；仍有 {failed_count} 行未得到可用推荐，请查看明细中的状态。",
+            "total": total,
+            "smart": smart_count,
+            "failed": failed_count,
+            "changed": changed_count,
+        }
+    if smart_count:
+        return {
+            "level": "ok",
+            "title": f"{scope_label}已完成",
+            "message": f"本次处理 {total} 行，生成智能推荐 {smart_count} 行；请继续核对税收分类和税收编码。",
+            "total": total,
+            "smart": smart_count,
+            "failed": failed_count,
+            "changed": changed_count,
+        }
+    if changed_count:
+        return {
+            "level": "ok",
+            "title": f"{scope_label}已完成",
+            "message": f"本次处理 {total} 行，已更新 {changed_count} 行赋码信息；请继续核对发票内容。",
+            "total": total,
+            "smart": smart_count,
+            "failed": failed_count,
+            "changed": changed_count,
+        }
+
+    diagnostic = diagnose_llm_config()
+    if not diagnostic.ready:
+        return {
+            "level": "warn",
+            "title": f"{scope_label}未生成新的推荐",
+            "message": "当前明细保留原有赋码结果；智能赋码配置未就绪，请检查大模型配置后再试。",
+            "total": total,
+            "smart": smart_count,
+            "failed": failed_count,
+            "changed": changed_count,
+        }
+    return {
+        "level": "ok",
+        "title": f"{scope_label}已完成",
+        "message": f"本次复核 {total} 行，当前赋码结果未发生变化；请继续人工核对发票内容。",
+        "total": total,
+        "smart": smart_count,
+        "failed": failed_count,
+        "changed": changed_count,
+    }
 
 
 @app.post("/drafts/<draft_id>/failure")

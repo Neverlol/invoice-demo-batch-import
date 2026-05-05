@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -138,14 +139,105 @@ def focus_tax_window(cdp_endpoint: str = "http://127.0.0.1:9222") -> dict:
                     return {"status": "error", "error": "未识别到税局窗口。请确认 Edge 已打开电子税务局页面。"}
                 page.bring_to_front()
                 try:
+                    session = page.context.new_cdp_session(page)
+                    window_info = session.send("Browser.getWindowForTarget")
+                    session.send(
+                        "Browser.setWindowBounds",
+                        {"windowId": window_info["windowId"], "bounds": {"windowState": "normal"}},
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
                     page.evaluate("() => window.focus()")
                 except Exception:  # noqa: BLE001
                     pass
-                return {"status": "ok", "url": page.url, "title": title, "score": score}
+                os_focused = _focus_windows_browser_window(title)
+                return {"status": "ok", "url": page.url, "title": title, "score": score, "os_focused": os_focused}
             finally:
                 browser.close()
     except Exception as exc:  # noqa: BLE001
         return {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+
+
+def _focus_windows_browser_window(title_hint: str) -> bool:
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except Exception:  # noqa: BLE001
+        return False
+
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    SW_RESTORE = 9
+    ASFW_ANY = -1
+    title_hint = (title_hint or "").strip()
+    title_tokens = [token for token in (title_hint, "电子税务局", "发票", "税局") if token]
+    candidates: list[tuple[int, int, str]] = []
+
+    EnumWindowsProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def callback(hwnd, _lparam):
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length <= 0:
+            return True
+        buffer = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buffer, length + 1)
+        title = buffer.value or ""
+        lowered = title.lower()
+        if "edge" not in lowered and "chrome" not in lowered:
+            return True
+        score = 0
+        for token in title_tokens:
+            if token and token in title:
+                score += 20 if token == title_hint else 8
+        if "microsoft edge" in lowered:
+            score += 5
+        if score > 0:
+            candidates.append((score, int(hwnd), title))
+        return True
+
+    try:
+        user32.EnumWindows(EnumWindowsProc(callback), 0)
+    except Exception:  # noqa: BLE001
+        return False
+    if not candidates:
+        return False
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    hwnd = candidates[0][1]
+    try:
+        user32.AllowSetForegroundWindow(ASFW_ANY)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        foreground = user32.GetForegroundWindow()
+        current_thread = kernel32.GetCurrentThreadId()
+        target_thread = user32.GetWindowThreadProcessId(hwnd, None)
+        foreground_thread = user32.GetWindowThreadProcessId(foreground, None) if foreground else 0
+        if target_thread:
+            user32.AttachThreadInput(current_thread, target_thread, True)
+        if foreground_thread:
+            user32.AttachThreadInput(current_thread, foreground_thread, True)
+        user32.ShowWindow(hwnd, SW_RESTORE)
+        user32.BringWindowToTop(hwnd)
+        user32.SetForegroundWindow(hwnd)
+        user32.SetActiveWindow(hwnd)
+        user32.SetFocus(hwnd)
+        try:
+            user32.SwitchToThisWindow(hwnd, True)
+        except Exception:  # noqa: BLE001
+            pass
+        if foreground_thread:
+            user32.AttachThreadInput(current_thread, foreground_thread, False)
+        if target_thread:
+            user32.AttachThreadInput(current_thread, target_thread, False)
+        return user32.GetForegroundWindow() == hwnd
+    except Exception:  # noqa: BLE001
+        return False
 
 
 class BatchImportRunner:

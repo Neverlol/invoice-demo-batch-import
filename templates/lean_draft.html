@@ -51,7 +51,8 @@
           <div class="env-item"><span>明细</span><strong>{{ draft.lines|length }} 行</strong><small>你修正后可辅助下次推荐</small></div>
         </section>
 
-        {% if saved %}<section class="banner ok"><p>修改已保存。</p></section>{% endif %}
+        {% if saved and not smart_code_result %}<section class="banner ok"><p>修改已保存。</p></section>{% endif %}
+        {% if smart_code_result %}<section class="banner {{ 'alert' if smart_code_result.level == 'warn' else 'ok' }}"><strong>{{ smart_code_result.title }}</strong><p>{{ smart_code_result.message }}</p></section>{% endif %}
         {% if success_recorded %}<section class="banner ok"><p>已记录本次开票结果。</p></section>{% endif %}
         {% if run_blocked %}<section class="banner alert"><p>{{ run_block_reason or '当前草稿还有错误，暂不能发起开票。' }}</p></section>{% endif %}
         {% if applied_failure_repairs and applied_failure_repairs.applied_count %}<section class="banner ok"><p>已应用 {{ applied_failure_repairs.applied_count }} 条税局建议，请确认后保存修改；再次上传前必须人工确认。</p></section>{% endif %}

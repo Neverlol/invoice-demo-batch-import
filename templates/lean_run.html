@@ -164,7 +164,7 @@
                 {% elif run.status == 'done' %}
                   <div class="hy-panel-item"><span class="hy-badge ok">进入预览</span><p>税局预览已准备好。点击下方按钮，查看本次发票预览结果。</p></div>
                   <div class="hy-panel-item"><span class="hy-badge warn">请核对内容</span><p>请在税局页面核对购买方、金额、税额和明细，确认无误后再开具。</p></div>
-                  <form method="post" action="{{ url_for('run_focus_tax_window', run_id=run.run_id) }}"><button class="primary" type="submit">进入税局预览</button></form>
+                  <form method="post" action="{{ url_for('run_focus_tax_window', run_id=run.run_id) }}" data-tax-preview-form><button class="primary" type="submit">进入税局预览</button></form>
                 {% else %}
                   <div class="hy-panel-item"><span class="hy-badge info">执行中</span><p>保持 Edge 与税局页面打开，等待税局返回处理结果。</p></div>
                 {% endif %}
@@ -177,5 +177,28 @@
         </div>
       </section>
     </main>
+    <script>
+      document.querySelectorAll('[data-tax-preview-form]').forEach((form) => {
+        form.addEventListener('submit', (event) => {
+          if (!window.fetch) return;
+          event.preventDefault();
+          const button = form.querySelector('button[type="submit"]');
+          if (button) button.disabled = true;
+          fetch(form.action, { method: 'POST', body: new FormData(form), credentials: 'same-origin' })
+            .then((response) => {
+              if (!response.ok) {
+                return response.text().then((html) => {
+                  document.open();
+                  document.write(html);
+                  document.close();
+                });
+              }
+              return null;
+            })
+            .catch(() => form.submit())
+            .finally(() => { if (button) button.disabled = false; });
+        });
+      });
+    </script>
   </body>
 </html>
