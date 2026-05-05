@@ -231,8 +231,8 @@
     <section class="hero">
       <div class="hero-card">
         <span class="eyebrow">智能开票助手｜现场版产品说明</span>
-        <h1>从客户材料到税局预览页的开票工作台</h1>
-        <p class="lead">这份说明给现场助理 / 开票人员使用。目标是：把客户材料整理成发票草稿，复核税收编码，生成税局模板，上传税局并进入“预览发票”页面。</p>
+        <h1>把客户开票材料整理成可复核的发票草稿</h1>
+        <p class="lead">这套工具会帮您把客户发来的文字、截图、表格或 PDF 整理成发票草稿和税局批量模板。如果您负责日常开票，它可以减少重复录入；如果您负责现场管理，它可以让每一步处理、复核和更新都有记录可查。</p>
         <div class="badges">
           <span class="badge b-blue">单张草稿</span>
           <span class="badge b-green">批量截图</span>
@@ -271,9 +271,9 @@
     <section class="panel section">
       <h2>产品边界先说明</h2>
       <div class="grid-3">
-        <div class="card"><div class="icon">✓</div><h3>系统负责</h3><p>整理材料、生成草稿、辅助赋码、生成税局批量模板、记录执行过程。</p></div>
-        <div class="card"><div class="icon" style="background:var(--orange-2);color:var(--orange)">👤</div><h3>助理负责</h3><p>复核购买方、税号、金额、税率、税收编码，以及税局预览页结果。</p></div>
-        <div class="card"><div class="icon" style="background:var(--red-2);color:var(--red)">!</div><h3>不会自动做</h3><p>系统不会自动最终开具。到“预览发票”后，必须由客户 / 助理人工确认。</p></div>
+        <div class="card"><div class="icon">✓</div><h3>工具可以帮您做什么</h3><p>整理材料、生成草稿、辅助赋码、生成税局批量模板、记录执行过程。</p></div>
+        <div class="card"><div class="icon" style="background:var(--orange-2);color:var(--orange)">👤</div><h3>哪些地方需要您确认</h3><p>购买方、税号、金额、税率、税收编码，以及税局预览页结果。</p></div>
+        <div class="card"><div class="icon" style="background:var(--red-2);color:var(--red)">!</div><h3>哪些事情不会自动完成</h3><p>系统不会自动最终开具。到“预览发票”后，必须由现场人员按客户确认结果再操作。</p></div>
       </div>
     </section>
 
@@ -375,7 +375,7 @@
     <section id="smart-coding" class="panel section">
       <span class="eyebrow">04｜智能赋码</span>
       <h2>草稿先成型，赋码再二次处理</h2>
-      <p>为了让助理尽快进入可复核页面，首页“生成草稿”阶段不会因为税收编码大模型等待而卡住。系统先用本地规则快速生成草稿；本地未命中的明细，在草稿页统一处理。</p>
+      <p>为了让您尽快看到可复核的草稿，首页“生成草稿”阶段不会因为税收编码大模型等待而卡住。系统先用本地规则快速生成草稿；本地未命中的明细，在草稿页统一处理。</p>
       <div class="grid-4">
         <div class="card"><h3>本地命中</h3><p>规则库能确定时直接填入分类和编码。</p><span class="badge b-green">速度最快</span></div>
         <div class="card"><h3>未命中规则</h3><p>显示“未命中规则”，不静默空白。</p><span class="badge b-orange">待处理</span></div>
@@ -387,7 +387,7 @@
         <tbody>
           <tr><td>未命中规则 N 行</td><td>点击“智能赋码未命中 N 行”</td><td>多行合并成一次请求，通常比逐行点击更省成本、更少等待。</td></tr>
           <tr><td>某一行失败</td><td>点击该行“重试本行”</td><td>只重试失败行，避免整批重复调用。</td></tr>
-          <tr><td>本地已命中但助理不放心</td><td>点击“复核本行”</td><td>用于定证检验，不是日常必点流程。</td></tr>
+          <tr><td>本地已命中但您觉得需要再确认</td><td>点击“复核本行”</td><td>用于定证检验，不是日常必点流程。</td></tr>
           <tr><td>全部都想复核</td><td>点击“智能复核全部明细”</td><td>会增加等待和调用成本，只在必要时使用。</td></tr>
         </tbody>
       </table>
@@ -405,7 +405,7 @@
         <div class="step"><div><h3>批量明细填充</h3><p>如果这一批都是同类项目，例如餐费，可在“批量明细填充”中确认项目、税收编码和税率，再一键导入所有明细行。</p></div></div>
       </div>
       <table>
-        <thead><tr><th>区域</th><th>用途</th><th>助理重点</th></tr></thead>
+        <thead><tr><th>区域</th><th>用途</th><th>复核重点</th></tr></thead>
         <tbody>
           <tr><td>Sheet 1：发票基本信息</td><td>购买方、税号、金额、票种等</td><td>重点核对购买方名称、税号、含税金额。</td></tr>
           <tr><td>Sheet 2：发票明细信息</td><td>项目、税率、税收编码、数量、单位等</td><td>批量明细填充后仍需复核。</td></tr>
