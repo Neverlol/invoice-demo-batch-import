@@ -16,6 +16,7 @@ from flask import Flask, abort, jsonify, redirect, render_template, request, sen
 from tax_invoice_batch_demo.batch_runner import (
     BatchImportRunner,
     BatchRunResult,
+    focus_tax_window,
     inspect_tax_browser,
     open_tax_portal,
 )
@@ -751,27 +752,40 @@ def run_detail(run_id: str):
     return render_template("lean_run.html", run=run)
 
 
+@app.post("/runs/<run_id>/focus-tax-window")
+def run_focus_tax_window(run_id: str):
+    with RUN_LOCK:
+        run = RUNS.get(run_id)
+    if run is None:
+        abort(404)
+    cdp_endpoint = str(run.get("cdp_endpoint") or "http://127.0.0.1:9222")
+    result = focus_tax_window(cdp_endpoint=cdp_endpoint)
+    with RUN_LOCK:
+        current = RUNS.get(run_id)
+        if current is None:
+            abort(404)
+        if result.get("status") == "ok":
+            notice = "已进入税局预览；请核对发票内容。"
+            error = ""
+        else:
+            notice = ""
+            error = result.get("error") or "未能进入税局预览。请确认 Edge 税局页面仍然打开。"
+        RUNS[run_id] = {**current, "focus_notice": notice, "error": error}
+        run = RUNS[run_id]
+    status_code = 200 if result.get("status") == "ok" else 400
+    return render_template("lean_run.html", run=run), status_code
+
+
 @app.post("/runs/<run_id>/record-success")
 def run_record_success(run_id: str):
     with RUN_LOCK:
         run = RUNS.get(run_id)
     if run is None:
         abort(404)
-    if run.get("status") != "done":
-        return render_template("lean_run.html", run={**run, "error": "只有税局执行完成后，才能记录成功。"}), 400
-    draft_or_batch_id = str(run.get("draft_id") or "")
-    draft = load_draft(draft_or_batch_id) if draft_or_batch_id else None
-    if draft is not None:
-        record_success_to_ledger(draft)
-    else:
-        batch = load_draft_batch(draft_or_batch_id) if draft_or_batch_id else None
-        if batch is None:
-            abort(404)
-        record_batch_success_to_ledger(batch)
-    with RUN_LOCK:
-        RUNS[run_id] = {**RUNS[run_id], "success_recorded": True}
-        run = RUNS[run_id]
-    return render_template("lean_run.html", run=run)
+    return render_template(
+        "lean_run.html",
+        run={**run, "error": "请进入税局预览，并在税局页面完成后续操作。"},
+    ), 400
 
 
 @app.get("/runs/<run_id>/failure-download")
@@ -918,6 +932,7 @@ def _queue_batch_run(template_path: Path, cdp_endpoint: str, *, draft_id: str = 
             "error": "",
             "template_path": str(template_path),
             "draft_id": draft_id or _draft_id_from_template_path(template_path),
+            "cdp_endpoint": cdp_endpoint,
             "downloaded_failure_path": "",
             "failure_report": None,
             "preview_clicked": False,

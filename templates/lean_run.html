@@ -34,8 +34,8 @@
         </nav>
 
         <section class="sidebar-panel">
-          <h3>安全边界</h3>
-          <p>运行期间保持已登录的 Edge 和税局页面开启。系统只到预览，不自动最终开具。</p>
+          <h3>操作提示</h3>
+          <p>运行期间保持已登录的 Edge 和税局页面开启。执行完成后，在税局页面核对预览内容。</p>
         </section>
       </aside>
 
@@ -64,16 +64,16 @@
             <strong>{% if run.status == 'done' %}已处理完成{% elif run.status == 'failed' %}税局校验未通过{% elif run.status == 'running' %}正在执行{% else %}排队中{% endif %}</strong>
             <small>{{ run.current_step or 'queued' }}</small>
           </div>
-          <div class="hy-env-item"><span>浏览器连接</span><strong>CDP Edge</strong><small>保持 9222 税局窗口开启</small></div>
+          <div class="hy-env-item"><span>税局页面</span><strong>Edge 已连接</strong><small>保持税局页面开启</small></div>
           <div class="hy-env-item"><span>失败明细</span><strong>{% if run.failure_report %}已解析{% elif run.downloaded_failure_path %}已下载{% else %}暂无{% endif %}</strong><small>失败后回填草稿</small></div>
-          <div class="hy-env-item"><span>确认边界</span><strong>只到预览页</strong><small>最终开具人工确认</small></div>
+          <div class="hy-env-item"><span>预览确认</span><strong>税局页面核对</strong><small>确认后再开具</small></div>
         </section>
 
         {% if run.error %}<section class="banner alert"><p>{{ run.error }}</p></section>{% endif %}
+        {% if run.focus_notice %}<section class="banner ok"><p>{{ run.focus_notice }}</p></section>{% endif %}
         {% if run.status == "done" %}
-          <section class="banner ok"><p>执行完成。{% if run.preview_clicked %}系统已尝试进入预览发票页。{% else %}未自动点击预览，请在税局页面手动查看。{% endif %}</p></section>
+          <section class="banner ok"><p>执行完成。{% if run.preview_clicked %}税局预览已准备好，请核对发票内容。{% else %}请打开税局页面查看预览结果。{% endif %}</p></section>
         {% endif %}
-        {% if run.success_recorded %}<section class="banner ok"><p>已记录到执行记录。</p></section>{% endif %}
         {% if run.status == "failed" %}
           <section class="banner alert">
             {% if run.downloaded_failure_path %}
@@ -92,7 +92,7 @@
                   <span class="card-icon">进</span>
                   <div>
                     <h2>当前进度与下一步</h2>
-                    <p>{% if run.status == 'failed' %}本次未通过税局校验，请先处理失败原因，确认后再重新发起开票。{% elif run.status == 'done' %}本次已到达处理完成状态，请只预览核对，不要自动最终开具。{% else %}正在执行，请保持 Edge 和税局页面打开。{% endif %}</p>
+                    <p>{% if run.status == 'failed' %}本次未通过税局校验，请先处理失败原因，确认后再重新发起开票。{% elif run.status == 'done' %}本次已到达税局处理完成状态，请进入税局预览核对发票内容。{% else %}正在执行，请保持 Edge 和税局页面打开。{% endif %}</p>
                   </div>
                 </div>
               </header>
@@ -162,16 +162,16 @@
                   {% endif %}
                   <a class="secondary button-like" href="{{ url_for('draft_detail', draft_id=run.draft_id) }}">回到本次草稿修改</a>
                 {% elif run.status == 'done' %}
-                  <div class="hy-panel-item"><span class="hy-badge ok">核对预览</span><p>请在税局页面核对金额、税额、购买方和明细。</p></div>
-                  <div class="hy-panel-item"><span class="hy-badge warn">人工决策</span><p>系统不会点击最终开具；请你确认无误后，再记录成功。</p></div>
-                  <form method="post" action="{{ url_for('run_record_success', run_id=run.run_id) }}"><button class="primary" type="submit" {% if run.success_recorded %}disabled{% endif %}>{% if run.success_recorded %}已记录成功{% else %}已人工确认，记录为成功{% endif %}</button></form>
+                  <div class="hy-panel-item"><span class="hy-badge ok">进入预览</span><p>税局预览已准备好。点击下方按钮，查看本次发票预览结果。</p></div>
+                  <div class="hy-panel-item"><span class="hy-badge warn">请核对内容</span><p>请在税局页面核对购买方、金额、税额和明细，确认无误后再开具。</p></div>
+                  <form method="post" action="{{ url_for('run_focus_tax_window', run_id=run.run_id) }}"><button class="primary" type="submit">进入税局预览</button></form>
                 {% else %}
                   <div class="hy-panel-item"><span class="hy-badge info">执行中</span><p>保持 Edge 与税局页面打开，等待税局返回处理结果。</p></div>
                 {% endif %}
               </div>
             </section>
             <section class="hy-safe-boundary">
-              <strong>重要边界：</strong>系统只辅助上传模板并进入税局预览页，不会自动最终开具。请你在税局页面确认后，再决定是否最终开具。
+              <strong>下一步：</strong>进入税局预览后，请核对购买方、金额、税额和明细，确认无误后再开具。
             </section>
           </aside>
         </div>

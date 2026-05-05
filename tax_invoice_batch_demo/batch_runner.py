@@ -103,6 +103,51 @@ def open_tax_portal(
         return {"status": "error", "url": target_url, "error": f"{type(exc).__name__}: {exc}"}
 
 
+def focus_tax_window(cdp_endpoint: str = "http://127.0.0.1:9222") -> dict:
+    """Bring the existing tax-bureau tab to the front without clicking anything.
+
+    This is intentionally only a window/tab switch helper. The batch runner has
+    already navigated the tax site to the preview stage; this function must not
+    upload, preview-click, submit, or record anything.
+    """
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "error": f"Playwright 不可用: {type(exc).__name__}: {exc}"}
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.connect_over_cdp(cdp_endpoint)
+            try:
+                pages = [page for context in browser.contexts for page in context.pages]
+                if not pages:
+                    return {"status": "error", "error": "未找到 Edge 税局页面。请确认税局页面仍然打开。"}
+
+                ranked = []
+                for page in pages:
+                    title = _safe_title(page)
+                    text = _safe_body_text(page)
+                    score = _tax_page_score(page.url, title, text)
+                    if any(token in text for token in ("预览发票", "发票预览", "发票价税合计", "最终开具")):
+                        score += 80
+                    ranked.append((score, page, title))
+                ranked.sort(key=lambda item: item[0], reverse=True)
+                score, page, title = ranked[0]
+                if score <= 0:
+                    return {"status": "error", "error": "未识别到税局窗口。请确认 Edge 已打开电子税务局页面。"}
+                page.bring_to_front()
+                try:
+                    page.evaluate("() => window.focus()")
+                except Exception:  # noqa: BLE001
+                    pass
+                return {"status": "ok", "url": page.url, "title": title, "score": score}
+            finally:
+                browser.close()
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+
+
 class BatchImportRunner:
     """Best-effort CDP runner for the tax bureau batch-import page.
 
@@ -202,7 +247,7 @@ class BatchImportRunner:
             business_page = self._open_invoice_business_from_portal(page)
             if business_page is not page:
                 page = business_page
-                self._log("navigate", f"已切换到发票业务新窗口: {_page_label(page)}")
+                self._log("navigate", f"已进入发票业务页面: {_page_label(page)}")
                 subject = _extract_tax_subject(page)
                 if subject:
                     self._log("subject", f"发票业务页识别主体: {subject}")
