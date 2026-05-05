@@ -488,7 +488,7 @@
     <section id="smart-coding" class="panel section">
       <span class="eyebrow">04｜智能赋码</span>
       <h2>草稿先成型，赋码再二次处理</h2>
-      <p>为了让您尽快看到可复核的草稿，首页“生成草稿”阶段不会因为税收编码大模型等待而卡住。系统先用本地规则快速生成草稿；本地未命中的明细，在草稿页统一处理。</p>
+      <p>为了让您尽快看到可复核的草稿，首页“生成草稿”会先完成材料识别：文字、截图、表格或 PDF 仍按识别路由调用本地规则、OCR 或大模型。分离的是后面的“税收编码赋码”环节：生成草稿时先用本地规则匹配税收编码；没有匹配上或需要复核的明细，再到草稿页点击“智能赋码”二次处理。</p>
       <div class="grid-4">
         <div class="card"><h3>本地命中</h3><p>规则库能确定时直接填入分类和编码。</p><span class="badge b-green">速度最快</span></div>
         <div class="card"><h3>未命中规则</h3><p>显示“未命中规则”，不静默空白。</p><span class="badge b-orange">待处理</span></div>
