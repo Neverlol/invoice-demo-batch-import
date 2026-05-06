@@ -13,17 +13,18 @@ echo   Invoice Assistant - Install Private Config
 echo ========================================
 echo.
 echo This step installs MiMo, sync center, and cloud profile config.
-echo Please make sure this file exists:
-echo   _onsite_private_config\onsite_secrets.json
 echo.
 
-set "SECRET_DIR=%PROJECT_ROOT%\_onsite_private_config"
+set "SECRET_DIR=%PROJECT_ROOT%\_现场私密配置"
+if not exist "%SECRET_DIR%\onsite_secrets.json" set "SECRET_DIR=%PROJECT_ROOT%\_onsite_private_config"
 
 if not exist "%SECRET_DIR%\onsite_secrets.json" (
   echo Missing private config file:
+  echo   _现场私密配置\onsite_secrets.json
+  echo or:
   echo   _onsite_private_config\onsite_secrets.json
   echo.
-  echo Copy the private config folder into this project folder, then run this again.
+  echo Open _现场私密配置, copy onsite_secrets.template.json to onsite_secrets.json, fill the real keys, then run this again.
   pause
   exit /b 1
 )

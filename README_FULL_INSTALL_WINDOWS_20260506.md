@@ -35,52 +35,32 @@ test_materials\
 
 ## 2. 配置密钥文件
 
-### 2.1 创建私密配置目录
+### 2.1 编辑私密配置模板
 
-在安装根目录下创建：
-
-```text
-_现场私密配置
-```
-
-完整路径示例：
+完整安装包内已经带好模板目录：
 
 ```text
 C:\InvoiceAssistant\_现场私密配置\
 ```
 
-### 2.2 新建 onsite_secrets.json
-
-在 `_现场私密配置` 目录里新建：
+里面有：
 
 ```text
-onsite_secrets.json
+onsite_secrets.template.json
+00_复制模板并打开编辑.bat
 ```
 
-内容模板如下，填入真实值：
+推荐操作：
 
-```json
-{
-  "mimo_api_key": "在这里填真实 MiMo API Key",
-  "mimo_provider": "mimo_openai",
-  "mimo_region": "cn",
-  "mimo_endpoint": "https://api.xiaomimimo.com/v1/chat/completions",
-  "mimo_model": "mimo-v2-omni",
-  "mimo_timeout_seconds": 25,
-  "mimo_max_retries": 1,
-
-  "sync_endpoint": "http://39.106.111.126:5021/api/invoice/events",
-  "sync_token": "在这里填真实云端同步 token",
-  "sync_tenant": "liaoning-seed-20260506",
-  "sync_timeout_seconds": 8,
-
-  "rules_endpoint": "",
-  "profile_import_endpoint": "",
-  "customer_profiles_endpoint": "",
-
-  "delete_source_after_install": true
-}
+```text
+1. 进入 C:\InvoiceAssistant\_现场私密配置\
+2. 双击 00_复制模板并打开编辑.bat
+3. 脚本会把 onsite_secrets.template.json 复制为 onsite_secrets.json，并自动用记事本打开
+4. 只需要把里面的 MiMo API Key 和 sync token 替换成真实值
+5. 保存并关闭记事本
 ```
+
+不要手打 JSON，不要从聊天里复制整段模板。
 
 说明：
 
@@ -93,7 +73,7 @@ delete_source_after_install：建议 true，安装成功后自动删除 onsite_s
 
 如果现场暂时不需要云端同步，但安装器当前要求 sync 字段存在，可以先填专用测试 token；不要乱填公开字符串。
 
-### 2.3 安装私密配置
+### 2.2 安装私密配置
 
 双击：
 
