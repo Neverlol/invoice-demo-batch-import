@@ -24,7 +24,7 @@ if not exist "%~dp0_现场私密配置\onsite_secrets.json" (
   exit /b 1
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\install_onsite_secrets.ps1" -ProjectRoot "%~dp0"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\install_onsite_secrets.ps1" -ProjectRoot "%~dp0" -SecretDir "%~dp0_现场私密配置"
 if errorlevel 1 (
   echo.
   echo 私密配置安装失败，请联系技术人员。

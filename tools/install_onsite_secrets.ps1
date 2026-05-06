@@ -35,7 +35,13 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
 $ProjectRoot = (Resolve-Path $ProjectRoot).Path
 
 if ([string]::IsNullOrWhiteSpace($SecretDir)) {
-  $SecretDir = Join-Path $ProjectRoot "_onsite_private_config"
+  $ChineseSecretDir = Join-Path $ProjectRoot "_现场私密配置"
+  $AsciiSecretDir = Join-Path $ProjectRoot "_onsite_private_config"
+  if (Test-Path (Join-Path $ChineseSecretDir "onsite_secrets.json")) {
+    $SecretDir = $ChineseSecretDir
+  } else {
+    $SecretDir = $AsciiSecretDir
+  }
 }
 
 $secretPath = Join-Path $SecretDir "onsite_secrets.json"
