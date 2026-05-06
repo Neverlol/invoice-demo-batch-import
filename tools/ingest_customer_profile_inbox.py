@@ -564,10 +564,59 @@ def collect_history_rows(root: Path) -> list[HistoryRow]:
     return [row for row in rows if is_trusted_history_row(row)]
 
 
+def normalize_dedupe_text(value: str) -> str:
+    return re.sub(r"\s+", "", str(value or "")).strip().upper()
+
+
+def normalize_dedupe_date(value: str) -> str:
+    text = str(value or "").strip()
+    return text[:10]
+
+
+def history_row_dedupe_key(row: HistoryRow) -> tuple[str, ...]:
+    """Stable line-level key for repeated exports of the same tax history.
+
+    Re-exported customer history files often contain old invoice rows plus a few
+    new rows. File name or file hash is not enough: a changed Excel can contain
+    mostly duplicate lines. The active profile layer therefore deduplicates by
+    invoice-line business identity, not by source file.
+    """
+
+    return (
+        normalize_dedupe_text(row.seller_tax_id),
+        normalize_dedupe_text(row.seller_name),
+        normalize_dedupe_text(row.buyer_tax_id),
+        normalize_dedupe_text(row.buyer_name),
+        normalize_dedupe_text(row.serial),
+        normalize_dedupe_date(row.invoice_date),
+        normalize_dedupe_text(row.full_item_name or row.project_name),
+        normalize_dedupe_text(row.tax_code),
+        normalize_dedupe_text(row.tax_rate),
+        decimal_text(row.amount),
+        decimal_text(row.tax_amount),
+        decimal_text(row.amount_with_tax),
+    )
+
+
+def dedupe_history_rows(rows: list[HistoryRow]) -> tuple[list[HistoryRow], int]:
+    seen: set[tuple[str, ...]] = set()
+    unique_rows: list[HistoryRow] = []
+    duplicate_count = 0
+    for row in rows:
+        key = history_row_dedupe_key(row)
+        if key in seen:
+            duplicate_count += 1
+            continue
+        seen.add(key)
+        unique_rows.append(row)
+    return unique_rows, duplicate_count
+
+
 def rebuild_profiles(root: Path) -> dict[str, int]:
     profile_dir = root / PROFILE_DB_DIR
     profile_dir.mkdir(parents=True, exist_ok=True)
-    rows = collect_history_rows(root)
+    trusted_rows = collect_history_rows(root)
+    rows, duplicate_history_rows = dedupe_history_rows(trusted_rows)
     seller_groups: dict[tuple[str, str], list[HistoryRow]] = defaultdict(list)
     for row in rows:
         seller_groups[(row.seller_name, row.seller_tax_id)].append(row)
@@ -580,6 +629,8 @@ def rebuild_profiles(root: Path) -> dict[str, int]:
     write_overview_md(profile_dir / "客户档案总览.md", seller_groups)
     write_product_cache(PROJECT_ROOT / "output" / "workbench" / "tax_invoice_demo" / "客户档案缓存.json", seller_groups)
     return {
+        "trusted_history_rows_raw": len(trusted_rows),
+        "duplicate_history_rows": duplicate_history_rows,
         "trusted_history_rows": len(rows),
         "seller_count": len(seller_groups),
         "buyer_count": sum(len({(row.buyer_name, row.buyer_tax_id) for row in group}) for group in seller_groups.values()),
