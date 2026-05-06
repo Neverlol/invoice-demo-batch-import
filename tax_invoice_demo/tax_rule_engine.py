@@ -672,6 +672,47 @@ def _apply_local_safe_coding_hint(line: InvoiceLine) -> None:
     text = f"{line.project_name} {line.specification}".strip()
     if not text:
         return
+    if re.search(r"餐费|餐饮费|餐饮服务", text):
+        line.tax_category = line.tax_category or "餐饮服务"
+        line.tax_code = "3070401000000000000"
+        line.coding_reference = line.coding_reference or "本地餐饮规则，需人工复核: 餐饮服务 / 餐饮服务 / 3070401000000000000"
+        return
+    if re.search(r"签证费|签证服务", text):
+        line.tax_category = line.tax_category or "经纪代理服务"
+        line.tax_code = "3040802990000000000"
+        line.coding_reference = line.coding_reference or "本地出入境服务规则，需人工复核: 其他经纪代理服务 / 经纪代理服务 / 3040802990000000000"
+        return
+    if re.search(r"装卸搬运费|装卸费|搬运费", text):
+        line.tax_category = line.tax_category or "物流辅助服务"
+        line.tax_code = "3040408000000000000"
+        line.coding_reference = line.coding_reference or "本地物流辅助规则，需人工复核: 装卸搬运服务 / 物流辅助服务 / 3040408000000000000"
+        return
+    if re.search(r"物业管理|物业费|物业服务", text):
+        line.tax_category = line.tax_category or "企业管理服务"
+        line.tax_code = "3040801990000000000"
+        line.coding_reference = line.coding_reference or "本地物业规则，需人工复核: 其他企业管理服务 / 企业管理服务 / 3040801990000000000"
+        return
+    if re.search(r"住宿费|住宿服务|房费", text):
+        line.tax_category = line.tax_category or "住宿服务"
+        line.tax_code = "3070402000000000000"
+        line.coding_reference = line.coding_reference or "本地住宿规则，需人工复核: 住宿服务 / 住宿服务 / 3070402000000000000"
+        return
+    if re.search(r"直播服务费|直播服务|直播费", text):
+        line.tax_category = line.tax_category or "现代服务"
+        line.tax_code = "3049900000000000000"
+        line.coding_reference = line.coding_reference or "本地直播服务规则，需人工复核: 其他现代服务 / 现代服务 / 3049900000000000000"
+        return
+    if re.search(r"油烟机烟道清洗|烟道清洗|油烟机清洗", text):
+        line.tax_category = line.tax_category or "生活服务"
+        line.tax_code = "3079900000000000000"
+        line.coding_reference = line.coding_reference or "本地清洗服务规则，需人工复核: 其他生活服务 / 生活服务 / 3079900000000000000"
+        return
+    if re.search(r"玉米秸秆|秸秆", text):
+        line.tax_category = line.tax_category or "农副产品"
+        line.tax_code = "1010111010000000000"
+        line.tax_rate = "免税"
+        line.coding_reference = line.coding_reference or "本地农副产品规则，需人工复核: 玉米秸秆 / 农副产品 / 1010111010000000000 / 免税"
+        return
     if re.search(r"(维修费|维修服务|修理费|修理修配|汽车维修|车辆维修|汽修)", text):
         line.tax_category = line.tax_category or "劳务"
         line.tax_code = "2020000000000000000"

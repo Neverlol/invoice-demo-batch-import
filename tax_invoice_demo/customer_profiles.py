@@ -81,28 +81,52 @@ def apply_line_history_hints(
     buyer: BuyerInfo,
     raw_text: str = "",
 ) -> list[InvoiceLine]:
-    if not lines or not buyer.name.strip():
+    if not lines or not company_name.strip():
         return lines
-    rows = _profile_rows(company_name=company_name, buyer=buyer)
+    # 销售主体级历史项目本身就有价值：很多现场材料先能确认销售方和项目，
+    # 但图片/截图里的购买方可能遮挡。此时也允许按销售主体项目档案做“推荐”，
+    # 但所有历史推荐都保留“需人工复核”的说明，不做最终开具承诺。
+    buyer_filter = buyer if buyer.name.strip() or buyer.tax_id.strip() else None
+    rows = _profile_rows(company_name=company_name, buyer=buyer_filter)
     if not rows:
         return lines
     return [_apply_single_line_history_hint(line, rows, raw_text=raw_text) for line in lines]
 
 
 def _apply_single_line_history_hint(line: InvoiceLine, rows: list[dict[str, str]], *, raw_text: str) -> InvoiceLine:
-    # 历史档案在 P0 只处理“代理服务/服务费”这类弱简称；
-    # 明确项目名称仍交给客户规则 / 本地即时学习规则，避免历史记录覆盖已审核规则。
+    exact_match, conflict_note = _exact_line_history_match(line, rows)
+    if conflict_note:
+        _append_history_reference(line, conflict_note)
+        return line
+    if exact_match is not None:
+        return _apply_history_match_to_line(line, exact_match, exact=True)
+
+    # 弱简称（服务/服务费/代理等）再用相似历史兜底；明确项目名如果没有精确历史，
+    # 不让历史高频项目直接覆盖，避免“本行商品”被其它上下文项目污染。
     if not _is_weak_project_name(line.project_name):
         return line
     match = _match_line_history(line, rows, raw_text=raw_text)
     if match is None:
         return line
+    return _apply_history_match_to_line(line, match, exact=False)
 
-    line.project_name = match.project_name
+
+def _apply_history_match_to_line(line: InvoiceLine, match: LineHistoryMatch, *, exact: bool) -> InvoiceLine:
+    if exact and not line.tax_code:
+        line.project_name = match.project_name or line.project_name
+    elif not exact:
+        line.project_name = match.project_name or line.project_name
     if not line.tax_category and match.tax_category:
         line.tax_category = match.tax_category
     if not line.tax_code and match.tax_code:
         line.tax_code = match.tax_code
+    elif line.tax_code and match.tax_code and line.tax_code != match.tax_code:
+        _append_history_reference(
+            line,
+            "历史开票档案提示，需人工复核: "
+            f"{match.matched_source} 历史编码为 {match.tax_code}，当前编码为 {line.tax_code}",
+        )
+        return line
     if (not line.tax_rate or line.tax_rate == "3%") and match.tax_rate:
         line.tax_rate = match.tax_rate
     if not line.specification and match.specification and not _is_weak_project_name(match.specification):
@@ -111,16 +135,81 @@ def _apply_single_line_history_hint(line: InvoiceLine, rows: list[dict[str, str]
         line.unit = match.unit
     if not line.quantity:
         line.quantity = line.quantity or "1"
-    history_reference = (
-        "历史开票档案推荐，需人工复核: "
-        f"{match.matched_source} -> {match.tax_category or '未记录大类'}"
-        f" / {match.tax_code or '未记录编码'}"
+    prefix = "历史开票档案精确匹配" if exact else "历史开票档案推荐"
+    _append_history_reference(
+        line,
+        f"{prefix}，需人工复核: {match.matched_source} -> "
+        f"{match.tax_category or '未记录大类'} / {match.tax_code or '未记录编码'}"
+        f" / {match.tax_rate or '未记录税率'}",
     )
-    if not line.coding_reference:
-        line.coding_reference = history_reference
-    elif "历史开票档案推荐" not in line.coding_reference:
-        line.coding_reference = f"{line.coding_reference}; {history_reference}"
     return line
+
+
+def _exact_line_history_match(line: InvoiceLine, rows: list[dict[str, str]]) -> tuple[LineHistoryMatch | None, str]:
+    query = line.project_name.strip()
+    normalized_query = _normalize(query)
+    if not normalized_query:
+        return None, ""
+    exact_rows = [row for row in rows if _normalize(row.get("project_name", "")) == normalized_query and row.get("tax_code", "").strip()]
+    if not exact_rows:
+        return None, ""
+
+    variants: Counter[tuple[str, str, str, str, str, str]] = Counter()
+    latest_row_by_key: dict[tuple[str, str, str, str, str, str], dict[str, str]] = {}
+    for row in exact_rows:
+        key = (
+            row.get("project_name", "").strip(),
+            row.get("tax_category", "").strip(),
+            row.get("tax_code", "").strip(),
+            row.get("tax_rate", "").strip(),
+            row.get("unit", "").strip(),
+            row.get("specification", "").strip(),
+        )
+        weight = _safe_int(row.get("line_count", ""), default=1)
+        variants[key] += max(weight, 1)
+        latest_row_by_key[key] = row
+    if not variants:
+        return None, ""
+
+    code_rate_keys = {(key[2], key[3]) for key in variants if key[2]}
+    if len(code_rate_keys) > 1:
+        samples = sorted(
+            {f"{code or '未记录编码'} / {rate or '未记录税率'}" for code, rate in code_rate_keys}
+        )
+        return None, (
+            "历史开票档案存在多个编码/税率，需人工确认: "
+            f"{query} -> {'；'.join(samples[:4])}"
+        )
+
+    key, count = variants.most_common(1)[0]
+    row = latest_row_by_key[key]
+    return LineHistoryMatch(
+        project_name=key[0] or query,
+        tax_category=key[1],
+        tax_code=key[2],
+        tax_rate=key[3],
+        specification=key[5],
+        unit=key[4] or "项",
+        quantity=row.get("quantity", "").strip() or "1",
+        matched_source=key[0] or query,
+        confidence="high" if count >= 2 else "medium",
+    ), ""
+
+
+def _append_history_reference(line: InvoiceLine, reference: str) -> None:
+    if not reference:
+        return
+    if not line.coding_reference:
+        line.coding_reference = reference
+    elif reference not in line.coding_reference:
+        line.coding_reference = f"{line.coding_reference}; {reference}"
+
+
+def _safe_int(value: str, *, default: int = 0) -> int:
+    try:
+        return int(float(str(value or "").strip()))
+    except ValueError:
+        return default
 
 
 def _dominant_line_profile(rows: list[dict[str, str]]) -> LineHistoryMatch | None:
@@ -358,6 +447,8 @@ def _cached_line_to_row(seller_name: str, seller_tax_id: str, buyer_profile: dic
         "specification": str(line.get("specification") or "").strip(),
         "quantity": str(line.get("quantity") or "1").strip(),
         "amount_with_tax": str(line.get("amount_with_tax") or "").strip(),
+        "line_count": str(line.get("line_count") or "1").strip(),
+        "full_item_name": str(line.get("full_item_name") or "").strip(),
         "invoice_status": "正常",
         "invoice_direction": "蓝字",
         "coding_reference": "云端客户档案推荐，需人工复核",

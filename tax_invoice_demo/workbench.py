@@ -1855,6 +1855,17 @@ def _build_draft_issues(
                 + "、".join(special_tax_indexes)
                 + " 行命中了免税/不征税口径，请在执行前再次确认客户场景与票面口径一致。"
             )
+        history_conflict_indexes = [
+            str(index)
+            for index, line in enumerate(lines, start=1)
+            if "历史开票档案存在多个编码/税率" in (line.coding_reference or "")
+        ]
+        if history_conflict_indexes:
+            issues.append(
+                "第 "
+                + "、".join(history_conflict_indexes)
+                + " 行在客户历史档案中存在多个编码或税率，请按本次客户要求人工确认后再执行。"
+            )
     if special_business == "机动车":
         issues.append("系统从材料中识别出机动车线索，建议在草稿里确认 `特定业务 = 机动车` 后再执行。")
     return issues
