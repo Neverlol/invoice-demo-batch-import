@@ -7,7 +7,7 @@
 项目目录：
 
 ```text
-C:\invoice-assistant-staging-19d4851\
+C:\InvoiceAssistant\
 ```
 
 更新相关目录会由脚本自动创建：
@@ -25,7 +25,7 @@ VERSION.txt              # 当前已应用版本
 2. 把收到的最新更新包复制到：
 
 ```text
-C:\invoice-assistant-staging-19d4851\updates\latest.zip
+C:\InvoiceAssistant\updates\latest.zip
 ```
 
 3. 双击：

@@ -11,7 +11,7 @@
 建议把完整安装包解压到：
 
 ```text
-C:\invoice-assistant-staging-19d4851
+C:\InvoiceAssistant
 ```
 
 解压后应看到：
@@ -46,7 +46,7 @@ _现场私密配置
 完整路径示例：
 
 ```text
-C:\invoice-assistant-staging-19d4851\_现场私密配置\
+C:\InvoiceAssistant\_现场私密配置\
 ```
 
 ### 2.2 新建 onsite_secrets.json
@@ -175,7 +175,7 @@ http://127.0.0.1:5012
 PowerShell 进入安装目录：
 
 ```powershell
-cd C:\invoice-assistant-staging-19d4851
+cd C:\InvoiceAssistant
 ```
 
 检查 LLM 配置：
