@@ -40,27 +40,27 @@ test_materials\
 完整安装包内已经带好模板目录：
 
 ```text
-C:\InvoiceAssistant\_现场私密配置\
+C:\InvoiceAssistant\_onsite_private_config\
 ```
 
 里面有：
 
 ```text
 onsite_secrets.template.json
-00_复制模板并打开编辑.bat
+00_COPY_TEMPLATE_AND_EDIT.bat
 ```
 
 推荐操作：
 
 ```text
-1. 进入 C:\InvoiceAssistant\_现场私密配置\
-2. 双击 00_复制模板并打开编辑.bat
+1. 进入 C:\InvoiceAssistant\_onsite_private_config\
+2. 双击 00_COPY_TEMPLATE_AND_EDIT.bat
 3. 脚本会把 onsite_secrets.template.json 复制为 onsite_secrets.json，并自动用记事本打开
 4. 只需要把里面的 MiMo API Key 和 sync token 替换成真实值
 5. 保存并关闭记事本
 ```
 
-不要手打 JSON，不要从聊天里复制整段模板。
+如果你使用配套私密配置包，则不需要手动编辑模板；直接把私密配置包解压到 C:\InvoiceAssistant 后运行 01_INSTALL_PRIVATE_CONFIG.bat。
 
 说明：
 
@@ -335,12 +335,33 @@ output\workbench\tax_invoice_demo\客户档案缓存.json
 
 ---
 
-## 7. 安全提醒
+## 7. 后续调整策略
+
+本次沈阳现场以完整安装包为主，不在现场叠加小更新包。
+
+如果后续还有调整，重新输出新的完整安装包和配套私密配置包。
+现场处理方式：
+
+```text
+1. 关闭当前工作台；
+2. 备份或删除旧的 C:\InvoiceAssistant；
+3. 解压新的完整安装包到 C:\InvoiceAssistant；
+4. 解压配套私密配置包到 C:\InvoiceAssistant；
+5. 运行 01_INSTALL_PRIVATE_CONFIG.bat；
+6. 需要时重新运行 00_FIRST_INSTALL.bat；
+7. 启动系统验证。
+```
+
+一句话：现场拿一套新的完整包重新落成，不靠小更新包叠补丁。
+
+---
+
+## 8. 安全提醒
 
 ```text
 不要把 llm_client.local.json 发给客户或群里。
 不要把 sync_client.local.json 发给客户或群里。
-不要把 _现场私密配置 发给客户或群里。
+不要把 _onsite_private_config 发给客户或群里。
 不要把填写真实 key 的 onsite_secrets.json 放进公开安装包。
 ```
 
