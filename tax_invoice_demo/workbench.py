@@ -970,7 +970,8 @@ def _create_workbook_draft_batch(
 ) -> DraftBatch:
     batch_issues = [
         "当前材料命中了“多个 Excel 明细 -> 多张草稿”规则；系统已按每个 Excel 文件生成一张待复核草稿。",
-        "Excel 明细由本地表格规则解析；发票图片/补充文字只作为购买方、票种、税点和备注参考。请重点复核购买方、税率和每张表是否应单独开票。",
+        "每个 Excel 文件对应一张草稿，Excel 内多行会作为这张发票的多行明细；请确认客户是否确实要求按这些表分别开票。",
+        "Excel 明细由本地表格规则解析，并会优先参考客户历史档案赋码；发票图片/补充文字只作为购买方、票种、税点和备注参考。",
     ]
     if not buyer.name.strip():
         batch_issues.append("未可靠识别购买方名称；请在批量草稿中补全后再执行。")
@@ -987,9 +988,16 @@ def _create_workbook_draft_batch(
             target_dir=child_dir,
             attachments=attachments,
         )
-        enriched_lines = enrich_invoice_lines(
+        parse_source = f"{raw_text}\n{unit.source_excerpt}"
+        history_lines = _apply_history_profile_to_lines(
             unit.lines,
-            raw_text=f"{raw_text}\n{unit.source_excerpt}",
+            company_name=company_name,
+            buyer=buyer,
+            parse_source=parse_source,
+        )
+        enriched_lines = enrich_invoice_lines(
+            history_lines,
+            raw_text=parse_source,
             note=note,
             preserve_existing_tax_rate=True,
         )
@@ -1855,16 +1863,16 @@ def _build_draft_issues(
                 + "、".join(special_tax_indexes)
                 + " 行命中了免税/不征税口径，请在执行前再次确认客户场景与票面口径一致。"
             )
-        history_conflict_indexes = [
+        history_category_review_indexes = [
             str(index)
             for index, line in enumerate(lines, start=1)
-            if "历史开票档案存在多个编码/税率" in (line.coding_reference or "")
+            if "历史同项目还出现过" in (line.coding_reference or "")
         ]
-        if history_conflict_indexes:
+        if history_category_review_indexes:
             issues.append(
                 "第 "
-                + "、".join(history_conflict_indexes)
-                + " 行在客户历史档案中存在多个编码或税率，请按本次客户要求人工确认后再执行。"
+                + "、".join(history_category_review_indexes)
+                + " 行在客户历史档案中还出现过其它品类或编码；系统已按最高频历史口径推荐，请人工复核本次项目归类。"
             )
     if special_business == "机动车":
         issues.append("系统从材料中识别出机动车线索，建议在草稿里确认 `特定业务 = 机动车` 后再执行。")
