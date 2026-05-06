@@ -29,30 +29,49 @@ function Int-OrDefault([object]$value, [int]$defaultValue) {
   }
 }
 
+function Get-ChineseSecretFolderName {
+  # Build "_现场私密配置" without non-ASCII source text for Windows PowerShell 5.1 encoding safety.
+  return "_" + ([char]0x73B0) + ([char]0x573A) + ([char]0x79C1) + ([char]0x5BC6) + ([char]0x914D) + ([char]0x7F6E)
+}
+
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
   $ProjectRoot = Split-Path -Parent $PSScriptRoot
 }
-$ProjectRoot = (Resolve-Path $ProjectRoot).Path
+
+# Defend against cmd.exe quoted trailing-backslash argument issues.
+$ProjectRoot = [string]$ProjectRoot
+$ProjectRoot = $ProjectRoot.Trim().Trim('"')
+$ProjectRoot = $ProjectRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+$ProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path
 
 if ([string]::IsNullOrWhiteSpace($SecretDir)) {
-  $ChineseSecretDir = Join-Path $ProjectRoot "_现场私密配置"
   $AsciiSecretDir = Join-Path $ProjectRoot "_onsite_private_config"
-  if (Test-Path (Join-Path $ChineseSecretDir "onsite_secrets.json")) {
+  $ChineseSecretDir = Join-Path $ProjectRoot (Get-ChineseSecretFolderName)
+  if (Test-Path -LiteralPath (Join-Path $AsciiSecretDir "onsite_secrets.json")) {
+    $SecretDir = $AsciiSecretDir
+  } elseif (Test-Path -LiteralPath (Join-Path $ChineseSecretDir "onsite_secrets.json")) {
     $SecretDir = $ChineseSecretDir
   } else {
     $SecretDir = $AsciiSecretDir
   }
+} else {
+  $SecretDir = [string]$SecretDir
+  $SecretDir = $SecretDir.Trim().Trim('"')
+  $SecretDir = $SecretDir.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
 }
 
 $secretPath = Join-Path $SecretDir "onsite_secrets.json"
 
-if (-not (Test-Path $secretPath)) {
-  Write-Host "Missing private config file: $secretPath" -ForegroundColor Red
+if (-not (Test-Path -LiteralPath $secretPath)) {
+  Write-Host "Missing private config file." -ForegroundColor Red
+  Write-Host "Expected one of:" -ForegroundColor Yellow
+  Write-Host (Join-Path (Join-Path $ProjectRoot "_onsite_private_config") "onsite_secrets.json") -ForegroundColor Yellow
+  Write-Host (Join-Path (Join-Path $ProjectRoot (Get-ChineseSecretFolderName)) "onsite_secrets.json") -ForegroundColor Yellow
   exit 1
 }
 
 try {
-  $cfg = Get-Content -Path $secretPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  $cfg = Get-Content -LiteralPath $secretPath -Raw -Encoding UTF8 | ConvertFrom-Json
 } catch {
   Write-Host "Failed to parse onsite_secrets.json: $($_.Exception.Message)" -ForegroundColor Red
   exit 1
@@ -124,10 +143,10 @@ foreach ($path in @($llmPath, $syncPath)) {
 [Environment]::SetEnvironmentVariable("TAX_INVOICE_SYNC_ENDPOINT", [string]$cfg.sync_endpoint, "User")
 
 if ($cfg.delete_source_after_install -eq $true) {
-  Remove-Item -Path $secretPath -Force
-  Write-Host "Deleted source private config file: $secretPath" -ForegroundColor Yellow
+  Remove-Item -LiteralPath $secretPath -Force
+  Write-Host "Deleted source private config file." -ForegroundColor Yellow
 } else {
-  Write-Host "Source private config file remains at: $secretPath" -ForegroundColor Yellow
+  Write-Host "Source private config file remains at private config folder." -ForegroundColor Yellow
   Write-Host "After onsite installation is verified, delete the private config folder manually." -ForegroundColor Yellow
 }
 
