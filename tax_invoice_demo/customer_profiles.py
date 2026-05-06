@@ -94,8 +94,11 @@ def apply_line_history_hints(
 
 
 def _apply_single_line_history_hint(line: InvoiceLine, rows: list[dict[str, str]], *, raw_text: str) -> InvoiceLine:
-    exact_match, conflict_note = _exact_line_history_match(line, rows)
+    exact_match, conflict_note = _exact_line_history_match(line, rows, raw_text=raw_text)
     if conflict_note:
+        explicit_rate = _explicit_tax_rate_from_context(raw_text)
+        if explicit_rate:
+            line.tax_rate = explicit_rate
         _append_history_reference(line, conflict_note)
         return line
     if exact_match is not None:
@@ -145,7 +148,7 @@ def _apply_history_match_to_line(line: InvoiceLine, match: LineHistoryMatch, *, 
     return line
 
 
-def _exact_line_history_match(line: InvoiceLine, rows: list[dict[str, str]]) -> tuple[LineHistoryMatch | None, str]:
+def _exact_line_history_match(line: InvoiceLine, rows: list[dict[str, str]], *, raw_text: str = "") -> tuple[LineHistoryMatch | None, str]:
     query = line.project_name.strip()
     normalized_query = _normalize(query)
     if not normalized_query:
@@ -154,46 +157,114 @@ def _exact_line_history_match(line: InvoiceLine, rows: list[dict[str, str]]) -> 
     if not exact_rows:
         return None, ""
 
-    variants: Counter[tuple[str, str, str, str, str, str]] = Counter()
-    latest_row_by_key: dict[tuple[str, str, str, str, str, str], dict[str, str]] = {}
+    # 编码/品类和税率是两件事：编码只决定品类，税率由本次客户要求或历史习惯决定。
+    code_variants: Counter[tuple[str, str, str, str, str]] = Counter()
+    latest_row_by_code_key: dict[tuple[str, str, str, str, str], dict[str, str]] = {}
+    rows_by_code_key: dict[tuple[str, str, str, str, str], list[dict[str, str]]] = {}
     for row in exact_rows:
         key = (
             row.get("project_name", "").strip(),
             row.get("tax_category", "").strip(),
             row.get("tax_code", "").strip(),
-            row.get("tax_rate", "").strip(),
             row.get("unit", "").strip(),
             row.get("specification", "").strip(),
         )
         weight = _safe_int(row.get("line_count", ""), default=1)
-        variants[key] += max(weight, 1)
-        latest_row_by_key[key] = row
-    if not variants:
+        code_variants[key] += max(weight, 1)
+        latest_row_by_code_key[key] = row
+        rows_by_code_key.setdefault(key, []).append(row)
+    if not code_variants:
         return None, ""
 
-    code_rate_keys = {(key[2], key[3]) for key in variants if key[2]}
-    if len(code_rate_keys) > 1:
-        samples = sorted(
-            {f"{code or '未记录编码'} / {rate or '未记录税率'}" for code, rate in code_rate_keys}
-        )
-        return None, (
-            "历史开票档案存在多个编码/税率，需人工确认: "
-            f"{query} -> {'；'.join(samples[:4])}"
-        )
+    selected_key, count = code_variants.most_common(1)[0]
+    selected_rows = rows_by_code_key.get(selected_key) or exact_rows
+    row = latest_row_by_code_key[selected_key]
 
-    key, count = variants.most_common(1)[0]
-    row = latest_row_by_key[key]
+    explicit_rate = _explicit_tax_rate_from_context(raw_text)
+    historical_rate, historical_rate_note = _recommended_history_tax_rate(selected_rows)
+    tax_rate = explicit_rate or historical_rate
+
+    source_notes: list[str] = []
+    if explicit_rate:
+        source_notes.append(f"本次材料明确 {explicit_rate}")
+    elif historical_rate_note:
+        source_notes.append(historical_rate_note)
+
+    code_samples = sorted({f"{key[1] or '未记录大类'} / {key[2] or '未记录编码'}" for key in code_variants})
+    if len(code_samples) > 1:
+        source_notes.append(f"历史同项目还出现过 {'；'.join(code_samples[:4])}，本次按最高频品类推荐")
+
+    matched_source = selected_key[0] or query
+    if source_notes:
+        matched_source = f"{matched_source}（{'；'.join(source_notes)}）"
+
     return LineHistoryMatch(
-        project_name=key[0] or query,
-        tax_category=key[1],
-        tax_code=key[2],
-        tax_rate=key[3],
-        specification=key[5],
-        unit=key[4] or "项",
+        project_name=selected_key[0] or query,
+        tax_category=selected_key[1],
+        tax_code=selected_key[2],
+        tax_rate=tax_rate,
+        specification=selected_key[4],
+        unit=selected_key[3] or "项",
         quantity=row.get("quantity", "").strip() or "1",
-        matched_source=key[0] or query,
-        confidence="high" if count >= 2 else "medium",
+        matched_source=matched_source,
+        confidence="high" if count >= 2 and len(code_samples) == 1 else "medium",
     ), ""
+
+
+def _recommended_history_tax_rate(rows: list[dict[str, str]]) -> tuple[str, str]:
+    rate_counts: Counter[str] = Counter()
+    original_by_normalized: dict[str, str] = {}
+    for row in rows:
+        normalized = _normalize_tax_rate(row.get("tax_rate", ""))
+        if not normalized:
+            continue
+        weight = _safe_int(row.get("line_count", ""), default=1)
+        rate_counts[normalized] += max(weight, 1)
+        original_by_normalized[normalized] = row.get("tax_rate", "").strip() or normalized
+    if not rate_counts:
+        return "", ""
+    selected, _count = rate_counts.most_common(1)[0]
+    if len(rate_counts) <= 1:
+        return original_by_normalized.get(selected, selected), ""
+    samples = "；".join(f"{rate}" for rate, _ in rate_counts.most_common(4))
+    return original_by_normalized.get(selected, selected), f"客户本次未写税率，按历史最高频 {selected} 推荐；历史税率还出现过 {samples}"
+
+
+def _explicit_tax_rate_from_context(text: str) -> str:
+    compact = _normalize(text)
+    if not compact:
+        return ""
+    if re.search(r"(免税|免征增值税|不征税)", compact):
+        return "免税"
+    rate_patterns = [
+        ("1%", r"(一个点|1个点|一%|1%|税率1|按1点|开1点)"),
+        ("3%", r"(三个点|3个点|三%|3%|税率3|按3点|开3点)"),
+        ("6%", r"(六个点|6个点|六%|6%|税率6|按6点|开6点)"),
+        ("9%", r"(九个点|9个点|九%|9%|税率9|按9点|开9点)"),
+        ("13%", r"(十三个点|13个点|十三%|13%|税率13|按13点|开13点)"),
+    ]
+    for normalized, pattern in rate_patterns:
+        if re.search(pattern, compact):
+            return normalized
+    return ""
+
+
+def _normalize_tax_rate(value: str) -> str:
+    compact = str(value or "").strip().replace("％", "%")
+    if compact in {"免税", "免征增值税", "不征税"}:
+        return "免税" if compact != "不征税" else compact
+    if not compact:
+        return ""
+    if compact.endswith("%"):
+        return compact
+    try:
+        number = float(compact)
+    except ValueError:
+        return compact
+    if number <= 1:
+        number *= 100
+    text = str(int(number)) if number.is_integer() else str(number).rstrip("0").rstrip(".")
+    return f"{text}%"
 
 
 def _append_history_reference(line: InvoiceLine, reference: str) -> None:
