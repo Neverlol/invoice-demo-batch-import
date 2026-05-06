@@ -35,6 +35,18 @@ def default_workbench_form() -> dict[str, str]:
     }
 
 
+def _merge_extracted_note(user_note: str, extracted_note: str) -> str:
+    base = (user_note or "").strip()
+    extra = (extracted_note or "").strip()
+    if not extra:
+        return base
+    if not base:
+        return extra
+    if extra in base:
+        return base
+    return f"{base}\n{extra}"
+
+
 def create_draft_from_workbench(
     company_name: str,
     raw_text: str,
@@ -108,6 +120,7 @@ def create_draft_from_workbench(
         force_llm_review=bool(attachments) and not force_batch,
     )
     parse_source = extraction.parse_source
+    draft_note = _merge_extracted_note(note, extraction.extracted_note)
     buyer = extraction.buyer
     buyer = _enrich_buyer_from_sheet_context(company_name, buyer, parse_source)
     buyer = _enrich_buyer_from_history_profile(company_name, buyer, parse_source)
@@ -117,7 +130,7 @@ def create_draft_from_workbench(
         buyer=buyer,
         parse_source=parse_source,
     )
-    invoice_profile = _infer_invoice_profile(parse_source, note=note)
+    invoice_profile = _infer_invoice_profile(parse_source, note=draft_note)
     platform_requests = []
     if force_batch:
         platform_requests = _ensure_requests_cover_uploaded_images(extract_platform_invoice_requests(parse_source), attachments)
@@ -167,7 +180,7 @@ def create_draft_from_workbench(
         )
         return batch
 
-    lines = enrich_invoice_lines(lines, raw_text=parse_source, note=note)
+    lines = enrich_invoice_lines(lines, raw_text=parse_source, note=draft_note)
 
     issues = _build_draft_issues(
         company_name=company_name,
@@ -189,7 +202,7 @@ def create_draft_from_workbench(
         buyer=buyer,
         lines=lines,
         raw_text=raw_text,
-        note=note.strip(),
+        note=draft_note,
         issues=issues,
         source_images=attachments,
         workbook_name="开票明细表.xlsx",
@@ -245,6 +258,7 @@ def update_draft_from_form(
     has_new_uploads = any((getattr(file, "filename", "") or "").strip() for file in uploaded_files)
     learned_rule_rows = []
     llm_metrics = []
+    draft_note = (note or "").strip()
 
     if manual_input_lines and not has_new_uploads:
         # 保存草稿上的人工编辑时，不重新解析原材料/OCR/调用 LLM；否则“保存修改”会被材料识别链路拖慢。
@@ -296,6 +310,7 @@ def update_draft_from_form(
             force_llm_review=bool(attachments),
         )
         parse_source = extraction.parse_source
+        draft_note = _merge_extracted_note(note, extraction.extracted_note)
         inferred_buyer = extraction.buyer
         inferred_buyer = _enrich_buyer_from_sheet_context(company_name, inferred_buyer, parse_source)
         inferred_buyer = _enrich_buyer_from_history_profile(company_name, inferred_buyer, parse_source)
@@ -305,7 +320,7 @@ def update_draft_from_form(
             buyer=inferred_buyer,
             parse_source=parse_source,
         )
-        inferred_profile = _infer_invoice_profile(parse_source, note=note)
+        inferred_profile = _infer_invoice_profile(parse_source, note=draft_note)
         resolved_buyer = BuyerInfo(
             name=buyer.name or inferred_buyer.name,
             tax_id=buyer.tax_id or inferred_buyer.tax_id,
@@ -320,7 +335,7 @@ def update_draft_from_form(
         resolved_lines = enrich_invoice_lines(
             resolved_lines,
             raw_text=parse_source,
-            note=note,
+            note=draft_note,
             preserve_existing_tax_rate=manual_input_lines,
         )
         if manual_input_lines:
@@ -362,7 +377,7 @@ def update_draft_from_form(
         buyer=resolved_buyer,
         lines=resolved_lines,
         raw_text=raw_text,
-        note=note.strip(),
+        note=draft_note,
         issues=issues,
         source_images=attachments,
         workbook_name=existing.workbook_name or "开票明细表.xlsx",

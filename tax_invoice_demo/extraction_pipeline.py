@@ -21,6 +21,7 @@ class ExtractionOutcome:
     parse_source: str
     strategy: str = "rules_only"
     llm_provider: str = ""
+    extracted_note: str = ""
     warnings: list[str] = field(default_factory=list)
     llm_metrics: list[dict] = field(default_factory=list)
 
@@ -91,6 +92,7 @@ def extract_invoice_structured_data(
                 continue
             llm_buyer = _buyer_from_llm_payload(response.parsed_json)
             llm_lines = _lines_from_llm_payload(response.parsed_json)
+            llm_note = _note_from_llm_payload(response.parsed_json)
             conflict_warnings = _build_extraction_conflict_warnings(buyer, lines, llm_buyer, llm_lines)
             merged_buyer = _merge_buyer(buyer, llm_buyer)
             merged_lines = _merge_lines(lines, llm_lines)
@@ -100,6 +102,7 @@ def extract_invoice_structured_data(
                 parse_source=parse_source,
                 strategy="rules_plus_vision" if task_type == "vision_extract_invoice" else "rules_plus_llm",
                 llm_provider=response.provider,
+                extracted_note=llm_note,
                 warnings=[*llm_errors, f"LLM 结构化识别耗时 {elapsed_seconds:.1f} 秒。", *conflict_warnings],
                 llm_metrics=llm_metrics,
             )
@@ -129,9 +132,9 @@ def _should_try_vision_extract(image_paths: list[Path]) -> bool:
     if toggle in {"0", "off", "false", "disabled"}:
         return False
     try:
-        max_images = int(os.environ.get("TAX_INVOICE_LLM_VISION_MAX_IMAGES", "3") or "3")
+        max_images = int(os.environ.get("TAX_INVOICE_LLM_VISION_MAX_IMAGES", "5") or "5")
     except ValueError:
-        max_images = 3
+        max_images = 5
     return len(image_paths) <= max(1, max_images)
 
 
@@ -224,6 +227,15 @@ def _buyer_from_llm_payload(payload: dict) -> BuyerInfo:
         bank_name=bank_account,
         bank_account="",
     )
+
+
+def _note_from_llm_payload(payload: dict) -> str:
+    return str(
+        payload.get("备注", "")
+        or payload.get("发票备注", "")
+        or payload.get("备注信息", "")
+        or ""
+    ).strip()
 
 
 def _lines_from_llm_payload(payload: dict) -> list[InvoiceLine]:

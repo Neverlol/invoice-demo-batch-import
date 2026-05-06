@@ -672,6 +672,11 @@ def _apply_local_safe_coding_hint(line: InvoiceLine) -> None:
     text = f"{line.project_name} {line.specification}".strip()
     if not text:
         return
+    if re.search(r"(维修费|维修服务|修理费|修理修配|汽车维修|车辆维修|汽修)", text):
+        line.tax_category = line.tax_category or "劳务"
+        line.tax_code = "2020000000000000000"
+        line.coding_reference = line.coding_reference or "本地维修站规则，需人工复核: 修理修配劳务 / 劳务 / 2020000000000000000"
+        return
     if re.search(r"(注射器|输液针|穿刺针|采血针|留置针|注射针)", text):
         line.tax_category = line.tax_category or "医疗仪器器械"
         line.tax_code = "1090245030000000000"
