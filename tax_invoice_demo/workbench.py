@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import re
 import shutil
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from uuid import uuid4
 
@@ -25,6 +26,13 @@ from .tax_rule_engine import write_learned_rules_from_manual_update
 
 WORKBENCH_ROOT = Path(__file__).resolve().parent.parent / "output" / "workbench" / "tax_invoice_demo"
 BATCH_LLM_MAX_ATTACHMENTS = 5
+
+
+@dataclass(frozen=True)
+class WorkbookInvoiceUnit:
+    source_name: str
+    lines: list[InvoiceLine]
+    source_excerpt: str
 
 
 def default_workbench_form() -> dict[str, str]:
@@ -75,6 +83,35 @@ def create_draft_from_workbench(
     )
     early_parse_source = _compose_parse_source(raw_text, document_result.combined_text, ocr_result.combined_text)
     invoice_profile = _infer_invoice_profile(early_parse_source, note=note)
+    if force_batch:
+        workbook_units = _extract_workbook_invoice_units(draft_dir, attachments)
+        if len(workbook_units) >= 2:
+            buyer_extraction = extract_invoice_structured_data(
+                raw_text=raw_text,
+                note=note,
+                document_text=document_result.combined_text,
+                ocr_text=ocr_result.combined_text,
+                image_paths=image_attachment_paths[:BATCH_LLM_MAX_ATTACHMENTS],
+                force_llm_review=bool(image_attachment_paths),
+            )
+            batch_buyer = _enrich_buyer_from_sheet_context(company_name, buyer_extraction.buyer, buyer_extraction.parse_source)
+            batch_buyer = _enrich_buyer_from_history_profile(company_name, batch_buyer, buyer_extraction.parse_source)
+            return _create_workbook_draft_batch(
+                batch_id=draft_id,
+                case_id=case_id,
+                draft_dir=draft_dir,
+                company_name=company_name,
+                raw_text=raw_text,
+                note=_merge_extracted_note(note, buyer_extraction.extracted_note),
+                buyer=batch_buyer,
+                attachments=attachments,
+                document_result=document_result,
+                ocr_result=ocr_result,
+                invoice_profile=invoice_profile,
+                workbook_units=workbook_units,
+                extract_warnings=buyer_extraction.warnings,
+                llm_provider=buyer_extraction.llm_provider,
+            )
     platform_requests: list[PlatformInvoiceRequest] = []
     batch_extract_strategy = "platform_screenshot_batch"
     batch_llm_provider = ""
@@ -914,6 +951,135 @@ def _create_platform_screenshot_draft_batch(
 
 
 
+def _create_workbook_draft_batch(
+    *,
+    batch_id: str,
+    case_id: str,
+    draft_dir: Path,
+    company_name: str,
+    raw_text: str,
+    note: str,
+    buyer: BuyerInfo,
+    attachments: list[DraftAttachment],
+    document_result,
+    ocr_result,
+    invoice_profile: dict[str, str],
+    workbook_units: list[WorkbookInvoiceUnit],
+    extract_warnings: list[str],
+    llm_provider: str,
+) -> DraftBatch:
+    batch_issues = [
+        "当前材料命中了“多个 Excel 明细 -> 多张草稿”规则；系统已按每个 Excel 文件生成一张待复核草稿。",
+        "Excel 明细由本地表格规则解析；发票图片/补充文字只作为购买方、票种、税点和备注参考。请重点复核购买方、税率和每张表是否应单独开票。",
+    ]
+    if not buyer.name.strip():
+        batch_issues.append("未可靠识别购买方名称；请在批量草稿中补全后再执行。")
+    if not buyer.tax_id.strip():
+        batch_issues.append("未可靠识别购买方税号；请在批量草稿中补全后再执行。")
+
+    items: list[DraftBatchItem] = []
+    for unit in workbook_units:
+        child_draft_id = uuid4().hex[:10]
+        child_dir = draft_directory(child_draft_id)
+        child_dir.mkdir(parents=True, exist_ok=True)
+        child_attachments = _clone_attachments_to_directory(
+            source_dir=draft_dir,
+            target_dir=child_dir,
+            attachments=attachments,
+        )
+        enriched_lines = enrich_invoice_lines(
+            unit.lines,
+            raw_text=f"{raw_text}\n{unit.source_excerpt}",
+            note=note,
+            preserve_existing_tax_rate=True,
+        )
+        child_issues = _build_draft_issues(
+            company_name=company_name,
+            raw_text=unit.source_excerpt or raw_text,
+            attachments=child_attachments,
+            buyer=buyer,
+            lines=enriched_lines,
+            special_business=invoice_profile["special_business"],
+            document_status=document_result.status,
+            document_note=document_result.note,
+            ocr_status=ocr_result.status,
+            ocr_note=ocr_result.note,
+        )
+        child_issues.insert(0, f"本草稿由 Excel 明细 `{unit.source_name}` 自动生成；请复核该表是否对应一张发票。")
+        child_draft = InvoiceDraft(
+            draft_id=child_draft_id,
+            case_id=case_id,
+            company_name=company_name.strip(),
+            buyer=buyer,
+            lines=enriched_lines,
+            raw_text=unit.source_excerpt or raw_text,
+            note="；".join(part for part in [note.strip(), f"来源 Excel：{unit.source_name}"] if part),
+            issues=child_issues,
+            source_images=child_attachments,
+            workbook_name="开票明细表.xlsx",
+            created_at=datetime.now().isoformat(timespec="seconds"),
+            invoice_kind=invoice_profile["invoice_kind"],
+            invoice_medium=invoice_profile["invoice_medium"],
+            special_business=invoice_profile["special_business"],
+            ocr_status=ocr_result.status,
+            ocr_engine=ocr_result.engine,
+            ocr_text=ocr_result.combined_text,
+            ocr_note=ocr_result.note,
+            source_doc_status=document_result.status,
+            source_doc_text=unit.source_excerpt,
+            source_doc_note=document_result.note,
+            extract_strategy="rules_plus_workbook_batch",
+            llm_provider=llm_provider,
+            extract_warnings=list(extract_warnings),
+        )
+        save_draft(child_draft)
+        record_case_event(
+            case_id=case_id,
+            draft_id=child_draft_id,
+            batch_id=batch_id,
+            event_type="workbook_child_draft_created",
+            payload=draft_snapshot(child_draft),
+        )
+        items.append(
+            DraftBatchItem(
+                draft_id=child_draft_id,
+                buyer_name=buyer.name or "待补全购买方名称",
+                invoice_kind=invoice_profile["invoice_kind"],
+                amount_total=_sum_line_amounts(enriched_lines),
+                project_summary=_summarize_projects(enriched_lines),
+                line_count=len(enriched_lines),
+                issue_summary=child_issues[0] if child_issues else "",
+            )
+        )
+        batch_issues.extend(child_issues)
+
+    batch = DraftBatch(
+        batch_id=batch_id,
+        case_id=case_id,
+        company_name=company_name.strip(),
+        created_at=datetime.now().isoformat(timespec="seconds"),
+        items=items,
+        raw_text=raw_text,
+        note=note.strip(),
+        issues=batch_issues,
+        source_images=attachments,
+        invoice_kind=invoice_profile["invoice_kind"],
+        invoice_medium=invoice_profile["invoice_medium"],
+        special_business=invoice_profile["special_business"],
+        extract_strategy="rules_plus_workbook_batch",
+        llm_provider=llm_provider,
+        extract_warnings=list(extract_warnings),
+    )
+    save_draft_batch(batch)
+    record_case_event(
+        case_id=case_id,
+        batch_id=batch_id,
+        event_type="workbook_draft_batch_created",
+        payload=batch_snapshot(batch),
+    )
+    return batch
+
+
 def _create_split_draft_batch(
     *,
     batch_id: str,
@@ -1032,6 +1198,160 @@ def _create_split_draft_batch(
         payload=batch_snapshot(batch),
     )
     return batch
+
+
+def _extract_workbook_invoice_units(draft_dir: Path, attachments: list[DraftAttachment]) -> list[WorkbookInvoiceUnit]:
+    units: list[WorkbookInvoiceUnit] = []
+    for attachment in attachments:
+        suffix = Path(attachment.stored_name).suffix.lower()
+        if suffix not in {".xls", ".xlsx"}:
+            continue
+        source_path = draft_dir / attachment.stored_name
+        if not source_path.exists():
+            continue
+        try:
+            lines = _purchase_request_lines_from_workbook(source_path)
+        except Exception:  # noqa: BLE001
+            lines = []
+        if not lines:
+            continue
+        excerpt_rows = ["项目名称\t规格型号\t单位\t数量\t单价\t含税金额"]
+        for line in lines[:80]:
+            excerpt_rows.append(
+                "\t".join(
+                    [
+                        line.project_name,
+                        line.specification,
+                        line.unit,
+                        line.quantity,
+                        line.unit_price,
+                        line.amount_with_tax,
+                    ]
+                )
+            )
+        units.append(
+            WorkbookInvoiceUnit(
+                source_name=attachment.original_name or Path(attachment.stored_name).name,
+                lines=lines,
+                source_excerpt="\n".join(excerpt_rows),
+            )
+        )
+    return units
+
+
+def _purchase_request_lines_from_workbook(path: Path) -> list[InvoiceLine]:
+    suffix = path.suffix.lower()
+    rows_by_sheet: list[list[list[str]]] = []
+    if suffix == ".xls":
+        import xlrd
+
+        workbook = xlrd.open_workbook(path)
+        for sheet in workbook.sheets():
+            rows_by_sheet.append([[ _cell_text(cell) for cell in sheet.row_values(row_index)] for row_index in range(sheet.nrows)])
+    elif suffix == ".xlsx":
+        from openpyxl import load_workbook
+
+        workbook = load_workbook(path, read_only=True, data_only=True)
+        try:
+            for sheet in workbook.worksheets:
+                rows_by_sheet.append([[ _cell_text(cell) for cell in row] for row in sheet.iter_rows(values_only=True)])
+        finally:
+            workbook.close()
+    lines: list[InvoiceLine] = []
+    for rows in rows_by_sheet:
+        header_index = _find_purchase_request_header(rows)
+        if header_index is None:
+            continue
+        header = rows[header_index]
+        index = {name: _find_header_index(header, name) for name in ["物资名称", "规格型号", "计量单位", "采购单价", "实收数量", "实际金额"]}
+        if index["物资名称"] is None or index["实际金额"] is None:
+            continue
+        for row in rows[header_index + 1:]:
+            project_name = _row_value(row, index["物资名称"])
+            if not project_name or "合计" in project_name:
+                continue
+            amount = _money_text(_row_value(row, index["实际金额"]))
+            if not amount:
+                continue
+            unit_price = _money_text(_row_value(row, index["采购单价"])) if index["采购单价"] is not None else ""
+            quantity = _number_text(_row_value(row, index["实收数量"])) if index["实收数量"] is not None else ""
+            line = InvoiceLine(
+                project_name=project_name,
+                specification=_row_value(row, index["规格型号"]),
+                unit=_row_value(row, index["计量单位"]) or "项",
+                quantity=quantity or "1",
+                unit_price=unit_price,
+                amount_with_tax=amount,
+                tax_rate="1%",
+                coding_reference="Excel 明细本地解析，需人工复核：按客户表格生成开票明细。",
+            )
+            lines.append(line)
+    return lines
+
+
+def _cell_text(value) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if text.endswith(".0"):
+        try:
+            return str(int(float(text)))
+        except ValueError:
+            return text
+    return text
+
+
+def _find_purchase_request_header(rows: list[list[str]]) -> int | None:
+    for index, row in enumerate(rows[:30]):
+        compact = "\t".join(row)
+        if "物资名称" in compact and "实际金额" in compact:
+            return index
+    return None
+
+
+def _find_header_index(header: list[str], name: str) -> int | None:
+    for index, value in enumerate(header):
+        if value.strip() == name:
+            return index
+    return None
+
+
+def _row_value(row: list[str], index: int | None) -> str:
+    if index is None or index >= len(row):
+        return ""
+    return row[index].strip()
+
+
+def _decimal_from_text(value: str) -> Decimal | None:
+    text = str(value or "").replace(",", "").replace("，", "").replace("¥", "").replace("￥", "").strip()
+    if not text:
+        return None
+    try:
+        return Decimal(text)
+    except InvalidOperation:
+        return None
+
+
+def _money_text(value: str) -> str:
+    parsed = _decimal_from_text(value)
+    return f"{parsed:.2f}" if parsed is not None else ""
+
+
+def _number_text(value: str) -> str:
+    parsed = _decimal_from_text(value)
+    if parsed is None:
+        return str(value or "").strip()
+    text = f"{parsed:f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _sum_line_amounts(lines: list[InvoiceLine]) -> str:
+    total = Decimal("0")
+    for line in lines:
+        parsed = _decimal_from_text(line.resolved_amount_with_tax())
+        if parsed is not None:
+            total += parsed
+    return f"{total:.2f}"
 
 
 def _save_uploads(draft_dir: Path, uploaded_files: list[FileStorage]) -> list[DraftAttachment]:

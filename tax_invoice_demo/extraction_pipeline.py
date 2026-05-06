@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -60,6 +61,11 @@ def extract_invoice_structured_data(
         force_llm_review=force_llm_review,
     )
     if not adapter.is_enabled or not (should_try_vision or should_try_text_llm):
+        outcome.lines = _apply_current_amount_from_user_text(
+            outcome.lines,
+            raw_text=raw_text,
+            reference_text=parse_source,
+        )
         return outcome
 
     llm_errors: list[str] = []
@@ -96,6 +102,11 @@ def extract_invoice_structured_data(
             conflict_warnings = _build_extraction_conflict_warnings(buyer, lines, llm_buyer, llm_lines)
             merged_buyer = _merge_buyer(buyer, llm_buyer)
             merged_lines = _merge_lines(lines, llm_lines)
+            merged_lines = _apply_current_amount_from_user_text(
+                merged_lines,
+                raw_text=raw_text,
+                reference_text=parse_source,
+            )
             return ExtractionOutcome(
                 buyer=merged_buyer,
                 lines=merged_lines,
@@ -120,9 +131,91 @@ def extract_invoice_structured_data(
                 }
             )
             llm_errors.append(f"{task_type} 调用失败，耗时 {elapsed_seconds:.1f} 秒: {exc}")
+    outcome.lines = _apply_current_amount_from_user_text(
+        outcome.lines,
+        raw_text=raw_text,
+        reference_text=parse_source,
+    )
     outcome.warnings = llm_errors
     outcome.llm_metrics = llm_metrics
     return outcome
+
+
+def _current_amount_from_user_text(raw_text: str) -> str:
+    text = str(raw_text or "").strip()
+    if not text:
+        return ""
+    candidates: list[str] = []
+    for matched in re.finditer(r"(?<![A-Za-z0-9])(?:[¥￥]\s*)?(\d{1,8}(?:\.\d{1,2})?)\s*(?:元|块钱|块)?", text):
+        value = matched.group(1)
+        start, end = matched.span()
+        window = text[max(0, start - 12): min(len(text), end + 12)]
+        has_currency_hint = bool(re.search(r"[¥￥]|元|块钱|块|金额|开票|合计|总共|共计", window))
+        text_is_short_amount = len(re.sub(r"\s+", "", text)) <= 12
+        if has_currency_hint or text_is_short_amount:
+            candidates.append(value)
+    if not candidates:
+        return ""
+    return candidates[-1]
+
+
+def _looks_like_repair_reference(reference_text: str) -> bool:
+    text = str(reference_text or "")
+    return bool(re.search(r"修理修配|维修费|修理费|汽车维修|车辆维修|汽修|保险|车牌|车辆照片", text))
+
+
+def _infer_reference_tax_rate(reference_text: str) -> str:
+    rates = re.findall(r"(?<!\d)(\d{1,2}(?:\.\d+)?)\s*%", str(reference_text or ""))
+    return f"{rates[-1]}%" if rates else "1%"
+
+
+def _apply_current_amount_from_user_text(
+    lines: list[InvoiceLine],
+    *,
+    raw_text: str,
+    reference_text: str,
+) -> list[InvoiceLine]:
+    amount = _current_amount_from_user_text(raw_text)
+    if not amount:
+        return lines
+    if not _looks_like_repair_reference(reference_text):
+        return lines
+    if not lines:
+        return [
+            InvoiceLine(
+                project_name="维修费",
+                amount_with_tax=amount,
+                tax_rate=_infer_reference_tax_rate(reference_text),
+                unit="项",
+                quantity="1",
+            )
+        ]
+    target_index = 0
+    for index, line in enumerate(lines):
+        if re.search(r"修理修配|维修|修理", line.project_name):
+            target_index = index
+            break
+    patched: list[InvoiceLine] = []
+    for index, line in enumerate(lines):
+        if index == target_index:
+            patched.append(
+                InvoiceLine(
+                    project_name=line.project_name or "维修费",
+                    amount_with_tax=amount,
+                    tax_rate=line.tax_rate or _infer_reference_tax_rate(reference_text),
+                    tax_category=line.tax_category,
+                    specification=line.specification,
+                    unit=line.unit or "项",
+                    quantity=line.quantity or "1",
+                    unit_price=line.unit_price,
+                    tax_code=line.tax_code,
+                    source_item_code=line.source_item_code,
+                    coding_reference=line.coding_reference,
+                )
+            )
+        else:
+            patched.append(line)
+    return patched
 
 
 def _should_try_vision_extract(image_paths: list[Path]) -> bool:
