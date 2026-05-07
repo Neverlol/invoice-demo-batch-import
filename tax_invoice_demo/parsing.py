@@ -1086,9 +1086,16 @@ def _find_inline_tax_id_match(text: str):
     for matched in re.finditer(r"([0-9A-Z]{15,20})", compact_text):
         value = matched.group(1)
         window = compact_text[max(0, matched.start() - 8): min(len(compact_text), matched.end() + 8)]
-        if "车架号" in window or "VIN" in window:
+        has_tax_label = bool(re.search(r"(税号|识别号|信用代码|纳税)", window))
+        if "车架号" in window or "VIN" in window or "发票号码" in window or "二维码" in window:
             continue
         if len(value) == 17 and not value[0].isdigit():
+            continue
+        if value.startswith("25") and not has_tax_label:
+            # 税局电子发票号码常以 25... 开头，OCR 场景下不要当成购买方税号。
+            continue
+        if sum(1 for char in value if char.isalpha()) > 4 and not has_tax_label:
+            # OCR 噪声容易拼出大量英文串；没有税号标签时不作为税号。
             continue
         return matched
     return None

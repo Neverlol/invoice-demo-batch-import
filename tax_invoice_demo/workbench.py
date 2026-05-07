@@ -71,6 +71,7 @@ def create_draft_from_workbench(
     attachments = _save_uploads(draft_dir, uploaded_files)
     document_result = _run_document_extraction(draft_dir, attachments)
     image_attachment_paths = _image_attachment_paths(draft_dir, attachments)
+    material_tags = _material_tags_from_context(raw_text, attachments, document_result)
     # 是否批量只看用户是否勾选“批量开具发票”：
     # - 未勾选：所有上传材料都视为同一张发票的材料，图片进入视觉 LLM 识别链路。
     # - 已勾选且图片不超过 5 张：按“一张图一个业务单元”逐张走视觉 LLM。
@@ -258,6 +259,7 @@ def create_draft_from_workbench(
         extract_strategy=extraction.strategy,
         llm_provider=extraction.llm_provider,
         extract_warnings=extraction.warnings,
+        material_tags=material_tags,
     )
     save_draft(draft)
     record_case_event(
@@ -334,10 +336,12 @@ def update_draft_from_form(
         extract_strategy = existing.extract_strategy
         llm_provider = existing.llm_provider
         extract_warnings = existing.extract_warnings
+        material_tags = existing.material_tags
     else:
         attachments = [*existing.source_images, *_save_uploads(draft_directory(draft_id), uploaded_files)]
         document_result = _run_document_extraction(draft_directory(draft_id), attachments)
         image_attachment_paths = _image_attachment_paths(draft_directory(draft_id), attachments)
+        material_tags = _material_tags_from_context(raw_text, attachments, document_result)
         ocr_result = _run_draft_ocr(draft_directory(draft_id), attachments, defer_to_vision=bool(image_attachment_paths))
         extraction = extract_invoice_structured_data(
             raw_text=raw_text,
@@ -433,6 +437,7 @@ def update_draft_from_form(
         extract_strategy=extract_strategy,
         llm_provider=llm_provider,
         extract_warnings=extract_warnings,
+        material_tags=material_tags,
     )
     save_draft(draft)
     edit_diffs = diff_drafts(existing, draft)
@@ -526,6 +531,7 @@ def save_draft(draft: InvoiceDraft) -> None:
         "extract_strategy": draft.extract_strategy,
         "llm_provider": draft.llm_provider,
         "extract_warnings": draft.extract_warnings,
+        "material_tags": draft.material_tags,
     }
     (draft_dir / "draft.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     (draft_dir / "raw_text.txt").write_text(draft.raw_text, encoding="utf-8")
@@ -567,6 +573,7 @@ def save_draft_batch(batch: DraftBatch) -> None:
         "extract_strategy": batch.extract_strategy,
         "llm_provider": batch.llm_provider,
         "extract_warnings": batch.extract_warnings,
+        "material_tags": batch.material_tags,
     }
     (batch_dir / "batch.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     (batch_dir / "raw_text.txt").write_text(batch.raw_text, encoding="utf-8")
@@ -593,6 +600,7 @@ def load_draft_batch(batch_id: str) -> DraftBatch | None:
         extract_strategy=payload.get("extract_strategy", "rules_only"),
         llm_provider=payload.get("llm_provider", ""),
         extract_warnings=payload.get("extract_warnings", []),
+        material_tags=payload.get("material_tags", []),
     )
 
 
@@ -626,6 +634,7 @@ def load_draft(draft_id: str) -> InvoiceDraft | None:
         extract_strategy=payload.get("extract_strategy", "rules_only"),
         llm_provider=payload.get("llm_provider", ""),
         extract_warnings=payload.get("extract_warnings", []),
+        material_tags=payload.get("material_tags", []),
     )
 
 
@@ -829,6 +838,7 @@ def _create_platform_screenshot_draft_batch(
     llm_provider: str = "",
     extract_warnings: list[str] | None = None,
 ) -> DraftBatch:
+    material_tags = _material_tags_from_context(raw_text, attachments, document_result)
     items: list[DraftBatchItem] = []
     batch_issues: list[str] = []
     for request in requests:
@@ -902,6 +912,7 @@ def _create_platform_screenshot_draft_batch(
             extract_strategy=extract_strategy,
             llm_provider=llm_provider,
             extract_warnings=list(extract_warnings or []),
+            material_tags=material_tags,
         )
         save_draft(child_draft)
         record_case_event(
@@ -940,6 +951,7 @@ def _create_platform_screenshot_draft_batch(
         extract_strategy=extract_strategy,
         llm_provider=llm_provider,
         extract_warnings=list(extract_warnings or []),
+        material_tags=material_tags,
     )
     save_draft_batch(batch)
     record_case_event(
@@ -969,6 +981,7 @@ def _create_workbook_draft_batch(
     extract_warnings: list[str],
     llm_provider: str,
 ) -> DraftBatch:
+    material_tags = _material_tags_from_context(raw_text, attachments, document_result)
     batch_issues = [
         "当前材料命中了“Excel 明细 -> 草稿”规则；系统已按每个 Excel 文件生成一张待复核草稿。",
         "每个 Excel 文件对应一张草稿，Excel 内多行会作为这张发票的多行明细；请确认客户是否确实要求按这些表分别开票。",
@@ -1040,6 +1053,7 @@ def _create_workbook_draft_batch(
             extract_strategy="rules_plus_workbook_batch",
             llm_provider=llm_provider,
             extract_warnings=list(extract_warnings),
+            material_tags=material_tags,
         )
         save_draft(child_draft)
         record_case_event(
@@ -1078,6 +1092,7 @@ def _create_workbook_draft_batch(
         extract_strategy="rules_plus_workbook_batch",
         llm_provider=llm_provider,
         extract_warnings=list(extract_warnings),
+        material_tags=material_tags,
     )
     save_draft_batch(batch)
     record_case_event(
@@ -1107,6 +1122,7 @@ def _create_split_draft_batch(
     llm_provider: str,
     extract_warnings: list[str],
 ) -> DraftBatch:
+    material_tags = _material_tags_from_context(raw_text, attachments, document_result)
     batch_issues = [
         "当前材料命中了“一份输入 -> 多张草稿”规则；系统已按金额自动拆成多张待复核草稿。",
         "这类草稿通常来自聊天里只给买方资料、税点和多笔金额。请重点复核每张草稿的项目名称、税率和票种。",
@@ -1161,6 +1177,7 @@ def _create_split_draft_batch(
             extract_strategy=extract_strategy,
             llm_provider=llm_provider,
             extract_warnings=list(extract_warnings),
+            material_tags=material_tags,
         )
         save_draft(child_draft)
         record_case_event(
@@ -1198,6 +1215,7 @@ def _create_split_draft_batch(
         extract_strategy=extract_strategy,
         llm_provider=llm_provider,
         extract_warnings=list(extract_warnings),
+        material_tags=material_tags,
     )
     save_draft_batch(batch)
     record_case_event(
@@ -2044,6 +2062,46 @@ def _build_draft_issues(
     if special_business == "机动车":
         issues.append("系统从材料中识别出机动车线索，建议在草稿里确认 `特定业务 = 机动车` 后再执行。")
     return issues
+
+
+def _material_tags_from_context(raw_text: str, attachments: list[DraftAttachment], document_result) -> list[str]:
+    tags: list[str] = []
+    if str(raw_text or "").strip():
+        compact = re.sub(r"\s+", "", raw_text)
+        if re.search(r"(微信|群聊|聊天|麻烦|帮忙|开票|发票|税号|金额)", compact):
+            tags.append("群文本/补充说明")
+        else:
+            tags.append("文本说明")
+    for item in getattr(document_result, "document_results", []) or []:
+        material_type = getattr(item, "material_type", "") or "文档材料"
+        if material_type:
+            tags.append(material_type)
+    for attachment in attachments:
+        suffix = Path(attachment.stored_name or attachment.original_name).suffix.lower()
+        name = (attachment.original_name or attachment.stored_name or "").lower()
+        if suffix not in {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}:
+            continue
+        if re.search(r"(wechat|微信|群聊|聊天|screenshot|截图|longscreenshot)", name, re.IGNORECASE):
+            tags.append("群聊截图")
+        elif re.search(r"(车|牌|维修|事故|照片|photo|image)", name, re.IGNORECASE):
+            tags.append("车辆/现场照片")
+        else:
+            tags.append("图片材料")
+    return _dedupe_preserve_order(tags)[:8]
+
+
+
+def _dedupe_preserve_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        cleaned = str(value or "").strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        result.append(cleaned)
+    return result
+
 
 
 def _image_attachment_paths(draft_dir: Path, attachments: list[DraftAttachment]) -> list[Path]:

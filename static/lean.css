@@ -1938,3 +1938,19 @@ body:has(#batch-sheet-form) .card-head p {
   .live-status-copy b,
   .live-draft-banner b { margin-top: 5px; }
 }
+.material-tag-panel p {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.material-tag-panel em {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(65,105,168,.10);
+  color: var(--info);
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 900;
+}

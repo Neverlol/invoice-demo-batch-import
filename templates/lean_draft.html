@@ -88,6 +88,7 @@
               <div class="card-head"><div><h2>材料摘要</h2><p>这里帮你回看材料来源，不需要重复录入。</p></div></div>
               <div class="panel-list">
                 <div class="panel-item"><span class="badge info">原始文本</span><p>{{ draft.raw_text[:180] if draft.raw_text else '本草稿没有保留原始文本。' }}{% if draft.raw_text|length > 180 %}…{% endif %}</p></div>
+                {% if draft.material_tags %}<div class="panel-item material-tag-panel"><span class="badge info">材料类型</span><p>{% for tag in draft.material_tags %}<em>{{ tag }}</em>{% endfor %}</p></div>{% endif %}
                 <div class="panel-item {% if draft.ocr_status in ['vision_deferred','partial','empty','unavailable'] %}review-attention{% endif %}"><span class="badge {% if draft.ocr_status == 'success' %}ok{% elif draft.ocr_status in ['vision_deferred','partial'] %}warn{% else %}neutral{% endif %}">OCR</span><p>{{ draft.ocr_note or draft.ocr_status or '未请求 OCR' }}</p></div>
                 <div class="panel-item {% if draft.source_doc_status in ['partial','empty'] %}review-attention{% endif %}"><span class="badge {% if draft.source_doc_status == 'success' %}ok{% elif draft.source_doc_status == 'partial' %}warn{% else %}neutral{% endif %}">文件解析</span><p>{{ draft.source_doc_note or draft.source_doc_status or '未解析文件' }}</p></div>
               </div>

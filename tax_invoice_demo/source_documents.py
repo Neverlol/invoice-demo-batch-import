@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 import tempfile
 import zipfile
 from dataclasses import dataclass, field
@@ -20,6 +21,7 @@ class SourceDocumentResult:
     extracted_text: str = ""
     error: str = ""
     parser: str = ""
+    material_type: str = ""
 
 
 @dataclass
@@ -68,30 +70,91 @@ def _extract_single_document(path: Path) -> SourceDocumentResult:
     try:
         if suffix == ".pdf":
             text = _extract_pdf_text(path)
-            return SourceDocumentResult(file_name=path.name, extracted_text=text, parser="pypdf")
+            return _document_result(path, text, parser="pypdf")
         if suffix == ".xlsx":
             text = _extract_xlsx_text(path)
-            return SourceDocumentResult(file_name=path.name, extracted_text=text, parser="openpyxl")
+            return _document_result(path, text, parser="openpyxl")
         if suffix == ".xls":
             text = _extract_xls_text(path)
-            return SourceDocumentResult(file_name=path.name, extracted_text=text, parser="xlrd")
+            return _document_result(path, text, parser="xlrd")
         if suffix in {".txt", ".csv", ".tsv", ".md"}:
             text = _extract_plain_text(path)
-            return SourceDocumentResult(file_name=path.name, extracted_text=text, parser="plain_text")
+            return _document_result(path, text, parser="plain_text")
         if suffix == ".docx":
             text = _extract_docx_text(path)
-            return SourceDocumentResult(file_name=path.name, extracted_text=text, parser="docx_xml")
+            return _document_result(path, text, parser="docx_xml")
         if suffix == ".doc":
             text = _extract_doc_text(path)
-            return SourceDocumentResult(file_name=path.name, extracted_text=text, parser="doc_best_effort")
+            return _document_result(path, text, parser="doc_best_effort")
         if suffix == ".zip":
             text = _extract_zip_text(path)
-            return SourceDocumentResult(file_name=path.name, extracted_text=text, parser="zip_bundle")
+            return _document_result(path, text, parser="zip_bundle")
         if suffix == ".7z":
-            return SourceDocumentResult(file_name=path.name, error="7z 压缩包当前不能直接解析；请先解压后上传里面的 Excel/PDF/Word/图片。", parser="archive_notice")
+            return SourceDocumentResult(file_name=path.name, error="7z 压缩包当前不能直接解析；请先解压后上传里面的 Excel/PDF/Word/图片。", parser="archive_notice", material_type="压缩包需解压")
     except Exception as exc:  # noqa: BLE001
-        return SourceDocumentResult(file_name=path.name, error=f"{type(exc).__name__}: {exc}")
-    return SourceDocumentResult(file_name=path.name, error="当前附件格式暂未接入解析。")
+        return SourceDocumentResult(file_name=path.name, error=f"{type(exc).__name__}: {exc}", material_type=_classify_material_type(path, ""))
+    return SourceDocumentResult(file_name=path.name, error="当前附件格式暂未接入解析。", material_type="暂不支持材料")
+
+
+
+def _document_result(path: Path, text: str, *, parser: str) -> SourceDocumentResult:
+    return SourceDocumentResult(
+        file_name=path.name,
+        extracted_text=text,
+        parser=parser,
+        material_type=_classify_material_type(path, text, parser=parser),
+    )
+
+
+
+def _classify_material_type(path: Path, text: str, *, parser: str = "") -> str:
+    name = path.name.lower()
+    suffix = path.suffix.lower()
+    compact = re.sub(r"\s+", "", text or "")
+    if suffix == ".zip":
+        return "压缩包材料"
+    if suffix == ".7z":
+        return "压缩包需解压"
+    if suffix in {".xls", ".xlsx", ".csv", ".tsv"}:
+        if re.search(r"(余额表|收入|流水|银行流水|银行明细|his|对账)", name + compact, re.IGNORECASE):
+            return "财务流水/余额线索"
+        if re.search(r"(车架号|车辆识别代号|合格证|机动车|VIN)", text or "", re.IGNORECASE):
+            return "机动车异常表"
+        if "开票联络函" in compact or "发票申请" in compact or "开发票" in compact:
+            return "开票联络函/申请表"
+        if "合同" in name or "合同" in compact:
+            return "合同/清单 Excel"
+        if _looks_like_tax_history_excel(compact):
+            return "税局历史 Excel"
+        return "本次开票样单 Excel"
+    if suffix == ".pdf":
+        if _looks_like_invoice_pdf(compact):
+            return "样票 PDF"
+        if "合同" in name or "合同" in compact:
+            return "合同 PDF"
+        return "PDF 材料"
+    if suffix in {".doc", ".docx"}:
+        if re.search(r"(开发票信息|开票信息|单位名称|纳税识别号|纳税人识别号|统一社会信用代码)", compact):
+            return "客户开票信息 Word"
+        return "Word 材料"
+    if suffix in {".txt", ".md"}:
+        if re.search(r"(微信|群聊|聊天|客户说|麻烦|帮忙|开票|发票)", compact):
+            return "群文本/整理文本"
+        return "文本材料"
+    return parser or "文档材料"
+
+
+
+def _looks_like_tax_history_excel(compact: str) -> bool:
+    markers = ["发票号码", "开票日期", "销售方", "购买方", "税收分类编码", "价税合计"]
+    return sum(1 for marker in markers if marker in compact) >= 4
+
+
+
+def _looks_like_invoice_pdf(compact: str) -> bool:
+    markers = ["发票号码", "价税合计", "购买方", "销售方", "税额", "电子发票"]
+    return sum(1 for marker in markers if marker in compact) >= 3
+
 
 
 def _extract_pdf_text(path: Path) -> str:
@@ -271,6 +334,7 @@ def serialize_document_results(extraction: SourceDocumentsExtraction) -> str:
                 {
                     "file_name": item.file_name,
                     "parser": item.parser,
+                    "material_type": item.material_type,
                     "error": item.error,
                     "has_text": bool(item.extracted_text),
                 }

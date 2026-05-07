@@ -176,6 +176,7 @@ class InvoiceDraft:
     extract_strategy: str = "rules_only"
     llm_provider: str = ""
     extract_warnings: List[str] = field(default_factory=list)
+    material_tags: List[str] = field(default_factory=list)
 
     def detail_lines_text(self) -> str:
         headers = [
@@ -304,6 +305,7 @@ class DraftBatch:
     extract_strategy: str = ""
     llm_provider: str = ""
     extract_warnings: list[str] = field(default_factory=list)
+    material_tags: list[str] = field(default_factory=list)
 
 
 @dataclass

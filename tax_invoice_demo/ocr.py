@@ -216,7 +216,13 @@ def _prepare_image_for_ocr(source: Path, target: Path) -> None:
     with Image.open(source) as image:
         processed = ImageOps.exif_transpose(image).convert("L")
         processed = ImageOps.autocontrast(processed)
-        if max(processed.size) < 1800:
+        # Long WeChat screenshots can be extremely tall. Running full-size
+        # tesseract on them blocks the draft experience, so cap the working
+        # image before OCR. The original attachment is still kept for manual
+        # review or vision-model fallback.
+        if processed.width * processed.height > 8_000_000 or max(processed.size) > 4200:
+            processed.thumbnail((2200, 4200))
+        elif max(processed.size) < 1800:
             processed = processed.resize((processed.width * 2, processed.height * 2))
         processed = processed.filter(ImageFilter.SHARPEN)
         processed.save(target)
