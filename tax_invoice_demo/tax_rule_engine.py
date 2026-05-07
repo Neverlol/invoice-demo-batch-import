@@ -702,6 +702,21 @@ def _apply_local_safe_coding_hint(line: InvoiceLine) -> None:
         line.tax_code = "3049900000000000000"
         line.coding_reference = line.coding_reference or "本地直播服务规则，需人工复核: 其他现代服务 / 现代服务 / 3049900000000000000"
         return
+    if re.search(r"其他现代服务", text):
+        line.tax_category = line.tax_category or "现代服务"
+        line.tax_code = "3049900000000000000"
+        line.coding_reference = line.coding_reference or "本地现代服务规则，需人工复核: 其他现代服务 / 现代服务 / 3049900000000000000"
+        return
+    if re.search(r"医疗服务|门诊服务|诊疗费|诊查费", text):
+        line.tax_category = line.tax_category or "医疗服务"
+        line.tax_code = "3070202000000000000"
+        line.coding_reference = line.coding_reference or "本地医疗服务规则，需人工复核: 医疗服务 / 医疗服务 / 3070202000000000000"
+        return
+    if re.search(r"酱料|调味酱|调味料", text):
+        line.tax_category = line.tax_category or "调味品"
+        line.tax_code = "1030206040000000000"
+        line.coding_reference = line.coding_reference or "本地调味品规则，需人工复核: 酱料 / 调味品 / 1030206040000000000"
+        return
     if re.search(r"油烟机烟道清洗|烟道清洗|油烟机清洗", text):
         line.tax_category = line.tax_category or "生活服务"
         line.tax_code = "3079900000000000000"

@@ -356,6 +356,10 @@ def _ingest_pending_bundle(
         counters["bundles_with_seller"] += 1
     else:
         counters["bundles_without_seller"] += 1
+        _archive_unassigned_bundle(root, bundle_dir, files, manifest, counters, review_rows, today=today, dry_run=dry_run)
+        if not dry_run:
+            shutil.rmtree(bundle_dir, ignore_errors=True)
+        return
 
     for file_path in files:
         _ingest_pending_file(
@@ -377,6 +381,68 @@ def _ingest_pending_bundle(
         except OSError:
             # Nested empty directories may remain; remove best-effort.
             shutil.rmtree(bundle_dir, ignore_errors=True)
+
+
+
+def _archive_unassigned_bundle(
+    root: Path,
+    bundle_dir: Path,
+    files: list[Path],
+    manifest: dict[str, dict[str, str]],
+    counters: Counter,
+    review_rows: list[dict[str, str]],
+    *,
+    today: str,
+    dry_run: bool,
+) -> None:
+    """Preserve a bundle without a tax-history seller as one review unit.
+
+    Customer/assistant materials may include invoice samples, PDFs, Word docs,
+    screenshots, or current detail workbooks without any tax-bureau history
+    export. Those files are not active profile evidence, but they are not
+    failures either. Keep them together for manual seller assignment.
+    """
+
+    bundle_name = bundle_dir.name
+    review_bundle_dir = root / REVIEW_DIR / "未关联客户资料包" / f"{today}_{safe_filename(bundle_name)}"
+    processed_base = root / INBOX_DIR / PROCESSED_DIR / today / safe_filename(bundle_name)
+    for path in files:
+        counters["unassigned_bundle_material"] += 1
+        file_hash = sha256_file(path)
+        rel_in_bundle = path.relative_to(bundle_dir)
+        if file_hash in manifest:
+            counters["duplicate"] += 1
+            continue
+        canonical = review_bundle_dir / rel_in_bundle
+        if dry_run:
+            processed = processed_base / rel_in_bundle
+        else:
+            canonical = copy_file(path, canonical)
+            processed = move_file(path, processed_base / rel_in_bundle)
+        suffix = path.suffix.lower()
+        file_type = "image_candidate" if suffix in IMAGE_EXTS else "unassigned_bundle_material"
+        manifest[file_hash] = {
+            "sha256": file_hash,
+            "original_name": path.name,
+            "file_type": file_type,
+            "status": "pending_seller_review",
+            "seller_name": "",
+            "canonical_path": str(canonical.relative_to(root)),
+            "processed_path": str(processed.relative_to(root)),
+            "message": f"无税局历史 Excel，按完整资料包待确认销售主体；资料包：{bundle_name}",
+            "ingested_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        review_rows.append(
+            {
+                "sha256": file_hash,
+                "original_name": path.name,
+                "seller_name": "",
+                "relative_path": str(canonical.relative_to(root)),
+                "candidate_type": file_type,
+                "status": "pending_seller_review",
+                "note": f"完整资料包待确认销售主体：{bundle_name}。不要把样票/PDF 文件名中的买方误判为销售主体。",
+            }
+        )
 
 
 
@@ -410,7 +476,46 @@ def _ingest_pending_file(
     suffix = path.suffix.lower()
     try:
         if suffix in EXCEL_EXTS:
-            rows = parse_history_excel(path, source_root=root)
+            try:
+                rows = parse_history_excel(path, source_root=root)
+            except Exception:
+                if bundle_seller_name:
+                    # In a seller-identified bundle, an Excel that is not a tax-bureau
+                    # history export is usually a current invoice sample/detail workbook.
+                    # Archive it with the customer materials instead of treating it as
+                    # a failed history import. It must not enter active profiles.
+                    material_dir = root / bundle_seller_name / "客户沟通材料" / f"{today}_{safe_filename(bundle_name)}"
+                    canonical = material_dir / rel_in_bundle
+                    if dry_run:
+                        processed = processed_base / rel_in_bundle
+                    else:
+                        canonical = copy_file(path, canonical)
+                        processed = move_file(path, processed_base / rel_in_bundle)
+                    manifest[file_hash] = {
+                        "sha256": file_hash,
+                        "original_name": path.name,
+                        "file_type": "bundle_material_candidate",
+                        "status": "candidate_only",
+                        "seller_name": bundle_seller_name,
+                        "canonical_path": str(canonical.relative_to(root)),
+                        "processed_path": str(processed.relative_to(root)),
+                        "message": f"同资料包归档到客户沟通材料；非税局历史 Excel，不进入 active 档案；资料包：{bundle_name}",
+                        "ingested_at": datetime.now().isoformat(timespec="seconds"),
+                    }
+                    counters["bundle_material_archived"] += 1
+                    review_rows.append(
+                        {
+                            "sha256": file_hash,
+                            "original_name": path.name,
+                            "seller_name": bundle_seller_name,
+                            "relative_path": str(canonical.relative_to(root)),
+                            "candidate_type": "bundle_material_candidate",
+                            "status": "pending_review",
+                            "note": f"来自同一资料包：{bundle_name}；非税局历史 Excel，按本次开票材料候选归档，不进入 active 档案。",
+                        }
+                    )
+                    return
+                raise
             seller_name = rows[0].seller_name
             target = root / seller_name / "历史开票明细" / path.name
             if dry_run:
