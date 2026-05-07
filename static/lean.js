@@ -38,23 +38,67 @@ if (createDraftForm) {
   createDraftForm.addEventListener("submit", () => {
     const button = createDraftForm.querySelector("[data-submit-button]");
     const status = createDraftForm.querySelector("[data-submit-status]");
+    const stageNode = createDraftForm.querySelector("[data-submit-stage]");
+    const detailNode = createDraftForm.querySelector("[data-submit-detail]");
+    const elapsedNode = createDraftForm.querySelector("[data-submit-elapsed]");
     const fileInput = createDraftForm.querySelector("[data-file-input]");
     const batchMode = createDraftForm.querySelector('input[name="batch_mode"]');
+    const rawText = createDraftForm.querySelector('textarea[name="raw_text"]')?.value || "";
     const files = Array.from(fileInput?.files || []);
+    const fileNames = files.map((file) => file.name || "");
+    const hasExcel = fileNames.some((name) => /\.(xlsx?|csv|tsv)$/i.test(name));
+    const hasPdf = fileNames.some((name) => /\.pdf$/i.test(name));
+    const hasWord = fileNames.some((name) => /\.(docx?|md|txt)$/i.test(name));
     const imageFiles = files.filter((file) => /\.(png|jpe?g|webp|bmp|gif)$/i.test(file.name || ""));
-    const willUseLlm = files.length > 0 && (!batchMode?.checked || (imageFiles.length > 0 && imageFiles.length <= 5));
+    const hasArchive = fileNames.some((name) => /\.(zip|7z)$/i.test(name));
+    const willUseVision = imageFiles.length > 0 && (!batchMode?.checked || imageFiles.length <= 5);
+    const startedAt = Date.now();
+    const stages = buildSubmitStages({ hasExcel, hasPdf, hasWord, imageCount: imageFiles.length, hasArchive, rawText, batchMode: Boolean(batchMode?.checked), willUseVision });
+
     if (button) {
       button.disabled = true;
-      button.textContent = willUseLlm ? "正在通过大模型识别…" : "正在生成草稿…";
+      button.textContent = "正在生成草稿…";
     }
     if (status) {
       status.hidden = false;
-      status.textContent = willUseLlm
-        ? "正在通过大模型识别图片和文件信息，请稍等。完成后请继续复核购买方、税号、金额和项目。"
-        : "正在用本地规则整理草稿，请稍等。";
-      status.classList.toggle("uses-llm", willUseLlm);
+      status.classList.add("is-live");
+      status.classList.toggle("uses-llm", willUseVision);
     }
+
+    const render = () => {
+      const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+      const current = stages.slice().reverse().find((stage) => elapsed >= stage.at) || stages[0];
+      if (stageNode) stageNode.textContent = current.title;
+      if (detailNode) detailNode.textContent = current.detail;
+      if (elapsedNode) elapsedNode.textContent = `${elapsed} 秒`;
+      if (button) button.textContent = current.button || "正在生成草稿…";
+    };
+    render();
+    window.setInterval(render, 1000);
   });
+}
+
+function buildSubmitStages({ hasExcel, hasPdf, hasWord, imageCount, hasArchive, rawText, batchMode, willUseVision }) {
+  const stages = [
+    { at: 0, title: "接收客户材料", detail: "正在保存上传文件和你粘贴的补充说明。", button: "接收材料中…" },
+    { at: 1, title: "本地规则快速识别", detail: "先用本地规则找销售主体、购买方、金额和票种。", button: "本地识别中…" },
+  ];
+  if (hasArchive) stages.push({ at: 2, title: "展开压缩包线索", detail: "正在识别压缩包内的 Excel / PDF / Word 材料。", button: "读取压缩包…" });
+  if (hasExcel) stages.push({ at: 3, title: batchMode ? "批量识别 Excel 明细" : "识别 Excel 明细", detail: "正在定位项目、规格、数量、单价、金额和税率列。", button: "解析 Excel…" });
+  if (hasPdf || hasWord) stages.push({ at: hasExcel ? 5 : 3, title: "读取 PDF / Word", detail: "正在提取开票信息、样票字段和购买方资料。", button: "读取文件…" });
+  if (rawText.trim()) stages.push({ at: 4, title: "合并补充说明", detail: "正在判断本次金额、税点、备注是否覆盖样票旧信息。", button: "合并文字…" });
+  if (imageCount > 0) {
+    stages.push({ at: 5, title: "图片 OCR 预处理", detail: `检测到 ${imageCount} 张图片，先识别关键截图，剩余保留附件。`, button: "识别图片…" });
+  }
+  if (willUseVision) {
+    stages.push({ at: 8, title: "LLM 识别图片中", detail: "正在让视觉模型读取截图里的买方、金额、订单号和备注。", button: "LLM 识别中…" });
+  }
+  stages.push(
+    { at: willUseVision ? 14 : 7, title: "匹配客户历史档案", detail: "正在按销售主体查历史购买方、常用项目和税率候选。", button: "匹配档案…" },
+    { at: willUseVision ? 18 : 10, title: "生成可复核草稿", detail: "正在把识别结果放入草稿页，并标记需要你重点核对的位置。", button: "生成草稿…" },
+    { at: willUseVision ? 25 : 16, title: "仍在处理，请稍等", detail: "材料较多时会多花几秒；系统会尽量先给出可复核草稿。", button: "即将完成…" }
+  );
+  return stages.sort((a, b) => a.at - b.at);
 }
 
 function setActionMode(mode) {
@@ -77,6 +121,35 @@ function setActionMode(mode) {
 
 function markDraftNeedsRebuild() {
   setActionMode("save");
+}
+
+const draftLiveStatus = document.querySelector("[data-draft-live-status]");
+if (draftLiveStatus) {
+  const titleNode = draftLiveStatus.querySelector("[data-draft-live-title]");
+  const detailNode = draftLiveStatus.querySelector("[data-draft-live-detail]");
+  const elapsedNode = draftLiveStatus.querySelector("[data-draft-live-elapsed]");
+  const hasActiveWork = draftLiveStatus.dataset.hasActiveWork === "1";
+  const startedAt = Date.now();
+  const activeMessages = [
+    "可以先核对已填出的购买方、金额和明细。",
+    "如果有图片或样票，请重点看黄色高亮字段。",
+    "未命中赋码的行建议先用“一键智能赋码”。",
+    "后台识别失败也不会影响你手工复核和保存。",
+  ];
+  let messageIndex = 0;
+  const tick = () => {
+    const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    if (elapsedNode) elapsedNode.textContent = `${elapsed} 秒`;
+    if (hasActiveWork && detailNode && elapsed > 0 && elapsed % 4 === 0) {
+      messageIndex = (messageIndex + 1) % activeMessages.length;
+      detailNode.textContent = activeMessages[messageIndex];
+    }
+    if (!hasActiveWork && titleNode && elapsed > 6) {
+      titleNode.textContent = "草稿已就绪，请按高亮提示复核";
+    }
+  };
+  tick();
+  window.setInterval(tick, 1000);
 }
 
 const draftForm = document.querySelector("[data-draft-form]");

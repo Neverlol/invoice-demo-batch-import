@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>智能开票 Ramp × Mercury 混合风格 - 工作台</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-assistant-copy') }}">
-    <script defer src="{{ url_for('static', filename='lean.js', v='20260502-v27') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260507-live-progress') }}">
+    <script defer src="{{ url_for('static', filename='lean.js', v='20260507-live-progress') }}"></script>
     <!-- compatibility marker: 20260501-v26 -->
   </head>
   <body class="operator-body">
@@ -101,7 +101,13 @@
                 <div class="actions" style="margin-top:16px;justify-content:flex-start">
                   <button class="btn primary" type="submit" data-submit-button>生成开票草稿</button>
                   <label class="batch-mode-toggle"><input type="checkbox" name="batch_mode"><span><strong>批量开具发票</strong><small>多张截图 / 多个购买方 / 税局批量模板导入时勾选</small></span></label>
-                  <div class="submit-status" data-submit-status hidden>正在生成草稿，请稍等。</div>
+                  <div class="submit-status live-submit-status" data-submit-status hidden>
+                    <div class="live-status-orb"><span></span></div>
+                    <div class="live-status-copy">
+                      <strong data-submit-stage>正在生成草稿</strong>
+                      <small><span data-submit-detail>准备读取材料。</span><b data-submit-elapsed>0 秒</b></small>
+                    </div>
+                  </div>
                 </div>
               </div>
             </form>

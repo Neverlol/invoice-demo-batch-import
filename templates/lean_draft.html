@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>发票草稿 {{ draft.draft_id }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-assistant-copy') }}">
-    <script defer src="{{ url_for('static', filename='lean.js', v='20260429-v23') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260507-live-progress') }}">
+    <script defer src="{{ url_for('static', filename='lean.js', v='20260507-live-progress') }}"></script>
   </head>
   <body class="operator-body">
     <div class="app-shell draft-console-shell">
@@ -51,6 +51,15 @@
           <div class="env-item"><span>明细</span><strong>{{ draft.lines|length }} 行</strong><small>你修正后可辅助下次推荐</small></div>
         </section>
 
+        {% set has_async_like_work = draft.ocr_status in ['vision_deferred', 'partial'] or draft.source_doc_status in ['partial'] or draft.llm_provider or draft.extract_warnings %}
+        <section class="banner live-draft-banner {% if has_async_like_work %}is-active{% else %}is-ready{% endif %}" data-draft-live-status data-has-active-work="{{ '1' if has_async_like_work else '0' }}">
+          <div class="live-status-orb"><span></span></div>
+          <div>
+            <strong data-draft-live-title>{% if has_async_like_work %}智能解析结果已进入草稿，请边核对边看重点提醒{% else %}草稿已生成，当前没有阻塞中的后台识别{% endif %}</strong>
+            <p><span data-draft-live-detail>{% if draft.ocr_status == 'vision_deferred' %}图片材料已交给视觉识别链路；请先核对已映射出的购买方、金额和明细。{% elif draft.extract_warnings %}智能识别有差异提醒，请优先查看高亮字段和命中来源。{% elif draft.source_doc_status in ['partial'] or draft.ocr_status in ['partial'] %}部分材料已解析，部分附件保留待人工复核。{% else %}请按高亮提示核对购买方、金额、税率和未命中赋码。{% endif %}</span> <b data-draft-live-elapsed>0 秒</b></p>
+          </div>
+        </section>
+
         {% if saved and not smart_code_result %}<section class="banner ok"><p>修改已保存。</p></section>{% endif %}
         {% if smart_code_result %}<section class="banner {{ 'alert' if smart_code_result.level == 'warn' else 'ok' }}"><strong>{{ smart_code_result.title }}</strong><p>{{ smart_code_result.message }}</p></section>{% endif %}
         {% if success_recorded %}<section class="banner ok"><p>已记录本次开票结果。</p></section>{% endif %}
@@ -79,16 +88,16 @@
               <div class="card-head"><div><h2>材料摘要</h2><p>这里帮你回看材料来源，不需要重复录入。</p></div></div>
               <div class="panel-list">
                 <div class="panel-item"><span class="badge info">原始文本</span><p>{{ draft.raw_text[:180] if draft.raw_text else '本草稿没有保留原始文本。' }}{% if draft.raw_text|length > 180 %}…{% endif %}</p></div>
-                <div class="panel-item"><span class="badge {% if draft.ocr_status == 'success' %}ok{% else %}neutral{% endif %}">OCR</span><p>{{ draft.ocr_note or draft.ocr_status or '未请求 OCR' }}</p></div>
-                <div class="panel-item"><span class="badge {% if draft.source_doc_status == 'success' %}ok{% else %}neutral{% endif %}">文件解析</span><p>{{ draft.source_doc_note or draft.source_doc_status or '未解析文件' }}</p></div>
+                <div class="panel-item {% if draft.ocr_status in ['vision_deferred','partial','empty','unavailable'] %}review-attention{% endif %}"><span class="badge {% if draft.ocr_status == 'success' %}ok{% elif draft.ocr_status in ['vision_deferred','partial'] %}warn{% else %}neutral{% endif %}">OCR</span><p>{{ draft.ocr_note or draft.ocr_status or '未请求 OCR' }}</p></div>
+                <div class="panel-item {% if draft.source_doc_status in ['partial','empty'] %}review-attention{% endif %}"><span class="badge {% if draft.source_doc_status == 'success' %}ok{% elif draft.source_doc_status == 'partial' %}warn{% else %}neutral{% endif %}">文件解析</span><p>{{ draft.source_doc_note or draft.source_doc_status or '未解析文件' }}</p></div>
               </div>
             </section>
 
             <section class="card compact-party-card">
               <div class="card-head"><div><h2>主体与购买方</h2><p>提交前请重点核对，避免主体或购买方填错。</p></div></div>
-              <label class="review-field"><span>销售方 / 纳税主体</span><input name="company_name" value="{{ draft.company_name }}" placeholder="销售方主体"></label>
-              <label class="review-field"><span>购买方名称</span><input name="buyer_name" value="{{ draft.buyer.name }}" placeholder="购买方名称"></label>
-              <label class="review-field"><span>购买方税号</span><input name="buyer_tax_id" value="{{ draft.buyer.tax_id }}" placeholder="购买方税号"></label>
+              <label class="review-field {% if not draft.company_name %}needs-review{% endif %}"><span>销售方 / 纳税主体</span><input name="company_name" value="{{ draft.company_name }}" placeholder="销售方主体"></label>
+              <label class="review-field {% if not draft.buyer.name %}needs-review{% endif %}"><span>购买方名称</span><input name="buyer_name" value="{{ draft.buyer.name }}" placeholder="购买方名称"></label>
+              <label class="review-field {% if not draft.buyer.tax_id %}needs-review{% endif %}"><span>购买方税号</span><input name="buyer_tax_id" value="{{ draft.buyer.tax_id }}" placeholder="购买方税号"></label>
               <details class="mini-details"><summary>更多购买方字段</summary>
                 <label class="review-field"><span>地址</span><input name="buyer_address" value="{{ draft.buyer.address }}"></label>
                 <label class="review-field"><span>电话</span><input name="buyer_phone" value="{{ draft.buyer.phone }}"></label>
@@ -138,11 +147,11 @@
               <div class="card-head"><div><h2>开票明细</h2><p>你可以直接在表格里修改；多行未命中时先用上方“一键智能赋码”，逐行入口只用于重试或复核。</p></div><button type="button" class="btn" data-add-line>新增项目</button></div>
               <div class="table-wrap table-scroll"><table class="line-table compact-line-table"><thead><tr><th>项目名称</th><th>赋码大类</th><th>税收编码</th><th>命中来源</th><th>规格</th><th>单位</th><th>数量</th><th>单价</th><th>金额</th><th>税率</th></tr></thead><tbody data-lines>
                 {% for line in line_rows %}
-                  <tr>
+                  {% set coding_reference = line.coding_reference or '' %}
+                  <tr class="{% if coding_reference.startswith('未命中') or coding_reference.startswith('智能赋码调用失败') or coding_reference.startswith('智能赋码返回结果未命中') or not line.tax_category or not line.tax_code or not line.amount_with_tax %}line-needs-review{% endif %}">
                     <td><input name="line_project_name" value="{{ line.project_name }}">{% if line.failure_alerts %}<div class="line-failure-list">{% for failure in line.failure_alerts %}<div class="line-failure"><span>{{ failure.repair_decision_label or '税局退回' }}</span><strong>{{ failure.field_name or '明细字段' }}</strong><small>{{ failure.repair_focus or failure.suggested_action }}{% if failure.applied_value %} 已应用：{{ failure.applied_value }}{% endif %}</small>{% if failure.repair_field and failure.repair_value %}<button type="button" class="inline-repair" data-apply-line-repair data-repair-field="{{ failure.repair_field }}" data-repair-value="{{ failure.repair_value }}">应用建议：{{ failure.repair_value }}</button>{% endif %}</div>{% endfor %}</div>{% endif %}</td>
                     <td><input name="line_tax_category" value="{{ line.tax_category }}"></td>
                     <td><input name="line_tax_code" value="{{ line.tax_code }}"></td>
-                    {% set coding_reference = line.coding_reference or '' %}
                     <td><span class="coding-note{% if coding_reference.startswith('智能推荐') %} smart-suggestion{% elif coding_reference.startswith('未命中') %} missed-rule{% elif coding_reference.startswith('智能赋码调用失败') or coding_reference.startswith('智能赋码返回结果未命中') %} smart-failed{% endif %}" data-coding-note title="{{ coding_reference }}">{{ coding_reference.split(':', 1)[0] if coding_reference else '待你核对' }}</span><input type="hidden" name="line_coding_reference" value="{{ line.coding_reference }}"><button class="smart-line-btn" formaction="{{ url_for('smart_code_draft', draft_id=draft.draft_id) }}" name="smart_code_scope" value="line:{{ loop.index0 }}" type="submit">{% if coding_reference.startswith('智能赋码调用失败') or coding_reference.startswith('智能赋码返回结果未命中') %}重试本行{% elif coding_reference.startswith('未命中') or not line.tax_category or not line.tax_code %}本行赋码{% elif coding_reference.startswith('智能推荐') %}重新复核{% else %}复核本行{% endif %}</button></td>
                     <td><input name="line_specification" value="{{ line.specification }}"></td>
                     <td><input name="line_unit" value="{{ line.unit }}"></td>
