@@ -188,6 +188,7 @@
               <h2>智能审核</h2>
               <div class="panel-list" style="margin-top:12px;">
                 <div class="panel-item"><span class="badge {% if export.error_count %}error{% elif export.warning_count %}warn{% else %}ok{% endif %}">预校验</span><p>{% if export.error_count %}存在阻断错误，暂不可上传税局。{% elif export.warning_count %}无阻断错误，但有提醒需要复核。{% else %}当前模板预校验通过。{% endif %}</p></div>
+                {% if draft.field_review_reasons %}<div class="panel-item review-attention field-review-card"><span class="badge warn">重点核对字段</span>{% for field, reasons in draft.field_review_reasons.items() %}<div class="field-review-item"><strong>{{ field }}</strong>{% for reason in reasons[:2] %}<small>{{ reason }}</small>{% endfor %}</div>{% endfor %}</div>{% endif %}
                 {% if draft.extract_warnings %}<div class="panel-item review-attention"><span class="badge warn">智能复核原因</span><p>{% for warning in draft.extract_warnings[:4] %}<em class="review-reason">{{ warning }}</em>{% endfor %}</p></div>{% endif %}
                 <div class="panel-item"><span class="badge info">字段来源</span><p>购买方、金额、明细可能来自材料解析、历史客户档案或你的修改；保存修改不会重复触发 OCR / LLM。</p></div>
                 <div class="panel-item"><span class="badge warn">规则学习</span><p>你修改税收编码、税率或项目后，系统会作为本地学习候选记录下来，下次仍请复核。</p></div>

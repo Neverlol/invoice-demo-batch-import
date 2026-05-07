@@ -506,7 +506,77 @@ def _manual_compare_value(line: InvoiceLine, field_name: str) -> str:
     return str(getattr(line, field_name, "") or "").strip()
 
 
+def _build_field_review_reasons(draft: InvoiceDraft) -> dict[str, list[str]]:
+    reasons: dict[str, list[str]] = {}
+
+    def add(field: str, message: str) -> None:
+        cleaned = str(message or "").strip()
+        if not cleaned:
+            return
+        bucket = reasons.setdefault(field, [])
+        if cleaned not in bucket:
+            bucket.append(cleaned)
+
+    tags_text = " / ".join(draft.material_tags or [])
+    warnings_text = "\n".join(draft.extract_warnings or [])
+    has_image_material = any(tag in tags_text for tag in ["群聊截图", "图片材料", "车辆/现场照片"])
+    has_ocr_risk = draft.ocr_status not in {"not_requested", "success", ""} or "OCR" in warnings_text
+
+    if not draft.company_name.strip():
+        add("销售方", "销售方为空；现场提交前必须确认当前税局登录主体和材料主体一致。")
+    if "多个公司" in warnings_text:
+        add("销售方", "材料中出现多个公司名；需确认哪个是销售主体，避免把样票买方当成咱们客户。")
+        add("购买方名称", "材料中出现多个公司名；需确认购买方没有和销售主体串位。")
+
+    if not draft.buyer.name.strip():
+        add("购买方名称", "购买方名称未可靠识别；请从客户开票信息、样票或聊天截图核对。")
+    if not draft.buyer.tax_id.strip():
+        add("购买方税号", "购买方税号缺失；上传税局前必须补全或确认客户不需要税号。")
+    if has_ocr_risk or has_image_material:
+        add("购买方税号", "图片/OCR 容易把发票号、二维码数字或车架号误当税号；请重点核对。")
+
+    if not draft.lines:
+        add("开票明细", "本地规则未形成明细；需要人工补充或等待智能识别结果。")
+        add("金额", "未形成可用金额；请从本次文字、Excel 或聊天截图确认。")
+    else:
+        missing_project = sum(1 for line in draft.lines if not line.project_name.strip())
+        missing_amount = sum(1 for line in draft.lines if not line.resolved_amount_with_tax())
+        missing_code = sum(1 for line in draft.lines if not line.tax_category.strip() or not line.tax_code.strip())
+        low_conf_lines = [line for line in draft.lines if _line_needs_field_review(line)]
+        if missing_project:
+            add("开票明细", f"{missing_project} 行缺项目名称；请核对客户材料中的项目/服务内容。")
+        if missing_amount:
+            add("金额", f"{missing_amount} 行缺含税金额；请核对本次开票金额，不要沿用样票旧金额。")
+        if missing_code:
+            add("税收编码", f"{missing_code} 行缺税收编码或赋码大类；建议先用一键智能赋码/人工复核。")
+        if low_conf_lines:
+            add("开票明细", f"{len(low_conf_lines)} 行来自兜底、OCR、异常表或需人工复核来源；请逐行看命中来源。")
+
+    if "样票 PDF" in tags_text or "样票" in warnings_text:
+        add("金额", "样票里的金额可能是历史金额；以本次文字/聊天/Excel 明确金额为准。")
+    if "多个金额" in warnings_text:
+        add("金额", "材料中出现多个金额；需确认哪个是本次开票金额，哪些只是样票或历史金额。")
+    if "财务流水/余额线索" in tags_text:
+        add("开票明细", "财务流水/余额表只作线索，不应直接转成发票明细。")
+        add("金额", "财务流水/余额表金额可能不是本次开票金额；请人工确认。")
+    if "压缩包" in tags_text:
+        add("附件", "压缩包材料可能只解析了部分文件；请确认附件内是否还有未识别材料。")
+    if has_image_material:
+        add("附件", "图片/截图已保留为附件；请对照原图核对系统识别出的字段。")
+
+    return {field: messages[:4] for field, messages in reasons.items()}
+
+
+
+def _line_needs_field_review(line: InvoiceLine) -> bool:
+    reference = f"{line.coding_reference} {line.project_name} {line.specification}"
+    markers = ["兜底", "异常", "需人工复核", "未命中", "OCR", "视觉", "样票", "历史", "智能赋码调用失败", "智能赋码返回结果未命中"]
+    return any(marker in reference for marker in markers)
+
+
+
 def save_draft(draft: InvoiceDraft) -> None:
+    draft.field_review_reasons = _build_field_review_reasons(draft)
     draft_dir = draft_directory(draft.draft_id)
     draft_dir.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -535,6 +605,7 @@ def save_draft(draft: InvoiceDraft) -> None:
         "llm_provider": draft.llm_provider,
         "extract_warnings": draft.extract_warnings,
         "material_tags": draft.material_tags,
+        "field_review_reasons": draft.field_review_reasons,
     }
     (draft_dir / "draft.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     (draft_dir / "raw_text.txt").write_text(draft.raw_text, encoding="utf-8")
@@ -638,6 +709,7 @@ def load_draft(draft_id: str) -> InvoiceDraft | None:
         llm_provider=payload.get("llm_provider", ""),
         extract_warnings=payload.get("extract_warnings", []),
         material_tags=payload.get("material_tags", []),
+        field_review_reasons=payload.get("field_review_reasons", {}),
     )
 
 

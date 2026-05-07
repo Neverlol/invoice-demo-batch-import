@@ -1965,3 +1965,24 @@ body:has(#batch-sheet-form) .card-head p {
   font-size: 12px;
   font-weight: 700;
 }
+.field-review-card {
+  display: grid;
+  gap: 8px;
+}
+.field-review-item {
+  padding: 9px 10px;
+  border-radius: 14px;
+  background: rgba(255,253,250,.72);
+  border: 1px solid rgba(166,106,0,.14);
+}
+.field-review-item strong {
+  display: block;
+  color: var(--warning);
+  font-size: 13px;
+}
+.field-review-item small {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink-2);
+  line-height: 1.35;
+}

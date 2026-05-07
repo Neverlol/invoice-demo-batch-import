@@ -177,6 +177,7 @@ class InvoiceDraft:
     llm_provider: str = ""
     extract_warnings: List[str] = field(default_factory=list)
     material_tags: List[str] = field(default_factory=list)
+    field_review_reasons: Dict[str, List[str]] = field(default_factory=dict)
 
     def detail_lines_text(self) -> str:
         headers = [
