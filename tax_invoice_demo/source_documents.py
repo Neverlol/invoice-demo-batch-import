@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import tempfile
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -83,6 +84,11 @@ def _extract_single_document(path: Path) -> SourceDocumentResult:
         if suffix == ".doc":
             text = _extract_doc_text(path)
             return SourceDocumentResult(file_name=path.name, extracted_text=text, parser="doc_best_effort")
+        if suffix == ".zip":
+            text = _extract_zip_text(path)
+            return SourceDocumentResult(file_name=path.name, extracted_text=text, parser="zip_bundle")
+        if suffix == ".7z":
+            return SourceDocumentResult(file_name=path.name, error="7z 压缩包当前不能直接解析；请先解压后上传里面的 Excel/PDF/Word/图片。", parser="archive_notice")
     except Exception as exc:  # noqa: BLE001
         return SourceDocumentResult(file_name=path.name, error=f"{type(exc).__name__}: {exc}")
     return SourceDocumentResult(file_name=path.name, error="当前附件格式暂未接入解析。")
@@ -152,6 +158,30 @@ def _extract_plain_text(path: Path) -> str:
         reader = csv.reader(io.StringIO(text))
         return "\n".join("\t".join(cell.strip() for cell in row) for row in reader if any(cell.strip() for cell in row))
     return text
+
+
+def _extract_zip_text(path: Path) -> str:
+    parts: list[str] = []
+    with tempfile.TemporaryDirectory(prefix="invoice-zip-docs-") as temp_dir_raw:
+        temp_dir = Path(temp_dir_raw)
+        with zipfile.ZipFile(path) as archive:
+            members = [member for member in archive.infolist() if not member.is_dir()]
+            for member in members[:30]:
+                name = Path(member.filename).name
+                if not name or name.startswith("."):
+                    continue
+                suffix = Path(name).suffix.lower()
+                if suffix not in {".pdf", ".xlsx", ".xls", ".txt", ".csv", ".tsv", ".md", ".docx", ".doc"}:
+                    continue
+                target = temp_dir / name
+                target.write_bytes(archive.read(member))
+                result = _extract_single_document(target)
+                if result.extracted_text:
+                    parts.append(f"[{member.filename}]\n{result.extracted_text}")
+                elif result.error:
+                    parts.append(f"[{member.filename}]\n解析提示：{result.error}")
+    return "\n\n".join(parts)
+
 
 
 def _extract_docx_text(path: Path) -> str:
@@ -229,7 +259,7 @@ def _doc_text_score(value: str) -> int:
 
 
 def _is_supported_document(path: Path) -> bool:
-    return path.suffix.lower() in {".pdf", ".xlsx", ".xls", ".txt", ".csv", ".tsv", ".md", ".docx", ".doc"}
+    return path.suffix.lower() in {".pdf", ".xlsx", ".xls", ".txt", ".csv", ".tsv", ".md", ".docx", ".doc", ".zip", ".7z"}
 
 
 def serialize_document_results(extraction: SourceDocumentsExtraction) -> str:
