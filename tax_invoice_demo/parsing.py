@@ -66,11 +66,11 @@ DETAIL_HEADERS = {
 }
 
 BUYER_NAME_PATTERNS = [
-    re.compile(r"^(?:购买方名称|购方名称|客户名称|公司名称|开票抬头|抬头|购货单位)[：:\t ]+\s*(.+)"),
-    re.compile(r"^(?:单位名称|名称)[：:\t ]+\s*(.+)"),
+    re.compile(r"(?:^|[\s\t])(?:购买方名称|购方名称|客户名称|公司名称|开票抬头|发票抬头|抬头|购货单位|购货方名称|业主单位名称|业主名称)[：:\t ]+\s*(.+)"),
+    re.compile(r"(?:^|[\s\t])(?:单位名称|名称)[：:\t ]+\s*(.+)"),
 ]
 BUYER_TAX_ID_PATTERNS = [
-    re.compile(r"^(?:购买方税号|购方税号|税号|统一社会信用代码|纳税人识别号)[：:\t ]+\s*([0-9A-Z]{15,20})"),
+    re.compile(r"(?:^|[\s\t])(?:购买方税号|购方税号|单位税号|税号|统一社会信用代码|纳税人识别号|纳税识别号)[：:\t ]+\s*([0-9A-Z]{15,20})"),
 ]
 BUYER_ADDRESS_PATTERNS = [
     re.compile(r"(?:购买方地址|地址)[：:]\s*(.+)"),
@@ -318,11 +318,12 @@ def serialize_invoice_lines(lines: list[InvoiceLine]) -> str:
 def extract_buyer_info_from_text(raw_text: str) -> BuyerInfo:
     buyer = BuyerInfo(name="", tax_id="")
     lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+    tabular_buyer = _extract_buyer_info_from_tabular_text(lines)
     for line in lines:
         for pattern in BUYER_NAME_PATTERNS:
             matched = pattern.search(line)
             if matched and not buyer.name:
-                candidate = matched.group(1).strip()
+                candidate = _trim_inline_field_value(matched.group(1).strip())
                 if _looks_like_placeholder_field_value(candidate):
                     continue
                 buyer.name = candidate
@@ -333,19 +334,31 @@ def extract_buyer_info_from_text(raw_text: str) -> BuyerInfo:
         for pattern in BUYER_ADDRESS_PATTERNS:
             matched = pattern.search(line)
             if matched and not buyer.address:
-                buyer.address = matched.group(1).strip()
+                buyer.address = _trim_inline_field_value(matched.group(1).strip())
         for pattern in BUYER_PHONE_PATTERNS:
             matched = pattern.search(line)
             if matched and not buyer.phone:
-                buyer.phone = matched.group(1).strip()
+                buyer.phone = _trim_inline_field_value(matched.group(1).strip())
         for pattern in BUYER_BANK_PATTERNS:
             matched = pattern.search(line)
             if matched and not buyer.bank_name:
-                buyer.bank_name = matched.group(1).strip()
+                buyer.bank_name = _trim_inline_field_value(matched.group(1).strip())
         for pattern in BUYER_ACCOUNT_PATTERNS:
             matched = pattern.search(line)
             if matched and not buyer.bank_account:
-                buyer.bank_account = matched.group(1).strip()
+                buyer.bank_account = _trim_inline_field_value(matched.group(1).strip())
+    if tabular_buyer.name and not buyer.name:
+        buyer.name = tabular_buyer.name
+    if tabular_buyer.tax_id and not buyer.tax_id:
+        buyer.tax_id = tabular_buyer.tax_id
+    if tabular_buyer.address and not buyer.address:
+        buyer.address = tabular_buyer.address
+    if tabular_buyer.phone and not buyer.phone:
+        buyer.phone = tabular_buyer.phone
+    if tabular_buyer.bank_name and not buyer.bank_name:
+        buyer.bank_name = tabular_buyer.bank_name
+    if tabular_buyer.bank_account and not buyer.bank_account:
+        buyer.bank_account = tabular_buyer.bank_account
     if not buyer.name or not buyer.tax_id:
         invoice_buyer = _extract_buyer_info_from_invoice_pdf_text(lines)
         if invoice_buyer.name and not buyer.name:
@@ -863,7 +876,7 @@ def _cleanup_invoice_ocr_project_name(value: str) -> str:
 def _looks_like_company_name(value: str) -> bool:
     return bool(
         re.search(
-            r"(?:公司|中心|商店|经销店|配送中心|修理部|商行|门市部|超市|合作社)$",
+            r"(?:公司|中心|医院|学校|大学|研究所|研究院|商店|经销店|配送中心|修理部|商行|门市部|超市|合作社)$",
             value.strip(),
         )
     )
@@ -894,6 +907,79 @@ def _looks_like_invoice_pdf_break(value: str) -> bool:
     )
 
 
+def _trim_inline_field_value(value: str) -> str:
+    return re.split(
+        r"\s+(?:纳税人识别号|纳税识别号|统一社会信用代码|税号|开户行|开户银行|账号|银行账号|电话|地址)[：:]",
+        value,
+        maxsplit=1,
+    )[0].strip()
+
+
+
+def _extract_buyer_info_from_tabular_text(lines: list[str]) -> BuyerInfo:
+    buyer = BuyerInfo(name="", tax_id="")
+    for index, line in enumerate(lines):
+        parts = [part.strip() for part in re.split(r"[\t|]", line)]
+        if len(parts) < 2:
+            continue
+        for column, label in enumerate(parts):
+            normalized = normalize_header(label).replace("：", "").replace(":", "")
+            value = _next_tabular_value(parts, column)
+            if not value and index + 1 < len(lines):
+                next_parts = [part.strip() for part in re.split(r"[\t|]", lines[index + 1])]
+                value = _next_tabular_value(next_parts, column, include_same_column=True)
+            if not value:
+                continue
+            if normalized in {"业主单位名称", "业主名称", "购买方名称", "购方名称", "客户名称", "开票抬头", "发票抬头", "单位名称"} and not buyer.name:
+                buyer.name = value
+            elif normalized in {"税号", "纳税人识别号", "纳税识别号", "统一社会信用代码", "购买方税号", "购方税号"} and not buyer.tax_id:
+                matched = re.search(r"([0-9A-Z]{15,20})", value.upper().replace(" ", ""))
+                if matched:
+                    buyer.tax_id = _normalize_tax_id_ocr_noise(matched.group(1))
+            elif normalized in {"地址", "购买方地址"} and not buyer.address:
+                buyer.address = value
+            elif normalized in {"电话", "购买方电话"} and not buyer.phone:
+                buyer.phone = value
+            elif normalized in {"开户行", "开户银行", "购买方开户行", "购买方开户银行"} and not buyer.bank_name:
+                buyer.bank_name = value
+            elif normalized in {"账号", "银行账号", "购买方银行账号"} and not buyer.bank_account:
+                buyer.bank_account = value
+    return buyer
+
+
+
+def _next_tabular_value(parts: list[str], column: int, *, include_same_column: bool = False) -> str:
+    start = column if include_same_column else column + 1
+    for value in parts[start:]:
+        value = value.strip()
+        if not value:
+            continue
+        if _looks_like_tabular_label(value):
+            return ""
+        return _trim_inline_field_value(value)
+    return ""
+
+
+
+def _looks_like_tabular_label(value: str) -> bool:
+    normalized = normalize_header(value).replace("：", "").replace(":", "").strip()
+    return normalized in {
+        "税号",
+        "纳税人识别号",
+        "纳税识别号",
+        "统一社会信用代码",
+        "开户行",
+        "开户银行",
+        "银行账号",
+        "账号",
+        "地址及电话",
+        "地址",
+        "电话",
+        "证明材料",
+    }
+
+
+
 def _extract_buyer_info_from_invoice_pdf_text(lines: list[str]) -> BuyerInfo:
     buyer = BuyerInfo(name="", tax_id="")
     date_index = -1
@@ -922,7 +1008,7 @@ def _extract_buyer_info_from_invoice_pdf_text(lines: list[str]) -> BuyerInfo:
 
 def _extract_buyer_info_from_invoice_ocr_text(lines: list[str]) -> BuyerInfo:
     buyer = BuyerInfo(name="", tax_id="")
-    company_tail_pattern = r"(?:公司|中心|商店|经销店|配送中心|修理部|商行|门市部|超市|合作社)"
+    company_tail_pattern = r"(?:公司|中心|医院|学校|大学|研究所|研究院|商店|经销店|配送中心|修理部|商行|门市部|超市|合作社)"
     for line in lines:
         if not buyer.name and "名称" in line:
             matched = re.search(r"名称[：:]\s*(.+?)(?:\s{2,}.+?名称[：:]|$)", line)
@@ -973,13 +1059,13 @@ def _extract_buyer_info_from_inline_text(raw_text: str) -> BuyerInfo:
     if not text:
         return buyer
 
-    tax_id_match = re.search(r"([0-9A-Z]{15,20})", text.upper().replace(" ", ""))
+    tax_id_match = _find_inline_tax_id_match(text)
     if tax_id_match:
         buyer.tax_id = _normalize_tax_id_ocr_noise(tax_id_match.group(1))
 
     company_matches = list(
         re.finditer(
-            r"([\u4e00-\u9fffA-Za-z0-9()（）·]{2,}(?:公司|中心|商店|经销店|配送中心|修理部|商行|门市部|超市|合作社))",
+            r"([\u4e00-\u9fffA-Za-z0-9()（）·]{2,}(?:公司|中心|医院|学校|大学|研究所|研究院|商店|经销店|配送中心|修理部|商行|门市部|超市|合作社))",
             text,
         )
     )
@@ -993,6 +1079,20 @@ def _extract_buyer_info_from_inline_text(raw_text: str) -> BuyerInfo:
         chosen = company_matches[0]
     buyer.name = _cleanup_inline_company_name(chosen.group(1))
     return buyer
+
+
+def _find_inline_tax_id_match(text: str):
+    compact_text = text.upper().replace(" ", "")
+    for matched in re.finditer(r"([0-9A-Z]{15,20})", compact_text):
+        value = matched.group(1)
+        window = compact_text[max(0, matched.start() - 8): min(len(compact_text), matched.end() + 8)]
+        if "车架号" in window or "VIN" in window:
+            continue
+        if len(value) == 17 and not value[0].isdigit():
+            continue
+        return matched
+    return None
+
 
 
 def _normalize_inline_request_text(raw_text: str) -> str:

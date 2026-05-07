@@ -169,6 +169,17 @@ def _infer_reference_tax_rate(reference_text: str) -> str:
     return f"{rates[-1]}%" if rates else "1%"
 
 
+def _should_override_single_line_amount(raw_text: str, lines: list[InvoiceLine]) -> bool:
+    text = str(raw_text or "")
+    if not text.strip() or len(lines) != 1:
+        return False
+    amount_mentions = re.findall(r"(?:[¥￥]\s*)?\d{1,8}(?:\.\d{1,2})?\s*(?:元|块钱|块)", text)
+    if len(amount_mentions) != 1:
+        return False
+    return bool(re.search(r"本次|这次|开票|发票|金额|合计|总共|共计", text))
+
+
+
 def _apply_current_amount_from_user_text(
     lines: list[InvoiceLine],
     *,
@@ -178,12 +189,13 @@ def _apply_current_amount_from_user_text(
     amount = _current_amount_from_user_text(raw_text)
     if not amount:
         return lines
-    if not _looks_like_repair_reference(reference_text):
+    is_repair = _looks_like_repair_reference(reference_text)
+    if not is_repair and not _should_override_single_line_amount(raw_text, lines):
         return lines
     if not lines:
         return [
             InvoiceLine(
-                project_name="维修费",
+                project_name="维修费" if is_repair else "开票项目",
                 amount_with_tax=amount,
                 tax_rate=_infer_reference_tax_rate(reference_text),
                 unit="项",
@@ -192,7 +204,7 @@ def _apply_current_amount_from_user_text(
         ]
     target_index = 0
     for index, line in enumerate(lines):
-        if re.search(r"修理修配|维修|修理", line.project_name):
+        if is_repair and re.search(r"修理修配|维修|修理", line.project_name):
             target_index = index
             break
     patched: list[InvoiceLine] = []

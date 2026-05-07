@@ -80,6 +80,9 @@ def _extract_single_document(path: Path) -> SourceDocumentResult:
         if suffix == ".docx":
             text = _extract_docx_text(path)
             return SourceDocumentResult(file_name=path.name, extracted_text=text, parser="docx_xml")
+        if suffix == ".doc":
+            text = _extract_doc_text(path)
+            return SourceDocumentResult(file_name=path.name, extracted_text=text, parser="doc_best_effort")
     except Exception as exc:  # noqa: BLE001
         return SourceDocumentResult(file_name=path.name, error=f"{type(exc).__name__}: {exc}")
     return SourceDocumentResult(file_name=path.name, error="当前附件格式暂未接入解析。")
@@ -164,8 +167,69 @@ def _extract_docx_text(path: Path) -> str:
     return "\n".join(part for part in paragraphs if part)
 
 
+
+def _extract_doc_text(path: Path) -> str:
+    # Some customer files are actually OOXML/ZIP documents with a .doc suffix.
+    # Try the structured reader first; otherwise fall back to a conservative
+    # printable-text harvest from legacy OLE Word binaries.
+    try:
+        return _extract_docx_text(path)
+    except Exception:
+        pass
+    raw = path.read_bytes()
+    candidates: list[str] = []
+    for encoding in ["utf-16le", "gb18030", "gbk", "utf-8"]:
+        decoded = raw.decode(encoding, errors="ignore")
+        chunks = _readable_doc_chunks(decoded)
+        if chunks:
+            candidates.append("\n".join(chunks))
+    if not candidates:
+        return ""
+    return max(candidates, key=_doc_text_score)
+
+
+
+def _readable_doc_chunks(text: str) -> list[str]:
+    import re
+
+    chunks = []
+    for chunk in re.findall(r"[\u4e00-\u9fffA-Za-z0-9（）()：:，,。./_\-\s]{4,}", text):
+        cleaned = re.sub(r"[ \t\r\f\v]+", " ", chunk).strip()
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        if not cleaned:
+            continue
+        if _looks_like_doc_binary_noise(cleaned):
+            continue
+        chunks.append(cleaned)
+    return chunks[:120]
+
+
+
+def _looks_like_doc_binary_noise(value: str) -> bool:
+    noise_markers = ["Content_Types", "theme/theme", "xml version", "Microsoft Office Word", "Root Entry", "WordDocument"]
+    if any(marker in value for marker in noise_markers):
+        return True
+    chinese_count = sum(1 for char in value if "\u4e00" <= char <= "\u9fff")
+    digit_count = sum(1 for char in value if char.isdigit())
+    return chinese_count == 0 and digit_count < 6 and len(value) > 30
+
+
+
+def _doc_text_score(value: str) -> int:
+    import re
+
+    field_markers = ["单位名称", "纳税识别号", "纳税人识别号", "统一社会信用代码", "开户行", "账号", "电话", "地址", "开票"]
+    marker_score = sum(10000 for marker in field_markers if marker in value)
+    tax_id_score = 5000 if re.search(r"[0-9A-Z]{15,20}", value.upper()) else 0
+    chinese_count = sum(1 for char in value if "\u4e00" <= char <= "\u9fff")
+    digit_count = sum(1 for char in value if char.isdigit())
+    noise_penalty = sum(3000 for marker in ["Content_Types", "theme/theme", "Root Entry", "WordDocument"] if marker in value)
+    return marker_score + tax_id_score + chinese_count * 3 + digit_count - noise_penalty
+
+
+
 def _is_supported_document(path: Path) -> bool:
-    return path.suffix.lower() in {".pdf", ".xlsx", ".xls", ".txt", ".csv", ".tsv", ".md", ".docx"}
+    return path.suffix.lower() in {".pdf", ".xlsx", ".xls", ".txt", ".csv", ".tsv", ".md", ".docx", ".doc"}
 
 
 def serialize_document_results(extraction: SourceDocumentsExtraction) -> str:

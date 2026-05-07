@@ -20,6 +20,7 @@ from .extraction_pipeline import compose_parse_source, extract_invoice_structure
 from .ledger import sync_draft_to_ledger
 from .models import BuyerInfo, DraftAttachment, DraftBatch, DraftBatchItem, InvoiceDraft, InvoiceLine
 from .ocr import run_optional_ocr
+from .parsing import parse_bulk_invoice_lines
 from .platform_invoice_screenshots import PlatformInvoiceRequest, extract_platform_invoice_requests
 from .source_documents import extract_supported_documents, serialize_document_results
 from .tax_rule_engine import write_learned_rules_from_manual_update
@@ -85,7 +86,7 @@ def create_draft_from_workbench(
     invoice_profile = _infer_invoice_profile(early_parse_source, note=note)
     if force_batch:
         workbook_units = _extract_workbook_invoice_units(draft_dir, attachments)
-        if len(workbook_units) >= 2:
+        if len(workbook_units) >= 1:
             buyer_extraction = extract_invoice_structured_data(
                 raw_text=raw_text,
                 note=note,
@@ -1222,6 +1223,11 @@ def _extract_workbook_invoice_units(draft_dir: Path, attachments: list[DraftAtta
         except Exception:  # noqa: BLE001
             lines = []
         if not lines:
+            try:
+                lines = _generic_invoice_lines_from_workbook(source_path)
+            except Exception:  # noqa: BLE001
+                lines = []
+        if not lines:
             continue
         excerpt_rows = ["项目名称\t规格型号\t单位\t数量\t单价\t含税金额"]
         for line in lines[:80]:
@@ -1248,23 +1254,7 @@ def _extract_workbook_invoice_units(draft_dir: Path, attachments: list[DraftAtta
 
 
 def _purchase_request_lines_from_workbook(path: Path) -> list[InvoiceLine]:
-    suffix = path.suffix.lower()
-    rows_by_sheet: list[list[list[str]]] = []
-    if suffix == ".xls":
-        import xlrd
-
-        workbook = xlrd.open_workbook(path)
-        for sheet in workbook.sheets():
-            rows_by_sheet.append([[ _cell_text(cell) for cell in sheet.row_values(row_index)] for row_index in range(sheet.nrows)])
-    elif suffix == ".xlsx":
-        from openpyxl import load_workbook
-
-        workbook = load_workbook(path, read_only=True, data_only=True)
-        try:
-            for sheet in workbook.worksheets:
-                rows_by_sheet.append([[ _cell_text(cell) for cell in row] for row in sheet.iter_rows(values_only=True)])
-        finally:
-            workbook.close()
+    rows_by_sheet = _workbook_rows_by_sheet(path)
     lines: list[InvoiceLine] = []
     for rows in rows_by_sheet:
         header_index = _find_purchase_request_header(rows)
@@ -1295,6 +1285,181 @@ def _purchase_request_lines_from_workbook(path: Path) -> list[InvoiceLine]:
             )
             lines.append(line)
     return lines
+
+
+def _generic_invoice_lines_from_workbook(path: Path) -> list[InvoiceLine]:
+    """Best-effort parser for customer-provided invoice/detail workbooks."""
+
+    rows_by_sheet = _workbook_rows_by_sheet(path)
+    vehicle_lines = _vehicle_missing_certificate_lines_from_rows(rows_by_sheet)
+    if vehicle_lines:
+        return vehicle_lines
+    parsed: list[InvoiceLine] = []
+    for rows in rows_by_sheet:
+        text = _rows_to_tab_text(rows)
+        if not text.strip():
+            continue
+        parsed.extend(parse_bulk_invoice_lines(text))
+    if parsed:
+        return _mark_workbook_lines(parsed)
+    return _fallback_project_amount_lines_from_rows(rows_by_sheet)
+
+
+def _vehicle_missing_certificate_lines_from_rows(rows_by_sheet: list[list[list[str]]]) -> list[InvoiceLine]:
+    lines: list[InvoiceLine] = []
+    for rows in rows_by_sheet:
+        if not rows:
+            continue
+        header = [cell.strip() for cell in rows[0]]
+        company_index = _first_header_index(header, ["公司名", "客户名称", "购买方名称"])
+        error_index = _first_header_index(header, ["错误信息", "车辆信息", "商品信息"])
+        if error_index is None or "发票行数" not in header:
+            continue
+        current_buyer = ""
+        for row in rows[1:]:
+            buyer = _row_value(row, company_index)
+            if buyer:
+                current_buyer = buyer
+            info = _row_value(row, error_index)
+            if not info:
+                continue
+            matched = re.search(r"(?P<model>.+?)\s*车架号\s*(?P<vin>[A-Za-z0-9]+)\s*价格\s*(?P<amount>\d+(?:\.\d{1,2})?)", info)
+            if not matched:
+                continue
+            model = matched.group("model").strip()
+            lines.append(
+                InvoiceLine(
+                    project_name=f"电动两轮摩托车 {model}".strip(),
+                    tax_category="机动车",
+                    specification=f"车架号 {matched.group('vin')}",
+                    unit="辆",
+                    quantity="1",
+                    amount_with_tax=_money_text(matched.group("amount")),
+                    tax_rate="1%",
+                    coding_reference=(
+                        "机动车合格证异常表解析，需人工复核："
+                        f"按错误信息提取车型/车架号/价格；购买方线索：{current_buyer}。"
+                    ),
+                )
+            )
+    return _dedupe_workbook_lines(lines)
+
+
+
+def _workbook_rows_by_sheet(path: Path) -> list[list[list[str]]]:
+    suffix = path.suffix.lower()
+    rows_by_sheet: list[list[list[str]]] = []
+    if suffix == ".xls":
+        import xlrd
+
+        workbook = xlrd.open_workbook(path)
+        for sheet in workbook.sheets():
+            rows_by_sheet.append([[_cell_text(cell) for cell in sheet.row_values(row_index)] for row_index in range(sheet.nrows)])
+    elif suffix == ".xlsx":
+        from openpyxl import load_workbook
+
+        workbook = load_workbook(path, read_only=True, data_only=True)
+        try:
+            for sheet in workbook.worksheets:
+                rows_by_sheet.append([[_cell_text(cell) for cell in row] for row in sheet.iter_rows(values_only=True)])
+        finally:
+            workbook.close()
+    return rows_by_sheet
+
+
+def _rows_to_tab_text(rows: list[list[str]]) -> str:
+    lines: list[str] = []
+    for row in rows[:500]:
+        trimmed = [cell.strip() for cell in row]
+        while trimmed and not trimmed[-1]:
+            trimmed.pop()
+        if any(trimmed):
+            lines.append("\t".join(trimmed))
+    return "\n".join(lines)
+
+
+def _mark_workbook_lines(lines: list[InvoiceLine]) -> list[InvoiceLine]:
+    marked: list[InvoiceLine] = []
+    for line in lines:
+        if not line.coding_reference:
+            line.coding_reference = "Excel 表格通用解析，需人工复核：按客户材料生成开票明细。"
+        marked.append(line)
+    return marked
+
+
+def _dedupe_workbook_lines(lines: list[InvoiceLine]) -> list[InvoiceLine]:
+    seen: set[tuple[str, str, str, str, str]] = set()
+    deduped: list[InvoiceLine] = []
+    for line in lines:
+        key = (
+            line.project_name.strip(),
+            line.specification.strip(),
+            line.quantity.strip(),
+            line.unit_price.strip(),
+            line.resolved_amount_with_tax().strip() or line.amount_with_tax.strip(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(line)
+    return _mark_workbook_lines(deduped)
+
+
+def _fallback_project_amount_lines_from_rows(rows_by_sheet: list[list[list[str]]]) -> list[InvoiceLine]:
+    lines: list[InvoiceLine] = []
+    for rows in rows_by_sheet:
+        header_index, header = _find_generic_project_amount_header(rows)
+        if header_index is None or header is None:
+            continue
+        project_index = _first_header_index(header, ["项目名称", "开票内容", "开票项目", "发票项目", "商品全名", "商品名称", "品名", "物资名称", "名称"])
+        amount_index = _first_header_index(header, ["开票金额", "含税金额", "价税合计", "金额", "实际金额", "合计金额"])
+        if project_index is None or amount_index is None:
+            continue
+        spec_index = _first_header_index(header, ["规格型号", "规格"])
+        unit_index = _first_header_index(header, ["单位", "计量单位"])
+        qty_index = _first_header_index(header, ["数量", "销售数量", "实收数量"])
+        price_index = _first_header_index(header, ["单价", "含税单价", "采购单价"])
+        tax_rate_index = _first_header_index(header, ["税率", "税率/征收率"])
+        category_index = _first_header_index(header, ["赋码大类", "税收分类", "税目大类", "大类"])
+        for row in rows[header_index + 1:]:
+            project_name = _row_value(row, project_index)
+            amount = _money_text(_row_value(row, amount_index))
+            if not project_name or not amount:
+                continue
+            if "合计" in project_name or project_name in {"小计", "总计"}:
+                continue
+            lines.append(
+                InvoiceLine(
+                    project_name=project_name.strip("*"),
+                    tax_category=_row_value(row, category_index),
+                    specification=_row_value(row, spec_index),
+                    unit=_row_value(row, unit_index) or "项",
+                    quantity=_number_text(_row_value(row, qty_index)) if qty_index is not None else "1",
+                    unit_price=_money_text(_row_value(row, price_index)) if price_index is not None else "",
+                    amount_with_tax=amount,
+                    tax_rate=_row_value(row, tax_rate_index) or "3%",
+                    coding_reference="Excel 表格兜底解析，需人工复核：按项目/金额列生成开票明细。",
+                )
+            )
+    return _dedupe_workbook_lines(lines)
+
+
+def _find_generic_project_amount_header(rows: list[list[str]]) -> tuple[int | None, list[str] | None]:
+    for index, row in enumerate(rows[:50]):
+        normalized = [cell.strip().replace("（", "(").replace("）", ")") for cell in row]
+        has_project = _first_header_index(normalized, ["项目名称", "开票内容", "开票项目", "发票项目", "商品全名", "商品名称", "品名", "物资名称", "名称"]) is not None
+        has_amount = _first_header_index(normalized, ["开票金额", "含税金额", "价税合计", "金额", "实际金额", "合计金额"]) is not None
+        if has_project and has_amount:
+            return index, normalized
+    return None, None
+
+
+def _first_header_index(header: list[str], names: list[str]) -> int | None:
+    wanted = {name.strip() for name in names}
+    for index, value in enumerate(header):
+        if value.strip() in wanted:
+            return index
+    return None
 
 
 def _cell_text(value) -> str:
@@ -1764,6 +1929,8 @@ def _enrich_buyer_from_sheet_context(company_name: str, buyer: BuyerInfo, parse_
 
 
 def _enrich_buyer_from_history_profile(company_name: str, buyer: BuyerInfo, parse_source: str) -> BuyerInfo:
+    if not company_name.strip():
+        return buyer
     history_match = resolve_buyer_from_history(parse_source, company_name=company_name)
     if history_match is None:
         return buyer

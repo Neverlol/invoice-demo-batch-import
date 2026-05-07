@@ -51,12 +51,16 @@ def run_optional_ocr(image_paths: list[Path]) -> OptionalOcrResult:
 
     language = os.environ.get("TAX_INVOICE_TESSERACT_LANG", "chi_sim+eng").strip() or "chi_sim+eng"
     psm = os.environ.get("TAX_INVOICE_TESSERACT_PSM", "6").strip() or "6"
+    timeout_seconds = _safe_int_env("TAX_INVOICE_TESSERACT_TIMEOUT", default=15, minimum=3)
+    max_images = _safe_int_env("TAX_INVOICE_OCR_MAX_IMAGES", default=5, minimum=1)
+    selected_image_paths = image_paths[:max_images]
+    skipped_count = max(0, len(image_paths) - len(selected_image_paths))
     image_results: list[OcrImageResult] = []
     combined_parts: list[str] = []
 
     with tempfile.TemporaryDirectory(prefix="tax-invoice-ocr-") as temp_dir_raw:
         temp_dir = Path(temp_dir_raw)
-        for index, image_path in enumerate(image_paths, start=1):
+        for index, image_path in enumerate(selected_image_paths, start=1):
             prepared = temp_dir / f"ocr_{index:02d}.png"
             try:
                 _prepare_image_for_ocr(image_path, prepared)
@@ -77,7 +81,7 @@ def run_optional_ocr(image_paths: list[Path]) -> OptionalOcrResult:
                 completed = subprocess.run(
                     command_parts,
                     capture_output=True,
-                    timeout=90,
+                    timeout=timeout_seconds,
                     check=False,
                 )
             except Exception as exc:  # pragma: no cover - defensive subprocess branch
@@ -118,10 +122,12 @@ def run_optional_ocr(image_paths: list[Path]) -> OptionalOcrResult:
             image_results=image_results,
         )
 
-    status = "success" if success_count == len(image_results) else "partial"
+    status = "success" if success_count == len(image_results) and skipped_count == 0 else "partial"
     note = "已从图片中提取文字，结果会进入草稿解析；仍建议在复核页人工确认。"
     if status == "partial":
         note = "部分图片已提取到文字，部分仍需人工补充；草稿已保留所有附件。"
+    if skipped_count:
+        note += f" 为保证生成草稿速度，本次先 OCR 前 {len(selected_image_paths)} 张图片，剩余 {skipped_count} 张保留为附件。"
     return OptionalOcrResult(
         status=status,
         engine=f"tesseract ({language})",
@@ -138,7 +144,10 @@ def _run_llm_image_ocr(image_paths: list[Path], *, fallback_reason: str) -> Opti
     image_results: list[OcrImageResult] = []
     combined_parts: list[str] = []
     errors: list[str] = []
-    for image_path in image_paths:
+    max_images = _safe_int_env("TAX_INVOICE_LLM_IMAGE_OCR_MAX_IMAGES", default=3, minimum=1)
+    selected_image_paths = image_paths[:max_images]
+    skipped_count = max(0, len(image_paths) - len(selected_image_paths))
+    for image_path in selected_image_paths:
         try:
             response = adapter.extract_text_from_image(image_path)
         except (LLMAdapterError, OSError) as exc:
@@ -162,12 +171,15 @@ def _run_llm_image_ocr(image_paths: list[Path], *, fallback_reason: str) -> Opti
             ),
             image_results=image_results,
         )
-    status = "success" if success_count == len(image_paths) else "partial"
+    status = "success" if success_count == len(image_paths) and skipped_count == 0 else "partial"
+    note = "本地 OCR 不可用或未识别出文本，已改用 LLM 图片 OCR 提取文字；仍建议在复核页人工确认。"
+    if skipped_count:
+        note += f" 为保证生成草稿速度，本次先识别前 {len(selected_image_paths)} 张图片，剩余 {skipped_count} 张保留为附件。"
     return OptionalOcrResult(
         status=status,
         engine=f"{adapter.provider_name} image-ocr",
         combined_text="\n\n".join(part for part in combined_parts if part.strip()),
-        note="本地 OCR 不可用或未识别出文本，已改用 LLM 图片 OCR 提取文字；仍建议在复核页人工确认。",
+        note=note,
         image_results=image_results,
     )
 
@@ -178,6 +190,15 @@ def _extract_llm_ocr_text(payload: dict) -> str:
         if isinstance(value, str) and value.strip():
             return value
     return ""
+
+
+def _safe_int_env(name: str, *, default: int, minimum: int) -> int:
+    try:
+        parsed = int(os.environ.get(name, "") or str(default))
+    except ValueError:
+        return default
+    return max(minimum, parsed)
+
 
 
 def _resolve_tesseract_command() -> str:
