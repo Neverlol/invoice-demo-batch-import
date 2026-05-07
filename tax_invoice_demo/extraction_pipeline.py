@@ -27,6 +27,17 @@ class ExtractionOutcome:
     llm_metrics: list[dict] = field(default_factory=list)
 
 
+@dataclass
+class RuleReviewAssessment:
+    reasons: list[str] = field(default_factory=list)
+    confidence: str = "high"
+    should_call_llm: bool = False
+
+    @property
+    def should_try_llm(self) -> bool:
+        return self.should_call_llm
+
+
 def compose_parse_source(raw_text: str, document_text: str, ocr_text: str) -> str:
     return "\n\n".join(part for part in [raw_text.strip(), document_text.strip(), ocr_text.strip()] if part)
 
@@ -39,33 +50,44 @@ def extract_invoice_structured_data(
     ocr_text: str,
     image_paths: list[Path] | None = None,
     force_llm_review: bool = False,
+    material_tags: list[str] | None = None,
 ) -> ExtractionOutcome:
     parse_source = compose_parse_source(raw_text, document_text, ocr_text)
     buyer = extract_buyer_info_from_text(parse_source)
     lines = extract_invoice_lines_from_text(parse_source)
+    lines = _apply_current_amount_from_user_text(
+        lines,
+        raw_text=raw_text,
+        reference_text=parse_source,
+    )
     outcome = ExtractionOutcome(
         buyer=buyer,
         lines=lines,
         parse_source=parse_source,
     )
 
-    adapter = get_llm_adapter()
-    should_try_vision = _should_try_vision_extract(image_paths or [])
-    should_try_text_llm = _should_try_llm(
+    assessment = _assess_rule_review_need(
         buyer,
         lines,
         parse_source,
         raw_text=raw_text,
         document_text=document_text,
         ocr_text=ocr_text,
+        image_paths=image_paths or [],
+        material_tags=material_tags or [],
         force_llm_review=force_llm_review,
     )
+    adapter = get_llm_adapter()
+    should_try_vision = _should_try_vision_extract(image_paths or [])
+    should_try_text_llm = assessment.should_try_llm
     if not adapter.is_enabled or not (should_try_vision or should_try_text_llm):
         outcome.lines = _apply_current_amount_from_user_text(
             outcome.lines,
             raw_text=raw_text,
             reference_text=parse_source,
         )
+        if assessment.reasons:
+            outcome.warnings = _review_reason_warnings(assessment)
         return outcome
 
     llm_errors: list[str] = []
@@ -114,7 +136,7 @@ def extract_invoice_structured_data(
                 strategy="rules_plus_vision" if task_type == "vision_extract_invoice" else "rules_plus_llm",
                 llm_provider=response.provider,
                 extracted_note=llm_note,
-                warnings=[*llm_errors, f"LLM 结构化识别耗时 {elapsed_seconds:.1f} 秒。", *conflict_warnings],
+                warnings=[*_review_reason_warnings(assessment), *llm_errors, f"LLM 结构化识别耗时 {elapsed_seconds:.1f} 秒。", *conflict_warnings],
                 llm_metrics=llm_metrics,
             )
         except LLMAdapterError as exc:
@@ -136,7 +158,7 @@ def extract_invoice_structured_data(
         raw_text=raw_text,
         reference_text=parse_source,
     )
-    outcome.warnings = llm_errors
+    outcome.warnings = [*_review_reason_warnings(assessment), *llm_errors]
     outcome.llm_metrics = llm_metrics
     return outcome
 
@@ -243,7 +265,7 @@ def _should_try_vision_extract(image_paths: list[Path]) -> bool:
     return len(image_paths) <= max(1, max_images)
 
 
-def _should_try_llm(
+def _assess_rule_review_need(
     buyer: BuyerInfo,
     lines: list[InvoiceLine],
     parse_source: str,
@@ -251,36 +273,113 @@ def _should_try_llm(
     raw_text: str,
     document_text: str,
     ocr_text: str,
+    image_paths: list[Path],
+    material_tags: list[str],
     force_llm_review: bool = False,
-) -> bool:
-    if not parse_source.strip():
-        return False
+) -> RuleReviewAssessment:
+    if not parse_source.strip() and not image_paths:
+        return RuleReviewAssessment()
+    reasons: list[str] = []
     if force_llm_review:
-        return True
-    blocking_review_mode = os.environ.get("TAX_INVOICE_LLM_BLOCKING_REVIEW", "fast").strip().lower()
-    if _rules_are_strong_enough_for_fast_draft(buyer, lines) and blocking_review_mode in {
-        "",
-        "0",
-        "fast",
-        "off",
-        "false",
-        "disabled",
-    }:
-        return False
-    if _rules_are_strong_enough_for_fast_draft(buyer, lines) and blocking_review_mode in {"1", "true", "on", "yes"}:
-        return True
-    # 规则未能形成完整草稿时，上传附件、OCR、长文本需要让 LLM 做识别补充。
-    if document_text.strip() or ocr_text.strip() or len(raw_text.strip()) >= 120:
-        return True
-    if not buyer.name.strip() or not buyer.tax_id.strip():
-        return True
+        reasons.append("调用方要求智能复核：当前材料适合让 LLM 做二次理解。")
+    if image_paths:
+        reasons.append(f"包含 {len(image_paths)} 张图片/截图：图片字段容易被 OCR 误读，建议视觉 LLM 复核。")
+    if ocr_text.strip():
+        reasons.append("OCR 文本参与了解析：请复核图片/OCR 得到的购买方、税号、金额和备注。")
+    joined_tags = " / ".join(material_tags)
+    if any(tag in joined_tags for tag in ["财务流水/余额线索", "压缩包材料", "压缩包需解压"]):
+        reasons.append(f"材料类型为 {joined_tags}：不应仅按本地规则直接生成开票明细。")
+    if "样票 PDF" in joined_tags and _has_amount_hint(raw_text):
+        reasons.append("存在样票 PDF 和本次文字金额：需判断样票旧金额是否应被本次金额覆盖。")
+    if len(_company_candidates(parse_source)) >= 2:
+        reasons.append("材料中出现多个公司名称：需确认销售主体、购买方和样票主体没有串位。")
+    if len(_amount_candidates(parse_source)) >= 2:
+        reasons.append("材料中出现多个金额：需确认哪个是本次开票金额，哪些只是样票/历史金额。")
+    if not buyer.name.strip():
+        reasons.append("购买方名称未可靠识别。")
+    if not buyer.tax_id.strip():
+        reasons.append("购买方税号未可靠识别。")
     if not lines:
-        return True
-    if all(not line.resolved_amount_with_tax() for line in lines):
-        return True
-    if sum(1 for line in lines if line.project_name.strip()) == 0:
-        return True
+        reasons.append("本地规则未形成开票明细。")
+    elif all(not line.resolved_amount_with_tax() for line in lines):
+        reasons.append("本地规则未形成可靠含税金额。")
+    elif sum(1 for line in lines if line.project_name.strip()) == 0:
+        reasons.append("本地规则未形成可靠项目名称。")
+    if _has_low_confidence_line(lines):
+        reasons.append("明细来源含兜底/异常/需人工复核标记，建议智能复核。")
+
+    strong = _rules_are_strong_enough_for_fast_draft(buyer, lines)
+    blocking_review_mode = os.environ.get("TAX_INVOICE_LLM_BLOCKING_REVIEW", "fast").strip().lower()
+    if strong and not reasons:
+        return RuleReviewAssessment(confidence="high", should_call_llm=False)
+    if strong and reasons and blocking_review_mode in {"", "0", "fast", "off", "false", "disabled"}:
+        # 快速模式下，强结构化草稿不强行阻塞；但原因会进入草稿提醒，供 Windows/MIMO 或人工复核。
+        return RuleReviewAssessment(reasons=_dedupe_reasons(reasons), confidence="medium", should_call_llm=False)
+    confidence = "low" if reasons else "high"
+    return RuleReviewAssessment(reasons=_dedupe_reasons(reasons), confidence=confidence, should_call_llm=bool(reasons))
+
+
+def _review_reason_warnings(assessment: RuleReviewAssessment) -> list[str]:
+    if not assessment.reasons:
+        return []
+    prefix = "建议智能复核" if assessment.should_call_llm else "建议人工重点复核"
+    return [f"{prefix}：{reason}" for reason in assessment.reasons[:8]]
+
+
+
+def _dedupe_reasons(reasons: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for reason in reasons:
+        cleaned = str(reason or "").strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        result.append(cleaned)
+    return result[:10]
+
+
+
+def _has_amount_hint(text: str) -> bool:
+    return bool(re.search(r"(?:[¥￥]\s*)?\d{1,8}(?:\.\d{1,2})?\s*(?:元|块钱|块)|金额|合计|总共|共计", str(text or "")))
+
+
+
+def _amount_candidates(text: str) -> list[str]:
+    values: list[str] = []
+    raw = str(text or "")
+    for matched in re.finditer(r"(?<![A-Za-z0-9])(?:[¥￥]\s*)?(\d{1,8}(?:\.\d{1,2})?)\s*(?:元|块钱|块|万元)?", raw):
+        start, end = matched.span()
+        before = raw[max(0, start - 8): start]
+        nearby = raw[max(0, start - 3): min(len(raw), end + 3)]
+        has_unit_or_currency = bool(re.search(r"[¥￥]|元|块钱|块|万元", nearby))
+        has_amount_label_before = bool(re.search(r"金额|合计|总共|共计|价税", before))
+        if not (has_unit_or_currency or has_amount_label_before):
+            continue
+        values.append(matched.group(1))
+    return values[:20]
+
+
+
+def _company_candidates(text: str) -> list[str]:
+    pattern = r"([\u4e00-\u9fffA-Za-z0-9（）()·\-]{2,40}(?:有限公司|有限责任公司|个体工商户|中心|门诊部|医院|学校|大学|研究院|研究所|商店|饭店|物业|餐饮|传媒))"
+    values = []
+    for match in re.finditer(pattern, str(text or "")):
+        value = match.group(1).strip(" ：:，,。；;（）()")
+        if value and value not in values:
+            values.append(value)
+    return values[:12]
+
+
+
+def _has_low_confidence_line(lines: list[InvoiceLine]) -> bool:
+    low_markers = ["兜底", "异常", "需人工复核", "未命中", "OCR", "视觉", "样票", "历史"]
+    for line in lines:
+        reference = f"{line.coding_reference} {line.project_name} {line.specification}"
+        if any(marker in reference for marker in low_markers):
+            return True
     return False
+
 
 
 def _rules_are_strong_enough_for_fast_draft(buyer: BuyerInfo, lines: list[InvoiceLine]) -> bool:

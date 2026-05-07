@@ -1954,3 +1954,14 @@ body:has(#batch-sheet-form) .card-head p {
   font-size: 12px;
   font-weight: 900;
 }
+.review-reason {
+  display: block;
+  margin-top: 6px;
+  padding: 7px 9px;
+  border-radius: 12px;
+  background: rgba(166,106,0,.08);
+  color: var(--ink-2);
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 700;
+}

@@ -95,6 +95,7 @@ def create_draft_from_workbench(
                 ocr_text=ocr_result.combined_text,
                 image_paths=image_attachment_paths[:BATCH_LLM_MAX_ATTACHMENTS],
                 force_llm_review=bool(image_attachment_paths),
+                material_tags=material_tags,
             )
             batch_buyer = _enrich_buyer_from_sheet_context(company_name, buyer_extraction.buyer, buyer_extraction.parse_source)
             batch_buyer = _enrich_buyer_from_history_profile(company_name, batch_buyer, buyer_extraction.parse_source)
@@ -156,7 +157,8 @@ def create_draft_from_workbench(
         document_text=document_result.combined_text,
         ocr_text=ocr_result.combined_text,
         image_paths=vision_image_paths,
-        force_llm_review=bool(attachments) and not force_batch,
+        force_llm_review=False,
+        material_tags=material_tags,
     )
     parse_source = extraction.parse_source
     draft_note = _merge_extracted_note(note, extraction.extracted_note)
@@ -349,7 +351,8 @@ def update_draft_from_form(
             document_text=document_result.combined_text,
             ocr_text=ocr_result.combined_text,
             image_paths=image_attachment_paths,
-            force_llm_review=bool(attachments),
+            force_llm_review=False,
+            material_tags=material_tags,
         )
         parse_source = extraction.parse_source
         draft_note = _merge_extracted_note(note, extraction.extracted_note)
@@ -712,6 +715,7 @@ def _batch_vision_requests_from_uploaded_images(
             ocr_text="",
             image_paths=[image_path],
             force_llm_review=True,
+            material_tags=["群聊截图"],
         )
         if extraction.llm_provider:
             provider = extraction.llm_provider
