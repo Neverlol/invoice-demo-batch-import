@@ -970,7 +970,7 @@ def _create_workbook_draft_batch(
     llm_provider: str,
 ) -> DraftBatch:
     batch_issues = [
-        "当前材料命中了“多个 Excel 明细 -> 多张草稿”规则；系统已按每个 Excel 文件生成一张待复核草稿。",
+        "当前材料命中了“Excel 明细 -> 草稿”规则；系统已按每个 Excel 文件生成一张待复核草稿。",
         "每个 Excel 文件对应一张草稿，Excel 内多行会作为这张发票的多行明细；请确认客户是否确实要求按这些表分别开票。",
         "Excel 明细由本地表格规则解析，并会优先参考客户历史档案赋码；发票图片/补充文字只作为购买方、票种、税点和备注参考。",
     ]
