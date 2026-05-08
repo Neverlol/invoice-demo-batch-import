@@ -1505,15 +1505,15 @@ def _fallback_project_amount_lines_from_rows(rows_by_sheet: list[list[list[str]]
         header_index, header = _find_generic_project_amount_header(rows)
         if header_index is None or header is None:
             continue
-        project_index = _first_header_index(header, ["项目名称", "开票内容", "开票项目", "发票项目", "商品全名", "商品名称", "品名", "物资名称", "名称"])
-        amount_index = _first_header_index(header, ["开票金额", "含税金额", "价税合计", "金额", "实际金额", "合计金额"])
+        project_index = _first_header_index(header, ["项目名称", "开票内容", "开票项目", "发票项目", "商品全名", "商品名称", "品名", "物资名称", "清单名称", "名称"])
+        amount_index = _first_header_index(header, ["开票金额", "含税金额", "含税总价", "含税总价(元)", "价税合计", "金额", "实际金额", "合计金额"])
         if project_index is None or amount_index is None:
             continue
-        spec_index = _first_header_index(header, ["规格型号", "规格"])
+        spec_index = _first_header_index(header, ["规格型号", "规格/项目特征", "规格"])
         unit_index = _first_header_index(header, ["单位", "计量单位"])
         qty_index = _first_header_index(header, ["数量", "销售数量", "实收数量"])
-        price_index = _first_header_index(header, ["单价", "含税单价", "采购单价"])
-        tax_rate_index = _first_header_index(header, ["税率", "税率/征收率"])
+        price_index = _first_header_index(header, ["单价", "含税单价", "含税单价(元)", "采购单价"])
+        tax_rate_index = _first_header_index(header, ["税率", "税率(%)", "税率/征收率"])
         category_index = _first_header_index(header, ["赋码大类", "税收分类", "税目大类", "大类"])
         for row in rows[header_index + 1:]:
             project_name = _row_value(row, project_index)
@@ -1531,7 +1531,10 @@ def _fallback_project_amount_lines_from_rows(rows_by_sheet: list[list[list[str]]
                     quantity=_number_text(_row_value(row, qty_index)) if qty_index is not None else "1",
                     unit_price=_money_text(_row_value(row, price_index)) if price_index is not None else "",
                     amount_with_tax=amount,
-                    tax_rate=_row_value(row, tax_rate_index) or "3%",
+                    tax_rate=_workbook_tax_rate_text(
+                        _row_value(row, tax_rate_index),
+                        _row_value(header, tax_rate_index),
+                    ) or "3%",
                     coding_reference="Excel 表格兜底解析，需人工复核：按项目/金额列生成开票明细。",
                 )
             )
@@ -1541,8 +1544,8 @@ def _fallback_project_amount_lines_from_rows(rows_by_sheet: list[list[list[str]]
 def _find_generic_project_amount_header(rows: list[list[str]]) -> tuple[int | None, list[str] | None]:
     for index, row in enumerate(rows[:50]):
         normalized = [cell.strip().replace("（", "(").replace("）", ")") for cell in row]
-        has_project = _first_header_index(normalized, ["项目名称", "开票内容", "开票项目", "发票项目", "商品全名", "商品名称", "品名", "物资名称", "名称"]) is not None
-        has_amount = _first_header_index(normalized, ["开票金额", "含税金额", "价税合计", "金额", "实际金额", "合计金额"]) is not None
+        has_project = _first_header_index(normalized, ["项目名称", "开票内容", "开票项目", "发票项目", "商品全名", "商品名称", "品名", "物资名称", "清单名称", "名称"]) is not None
+        has_amount = _first_header_index(normalized, ["开票金额", "含税金额", "含税总价", "含税总价(元)", "价税合计", "金额", "实际金额", "合计金额"]) is not None
         if has_project and has_amount:
             return index, normalized
     return None, None
@@ -1608,8 +1611,30 @@ def _number_text(value: str) -> str:
     parsed = _decimal_from_text(value)
     if parsed is None:
         return str(value or "").strip()
-    text = f"{parsed:f}".rstrip("0").rstrip(".")
+    text = f"{parsed:f}"
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
     return text or "0"
+
+
+def _workbook_tax_rate_text(value: str, header: str = "") -> str:
+    text = str(value or "").strip().replace("％", "%")
+    if not text:
+        return ""
+    if text.endswith("%") or text in {"免税", "不征税", "免征增值税"}:
+        return text
+    parsed = _decimal_from_text(text)
+    if parsed is None:
+        return text
+    # 工程清单类 Excel 常见表头为“税率(%)”，单元格值 1 / 1.0 表示 1%，不是 100%。
+    if "%" in str(header or ""):
+        return f"{_number_text(text)}%"
+    if parsed <= Decimal("1"):
+        parsed *= Decimal("100")
+    percent_text = f"{parsed:f}"
+    if "." in percent_text:
+        percent_text = percent_text.rstrip("0").rstrip(".")
+    return f"{percent_text}%"
 
 
 def _sum_line_amounts(lines: list[InvoiceLine]) -> str:
