@@ -56,6 +56,70 @@ def _merge_extracted_note(user_note: str, extracted_note: str) -> str:
     return f"{base}\n{extra}"
 
 
+def _extract_invoice_note_from_context(text: str) -> str:
+    """Extract stable invoice remark lines from OCR/text without sending data to LLM.
+
+    Real seed-customer screenshots often say "按该发票对象和备注".  Tesseract may
+    read "项目地址" as "顺目地址", so keep this intentionally conservative and only
+    extract project name/address style remarks.
+    """
+
+    project_name_candidates: list[str] = []
+    project_address = ""
+    for raw_line in str(text or "").splitlines():
+        line = re.sub(r"\s+", " ", raw_line).strip(" |\t")
+        if not line:
+            continue
+        normalized = line.replace("顺目地址", "项目地址").replace("项日地址", "项目地址")
+        if "项目名称" in normalized:
+            value = _value_after_label(normalized, "项目名称")
+            candidate = _cleanup_invoice_note_value(value)
+            if candidate:
+                project_name_candidates.append(candidate)
+        if "项目地址" in normalized and not project_address:
+            value = _value_after_label(normalized, "项目地址")
+            project_address = _cleanup_invoice_note_value(value)
+    project_name = _select_invoice_note_project_name(project_name_candidates)
+    parts = []
+    if project_name:
+        parts.append(f"项目名称:{project_name}")
+    if project_address:
+        parts.append(f"项目地址:{project_address}")
+    return "\n".join(parts)
+
+
+def _select_invoice_note_project_name(candidates: list[str]) -> str:
+    if not candidates:
+        return ""
+
+    def score(value: str) -> int:
+        compact = re.sub(r"\s+", "", value)
+        result = len(compact)
+        if re.search(r"项目经理部|项目部|冬运|沈阳市|王家", compact):
+            result += 100
+        if "公司" in compact:
+            result += 20
+        if re.search(r"规格型号|单位|数量|单价|金额|税率|编码|需求单位", compact):
+            result -= 80
+        return result
+
+    return sorted(candidates, key=score, reverse=True)[0]
+
+
+def _value_after_label(line: str, label: str) -> str:
+    _, _, value = line.partition(label)
+    value = value.lstrip(" :：|｜")
+    return value.strip()
+
+
+def _cleanup_invoice_note_value(value: str) -> str:
+    cleaned = str(value or "").strip().replace("〈", "（").replace("〉", "）")
+    cleaned = cleaned.replace("(冬运)", "（冬运）").replace("（冬运)", "（冬运）")
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    cleaned = re.sub(r"\s+项目", "项目", cleaned)
+    return cleaned.strip()
+
+
 def create_draft_from_workbench(
     company_name: str,
     raw_text: str,
@@ -84,6 +148,7 @@ def create_draft_from_workbench(
         defer_to_vision=bool(vision_image_paths) or batch_vision_enabled,
     )
     early_parse_source = _compose_parse_source(raw_text, document_result.combined_text, ocr_result.combined_text)
+    note = _merge_extracted_note(note, _extract_invoice_note_from_context(early_parse_source))
     invoice_profile = _infer_invoice_profile(early_parse_source, note=note)
     if force_batch:
         workbook_units = _extract_workbook_invoice_units(draft_dir, attachments)
