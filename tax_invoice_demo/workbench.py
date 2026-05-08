@@ -16,7 +16,7 @@ from werkzeug.datastructures import FileStorage
 
 from .case_events import batch_snapshot, diff_drafts, draft_snapshot, record_case_event
 from .coding_library import enrich_invoice_lines, load_formal_coding_library
-from .customer_profiles import LineHistoryMatch, apply_line_history_hints, resolve_buyer_from_history, resolve_invoice_record_from_history, seller_default_line_profile
+from .customer_profiles import LineHistoryMatch, apply_line_history_hints, resolve_buyer_from_history, seller_default_line_profile
 from .extraction_pipeline import compose_parse_source, extract_invoice_structured_data
 from .ledger import sync_draft_to_ledger
 from .models import BuyerInfo, DraftAttachment, DraftBatch, DraftBatchItem, InvoiceDraft, InvoiceLine
@@ -1565,23 +1565,6 @@ def _platform_units_from_blocks_with_profile(
         )
         amount = _extract_platform_amount(text)
         bill_id = _extract_platform_bill_id(text)
-        history_record = resolve_invoice_record_from_history(company_name=company_name, buyer=buyer, bill_id=bill_id, amount_with_tax=amount)
-        if history_record is not None:
-            units.append(
-                ReissueDraftUnit(
-                    source_name=source_name,
-                    buyer=history_record.buyer,
-                    invoice_kind=history_record.invoice_kind,
-                    note=history_record.note or bill_id,
-                    lines=[replace(line) for line in history_record.lines],
-                    target_amount=history_record.amount_with_tax,
-                    source_excerpt=(
-                        f"平台开票截图匹配客户档案历史发票 {history_record.invoice_no}；"
-                        f"来源图片 {source_name}；含税合计 {history_record.amount_with_tax}。"
-                    ),
-                )
-            )
-            continue
         line = _platform_line_from_profile(text, amount=amount, company_name=company_name, buyer=buyer)
         units.append(
             ReissueDraftUnit(
