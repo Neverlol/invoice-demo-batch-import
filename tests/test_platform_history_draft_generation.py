@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 from openpyxl import Workbook
 
 from tax_invoice_demo.models import DraftAttachment
+from tax_invoice_demo import customer_profiles
 from tax_invoice_demo.workbench import _extract_platform_history_draft_units
 
 
@@ -58,6 +60,59 @@ class PlatformHistoryDraftGenerationTest(unittest.TestCase):
         self.assertEqual(units[0].lines[0].project_name, "服务费")
         self.assertEqual(units[0].lines[0].tax_rate, "6%")
         self.assertEqual(units[0].lines[0].tax_code, "3049900000000000000")
+
+    def test_platform_screenshots_can_use_cached_invoice_records_without_uploaded_history_excel(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = Path(tmp) / "profile_cache.json"
+            cache_path.write_text(json.dumps([
+                {
+                    "seller_name": "沈阳市沈河区启运网络电子商务商行（个体工商户）",
+                    "seller_tax_id": "92210103MAEGN98R94",
+                    "invoice_records": [
+                        {
+                            "invoice_no": "26212000000650427121",
+                            "buyer_name": "北京字跳网络技术有限公司",
+                            "buyer_tax_id": "91110108MA01F2L25J",
+                            "invoice_kind": "数电发票（增值税专用发票）",
+                            "amount_with_tax": "14.63",
+                            "note": "202604300402361042",
+                            "lines": [
+                                {
+                                    "project_name": "服务费",
+                                    "tax_category": "现代服务",
+                                    "tax_code": "3049900000000000000",
+                                    "tax_rate": "6%",
+                                    "unit": "项",
+                                    "quantity": "1",
+                                    "amount_with_tax": "14.63",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ], ensure_ascii=False), encoding="utf-8")
+            old_path = customer_profiles.PROFILE_CACHE_PATH
+            customer_profiles.PROFILE_CACHE_PATH = cache_path
+            try:
+                units = _extract_platform_history_draft_units(
+                    draft_dir=Path(tmp),
+                    attachments=[],
+                    ocr_text="""
+[客户群聊图片3.png]
+购买方信息(平台) 销售方信息(您公司) 开票信息
+名称 北京字跳网络技术有限公司 名称 沈阳市沈河区启运网络电子商务商行（个体工商户）
+纳税人识别号 91110108MA01F2L25J
+纳税人识别号 92210103MAEGN98R94
+备注(账单ID) 202604300402361042
+""",
+                    company_name="沈阳市沈河区启运网络电子商务商行（个体工商户）",
+                )
+            finally:
+                customer_profiles.PROFILE_CACHE_PATH = old_path
+        self.assertEqual(len(units), 1)
+        self.assertEqual(units[0].target_amount, "14.63")
+        self.assertEqual(units[0].lines[0].tax_code, "3049900000000000000")
+        self.assertEqual(units[0].lines[0].tax_rate, "6%")
 
 
 def _write_history(path: Path) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import subprocess
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -15,7 +16,7 @@ from werkzeug.datastructures import FileStorage
 
 from .case_events import batch_snapshot, diff_drafts, draft_snapshot, record_case_event
 from .coding_library import enrich_invoice_lines, load_formal_coding_library
-from .customer_profiles import LineHistoryMatch, apply_line_history_hints, resolve_buyer_from_history, seller_default_line_profile
+from .customer_profiles import LineHistoryMatch, apply_line_history_hints, resolve_buyer_from_history, resolve_invoice_record_from_history, seller_default_line_profile
 from .extraction_pipeline import compose_parse_source, extract_invoice_structured_data
 from .ledger import sync_draft_to_ledger
 from .models import BuyerInfo, DraftAttachment, DraftBatch, DraftBatchItem, InvoiceDraft, InvoiceLine
@@ -200,12 +201,30 @@ def create_draft_from_workbench(
             units=reissue_units,
         )
     if force_batch:
+        platform_ocr_result = ocr_result
+        if image_attachment_paths and not platform_ocr_result.combined_text.strip():
+            platform_ocr_result = _run_draft_ocr(draft_dir, attachments, defer_to_vision=False)
+        platform_ocr_text = platform_ocr_result.combined_text
         platform_history_units = _extract_platform_history_draft_units(
             draft_dir=draft_dir,
             attachments=attachments,
-            ocr_text=ocr_result.combined_text,
+            ocr_text=platform_ocr_text,
             company_name=company_name,
         )
+        if not platform_history_units and image_attachment_paths:
+            fallback_platform_ocr = _run_platform_screenshot_ocr(draft_dir, attachments)
+            if fallback_platform_ocr:
+                platform_ocr_text = "\n\n".join(part for part in [platform_ocr_text, fallback_platform_ocr] if part.strip())
+                platform_history_units = _extract_platform_history_draft_units(
+                    draft_dir=draft_dir,
+                    attachments=attachments,
+                    ocr_text=platform_ocr_text,
+                    company_name=company_name,
+                )
+                try:
+                    platform_ocr_result = replace(platform_ocr_result, combined_text=platform_ocr_text)
+                except TypeError:
+                    pass
         if platform_history_units:
             return _create_platform_history_drafts(
                 batch_id=draft_id,
@@ -216,7 +235,7 @@ def create_draft_from_workbench(
                 note=note,
                 attachments=attachments,
                 document_result=document_result,
-                ocr_result=ocr_result,
+                ocr_result=platform_ocr_result,
                 fallback_invoice_profile=invoice_profile,
                 units=platform_history_units,
             )
@@ -859,6 +878,42 @@ def _requests_from_uploaded_images(attachments: list[DraftAttachment]) -> list[P
     return [_blank_request_from_attachment(attachment) for attachment in image_attachments]
 
 
+def _run_platform_screenshot_ocr(draft_dir: Path, attachments: list[DraftAttachment]) -> str:
+    command = shutil.which("tesseract") or shutil.which("tesseract.exe")
+    if not command:
+        return ""
+    parts: list[str] = []
+    for attachment in _uploaded_image_attachments(attachments):
+        image_path = draft_dir / attachment.stored_name
+        if not image_path.exists():
+            continue
+        try:
+            completed = subprocess.run(
+                [command, str(image_path), "stdout", "-l", "chi_sim+eng", "--psm", "11"],
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+        except Exception:  # noqa: BLE001
+            continue
+        if completed.returncode != 0:
+            continue
+        text = _decode_subprocess_text(completed.stdout).strip()
+        if text:
+            source_name = attachment.original_name or Path(attachment.stored_name).name
+            parts.append(f"[{source_name}]\n{text}")
+    return "\n\n".join(parts)
+
+
+def _decode_subprocess_text(value: bytes) -> str:
+    for encoding in ("utf-8", "gb18030", "latin-1"):
+        try:
+            return value.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return value.decode("utf-8", errors="ignore")
+
+
 def _ensure_requests_cover_uploaded_images(
     requests: list[PlatformInvoiceRequest],
     attachments: list[DraftAttachment],
@@ -1461,10 +1516,10 @@ def _extract_platform_history_draft_units(
         except Exception:  # noqa: BLE001
             continue
     if not records:
-        return []
+        return _platform_units_from_blocks_with_profile(platform_blocks, company_name=company_name)
     candidates = [record for record in records if record.is_positive and record.lines]
     if not candidates:
-        return []
+        return _platform_units_from_blocks_with_profile(platform_blocks, company_name=company_name)
 
     units: list[ReissueDraftUnit] = []
     used_invoice_numbers: set[str] = set()
@@ -1495,6 +1550,108 @@ def _extract_platform_history_draft_units(
             )
         )
     return units
+
+
+def _platform_units_from_blocks_with_profile(
+    platform_blocks: list[tuple[str, str]],
+    *,
+    company_name: str,
+) -> list[ReissueDraftUnit]:
+    units: list[ReissueDraftUnit] = []
+    for source_name, text in platform_blocks:
+        buyer = BuyerInfo(
+            name=_extract_platform_buyer_name(text),
+            tax_id=_extract_platform_buyer_tax_id(text),
+        )
+        amount = _extract_platform_amount(text)
+        bill_id = _extract_platform_bill_id(text)
+        history_record = resolve_invoice_record_from_history(company_name=company_name, buyer=buyer, bill_id=bill_id, amount_with_tax=amount)
+        if history_record is not None:
+            units.append(
+                ReissueDraftUnit(
+                    source_name=source_name,
+                    buyer=history_record.buyer,
+                    invoice_kind=history_record.invoice_kind,
+                    note=history_record.note or bill_id,
+                    lines=[replace(line) for line in history_record.lines],
+                    target_amount=history_record.amount_with_tax,
+                    source_excerpt=(
+                        f"平台开票截图匹配客户档案历史发票 {history_record.invoice_no}；"
+                        f"来源图片 {source_name}；含税合计 {history_record.amount_with_tax}。"
+                    ),
+                )
+            )
+            continue
+        line = _platform_line_from_profile(text, amount=amount, company_name=company_name, buyer=buyer)
+        units.append(
+            ReissueDraftUnit(
+                source_name=source_name,
+                buyer=buyer,
+                invoice_kind=_infer_platform_invoice_kind(text),
+                note=bill_id,
+                lines=[line],
+                target_amount=amount,
+                source_excerpt=(
+                    f"平台开票截图直接生成草稿；来源图片 {source_name}；"
+                    f"含税金额 {amount or '待补全'}；客户档案用于补充常用项目/税码。"
+                ),
+            )
+        )
+    return units
+
+
+def _platform_line_from_profile(
+    text: str,
+    *,
+    amount: str,
+    company_name: str,
+    buyer: BuyerInfo,
+) -> InvoiceLine:
+    project_name = _extract_platform_project_name(text) or "服务费"
+    tax_rate = _extract_platform_tax_rate(text) or ("6%" if _infer_platform_invoice_kind(text) == "增值税专用发票" else "")
+    if _infer_platform_invoice_kind(text) == "增值税专用发票" and tax_rate in {"", "3%", "1%", "免税"} and "6" in text:
+        tax_rate = "6%"
+    line = InvoiceLine(
+        project_name=project_name,
+        amount_with_tax=amount,
+        tax_rate=tax_rate,
+        tax_category="现代服务" if "服务" in project_name or "现代服务" in text else "",
+        unit="项",
+        quantity="1",
+        coding_reference="平台开票截图识别生成，金额/项目需人工复核；客户档案可补充历史税码。",
+    )
+    history_context = "\n".join(part for part in [project_name, tax_rate] if part)
+    enriched = apply_line_history_hints([line], company_name=company_name, buyer=buyer, raw_text=history_context)
+    return enriched[0] if enriched else line
+
+
+def _extract_platform_project_name(text: str) -> str:
+    compact = re.sub(r"\s+", "", str(text or ""))
+    for matched in re.finditer(r"[\*+?]现代服务[\*\"]?([\u4e00-\u9fffA-Za-z0-9]{2,20}?服务费)", compact):
+        value = matched.group(1).strip()
+        if "支持服务费" in value:
+            return "服务费"
+        return value
+    if "服务费" in compact:
+        return "服务费"
+    return ""
+
+
+def _extract_platform_tax_rate(text: str) -> str:
+    compact = re.sub(r"\s+", "", str(text or "")).replace("％", "%")
+    for rate in ["6%", "3%", "1%", "免税"]:
+        if rate in compact:
+            return rate
+    return ""
+
+
+def _infer_platform_invoice_kind(text: str) -> str:
+    compact = re.sub(r"\s+", "", str(text or ""))
+    if "专票" in compact or "增值税专票" in compact:
+        return "增值税专用发票"
+    if "普票" in compact or "普通发票" in compact:
+        return "普通发票"
+    return "增值税专用发票"
 
 
 def _extract_platform_invoice_blocks(ocr_text: str) -> list[tuple[str, str]]:
@@ -1586,7 +1743,7 @@ def _extract_platform_buyer_name(text: str) -> str:
 
 def _extract_platform_amount(text: str) -> str:
     candidates: list[str] = []
-    for matched in re.finditer(r"[¥￥Y]\s*(\d{1,6}(?:\.\d{1,2})?)", str(text or ""), re.IGNORECASE):
+    for matched in re.finditer(r"[¥￥Y]\s*(\d{1,6}(?:\.\d{1,3})?)", str(text or ""), re.IGNORECASE):
         amount = _money_text(matched.group(1))
         if amount:
             candidates.append(amount)
@@ -2604,11 +2761,13 @@ def _workbook_tax_rate_text(value: str, header: str = "") -> str:
 
 def _sum_line_amounts(lines: list[InvoiceLine]) -> str:
     total = Decimal("0")
+    has_amount = False
     for line in lines:
         parsed = _decimal_from_text(line.resolved_amount_with_tax())
         if parsed is not None:
             total += parsed
-    return f"{total:.2f}"
+            has_amount = True
+    return f"{total:.2f}" if has_amount else ""
 
 
 def _save_uploads(draft_dir: Path, uploaded_files: list[FileStorage]) -> list[DraftAttachment]:

@@ -113,6 +113,7 @@ class HistoryRow:
     invoice_status: str
     is_positive: str
     risk_level: str
+    note: str = ""
 
 
 def profile_root_from_args(value: str | None) -> Path:
@@ -242,6 +243,7 @@ def parse_history_excel(path: Path, *, source_root: Path) -> list[HistoryRow]:
         if missing:
             raise ValueError("不是税局历史明细 Excel，缺少表头：" + "、".join(sorted(missing)))
         idx = {name: headers.index(name) for name in headers if name}
+        invoice_note_by_serial = history_invoice_notes(workbook)
 
         def get(row: tuple[Any, ...], header: str) -> str:
             index = idx.get(header)
@@ -259,10 +261,11 @@ def parse_history_excel(path: Path, *, source_root: Path) -> list[HistoryRow]:
                 continue
             full_item = get(raw, "货物或应税劳务名称")
             tax_category, project_name = split_full_item_name(full_item)
+            serial = get(raw, "数电发票号码")
             parsed.append(
                 HistoryRow(
                     source_file=str(path.relative_to(source_root)) if path.is_relative_to(source_root) else str(path),
-                    serial=get(raw, "数电发票号码"),
+                    serial=serial,
                     seller_tax_id=seller_tax_id,
                     seller_name=seller_name,
                     buyer_tax_id=get(raw, "购方识别号"),
@@ -285,6 +288,7 @@ def parse_history_excel(path: Path, *, source_root: Path) -> list[HistoryRow]:
                     invoice_status=get(raw, "发票状态"),
                     is_positive=get(raw, "是否正数发票"),
                     risk_level=get(raw, "发票风险等级"),
+                    note=invoice_note_by_serial.get(serial, ""),
                 )
             )
         if not parsed:
@@ -292,6 +296,27 @@ def parse_history_excel(path: Path, *, source_root: Path) -> list[HistoryRow]:
         return parsed
     finally:
         workbook.close()
+
+
+def history_invoice_notes(workbook) -> dict[str, str]:
+    if "发票基础信息" not in workbook.sheetnames:
+        return {}
+    sheet = workbook["发票基础信息"]
+    rows = list(sheet.iter_rows(values_only=True))
+    if not rows:
+        return {}
+    headers = [cell_text(value) for value in rows[0]]
+    if "数电发票号码" not in headers or "备注" not in headers:
+        return {}
+    serial_index = headers.index("数电发票号码")
+    note_index = headers.index("备注")
+    result: dict[str, str] = {}
+    for row in rows[1:]:
+        serial = cell_text(row[serial_index]) if serial_index < len(row) else ""
+        note = cell_text(row[note_index]) if note_index < len(row) else ""
+        if serial and note:
+            result[serial] = note
+    return result
 
 
 def is_trusted_history_row(row: HistoryRow) -> bool:
@@ -935,9 +960,12 @@ def write_active_json(path: Path, groups: dict[tuple[str, str], list[HistoryRow]
     for (seller_name, seller_tax_id), rows in sorted(groups.items()):
         project_groups: dict[tuple[str, str, str, str, str, str], list[HistoryRow]] = defaultdict(list)
         buyer_groups: dict[tuple[str, str], list[HistoryRow]] = defaultdict(list)
+        invoice_groups: dict[str, list[HistoryRow]] = defaultdict(list)
         for row in rows:
             project_groups[(row.full_item_name, row.tax_category, row.project_name, row.tax_code, row.tax_rate, row.unit or "项")].append(row)
             buyer_groups[(row.buyer_name, row.buyer_tax_id)].append(row)
+            if row.serial:
+                invoice_groups[row.serial].append(row)
         payload.append(
             {
                 "seller_name": seller_name,
@@ -961,10 +989,42 @@ def write_active_json(path: Path, groups: dict[tuple[str, str], list[HistoryRow]
                     {"buyer_name": key[0], "buyer_tax_id": key[1], "line_count": len(items)}
                     for key, items in sorted(buyer_groups.items(), key=lambda item: (-len(item[1]), item[0][0]))
                 ],
+                "invoice_records": [
+                    invoice_record_payload(serial, items)
+                    for serial, items in sorted(invoice_groups.items(), key=lambda item: max([r.invoice_date for r in item[1] if r.invoice_date], default=""), reverse=True)
+                ],
             }
         )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def invoice_record_payload(serial: str, rows: list[HistoryRow]) -> dict:
+    first = rows[0]
+    return {
+        "invoice_no": serial,
+        "buyer_name": first.buyer_name,
+        "buyer_tax_id": first.buyer_tax_id,
+        "invoice_date": first.invoice_date,
+        "invoice_kind": first.invoice_kind,
+        "amount_with_tax": f"{sum((decimal_value(row.amount_with_tax) for row in rows), Decimal('0')):.2f}",
+        "note": first.note,
+        "lines": [
+            {
+                "project_name": row.project_name,
+                "tax_category": row.tax_category,
+                "tax_code": row.tax_code,
+                "tax_rate": row.tax_rate,
+                "specification": row.specification,
+                "unit": row.unit or "项",
+                "quantity": row.quantity,
+                "unit_price": row.unit_price,
+                "amount_with_tax": row.amount_with_tax,
+                "full_item_name": row.full_item_name,
+            }
+            for row in rows
+        ],
+    }
 
 
 def write_product_cache(path: Path, groups: dict[tuple[str, str], list[HistoryRow]]) -> None:
