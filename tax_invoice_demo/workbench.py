@@ -143,6 +143,8 @@ def _cleanup_invoice_note_value(value: str) -> str:
     cleaned = cleaned.replace("(冬运)", "（冬运）").replace("（冬运)", "（冬运）")
     cleaned = re.sub(r"\s+", " ", cleaned)
     cleaned = re.sub(r"\s+项目", "项目", cleaned)
+    if re.search(r"\d+\s*选|[（(]?\d+[）)]?\s*选|URS|ARSE|SRE|RRO|请选择|没有我可以开具的项目", cleaned, re.IGNORECASE):
+        return ""
     return cleaned.strip()
 
 
@@ -197,6 +199,27 @@ def create_draft_from_workbench(
             fallback_invoice_profile=invoice_profile,
             units=reissue_units,
         )
+    if force_batch:
+        platform_history_units = _extract_platform_history_draft_units(
+            draft_dir=draft_dir,
+            attachments=attachments,
+            ocr_text=ocr_result.combined_text,
+            company_name=company_name,
+        )
+        if platform_history_units:
+            return _create_platform_history_drafts(
+                batch_id=draft_id,
+                case_id=case_id,
+                draft_dir=draft_dir,
+                company_name=company_name,
+                raw_text=raw_text,
+                note=note,
+                attachments=attachments,
+                document_result=document_result,
+                ocr_result=ocr_result,
+                fallback_invoice_profile=invoice_profile,
+                units=platform_history_units,
+            )
     if force_batch:
         workbook_units = _extract_workbook_invoice_units(draft_dir, attachments)
         if len(workbook_units) >= 1:
@@ -1415,6 +1438,350 @@ def _create_split_draft_batch(
     return batch
 
 
+
+
+def _extract_platform_history_draft_units(
+    *,
+    draft_dir: Path,
+    attachments: list[DraftAttachment],
+    ocr_text: str,
+    company_name: str,
+) -> list[ReissueDraftUnit]:
+    platform_blocks = _extract_platform_invoice_blocks(ocr_text)
+    if not platform_blocks:
+        return []
+    records: list[HistoryInvoiceRecord] = []
+    for attachment in attachments:
+        suffix = Path(attachment.stored_name).suffix.lower()
+        if suffix not in {".xlsx", ".xls"}:
+            continue
+        source_path = draft_dir / attachment.stored_name
+        try:
+            records.extend(_history_invoice_records_from_workbook(source_path, attachment.original_name))
+        except Exception:  # noqa: BLE001
+            continue
+    if not records:
+        return []
+    candidates = [record for record in records if record.is_positive and record.lines]
+    if not candidates:
+        return []
+
+    units: list[ReissueDraftUnit] = []
+    used_invoice_numbers: set[str] = set()
+    for block in platform_blocks:
+        candidate = _match_platform_block_to_history_record(
+            block,
+            candidates,
+            company_name=company_name,
+            used_invoice_numbers=used_invoice_numbers,
+        )
+        if candidate is None:
+            return []
+        used_invoice_numbers.add(candidate.invoice_no)
+        bill_id = _extract_platform_bill_id(block[1])
+        note = candidate.note or bill_id
+        units.append(
+            ReissueDraftUnit(
+                source_name=block[0],
+                buyer=candidate.buyer,
+                invoice_kind=candidate.invoice_kind,
+                note=note,
+                lines=[replace(line) for line in candidate.lines],
+                target_amount=candidate.total_amount,
+                source_excerpt=(
+                    f"平台开票截图匹配历史正数发票 {candidate.invoice_no}；"
+                    f"来源图片 {block[0]}；含税合计 {candidate.total_amount}。"
+                ),
+            )
+        )
+    return units
+
+
+def _extract_platform_invoice_blocks(ocr_text: str) -> list[tuple[str, str]]:
+    blocks = _split_ocr_image_blocks(ocr_text)
+    result: list[tuple[str, str]] = []
+    for name, text in blocks:
+        compact = re.sub(r"\s+", "", text)
+        if not compact:
+            continue
+        score = 0
+        for token in ["购买方信息", "销售方信息", "开票信息", "纳税人识别号", "发票类型", "备注", "账单ID"]:
+            if token in compact:
+                score += 1
+        has_buyer_tax = bool(_extract_platform_buyer_tax_id(text))
+        has_buyer_name = bool(_extract_platform_buyer_name(text))
+        has_seller_tax = bool(re.search(r"92[0-9A-Z]{16}", compact))
+        if score >= 4 and (has_buyer_tax or has_buyer_name) and has_seller_tax:
+            result.append((name, text))
+    return result
+
+
+def _split_ocr_image_blocks(ocr_text: str) -> list[tuple[str, str]]:
+    matches = list(re.finditer(r"(?m)^\[(?P<name>[^\]]+\.(?:jpg|jpeg|png|webp|bmp))\]\s*$", str(ocr_text or ""), re.IGNORECASE))
+    if not matches:
+        return []
+    blocks: list[tuple[str, str]] = []
+    for index, matched in enumerate(matches):
+        start = matched.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(ocr_text)
+        blocks.append((_display_source_name(matched.group("name")), ocr_text[start:end].strip()))
+    return blocks
+
+
+def _display_source_name(name: str) -> str:
+    base = Path(name or "").name
+    return re.sub(r"^\d{2}_", "", base)
+
+
+def _match_platform_block_to_history_record(
+    block: tuple[str, str],
+    records: list[HistoryInvoiceRecord],
+    *,
+    company_name: str,
+    used_invoice_numbers: set[str],
+) -> HistoryInvoiceRecord | None:
+    _source_name, text = block
+    buyer_tax_id = _extract_platform_buyer_tax_id(text)
+    buyer_name = _extract_platform_buyer_name(text)
+    amount = _extract_platform_amount(text)
+    candidates: list[HistoryInvoiceRecord] = []
+    for record in records:
+        if record.invoice_no in used_invoice_numbers:
+            continue
+        if company_name.strip() and record.seller_name.strip() and company_name.strip() not in record.seller_name.strip() and record.seller_name.strip() not in company_name.strip():
+            continue
+        if buyer_tax_id and record.buyer.tax_id != buyer_tax_id:
+            continue
+        if buyer_name and record.buyer.name and buyer_name not in record.buyer.name and record.buyer.name not in buyer_name:
+            continue
+        if amount and _decimal_from_text(record.total_amount) != _decimal_from_text(amount):
+            continue
+        candidates.append(record)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item.issued_at, reverse=True)
+    return candidates[0]
+
+
+def _extract_platform_buyer_tax_id(text: str) -> str:
+    compact = re.sub(r"\s+", "", str(text or "").upper()).replace("Ｏ", "O").replace("Ｉ", "I")
+    candidates = [candidate for candidate in re.findall(r"[0-9][0-9A-Z]{17}", compact) if candidate.startswith(("91", "92"))]
+    if not candidates:
+        return ""
+    # 平台截图通常先出现购买方税号，再出现销售方税号；销售方个体工商户常以 92 开头。
+    for candidate in candidates:
+        if candidate.startswith("91"):
+            return candidate[:18]
+    return ""
+
+
+def _extract_platform_buyer_name(text: str) -> str:
+    for line in str(text or "").splitlines():
+        matched = re.search(r"(北京[^\s|｜>《》]{2,40}(?:网络技术有限公司|有限公司))", line)
+        if matched:
+            return matched.group(1).strip()
+    matched = re.search(r"([\u4e00-\u9fffA-Za-z0-9（）()]{4,60}(?:网络技术有限公司|有限公司))", str(text or ""))
+    return matched.group(1).strip() if matched else ""
+
+
+def _extract_platform_amount(text: str) -> str:
+    candidates: list[str] = []
+    for matched in re.finditer(r"[¥￥Y]\s*(\d{1,6}(?:\.\d{1,2})?)", str(text or ""), re.IGNORECASE):
+        amount = _money_text(matched.group(1))
+        if amount:
+            candidates.append(amount)
+    return candidates[-1] if candidates else ""
+
+
+def _extract_platform_bill_id(text: str) -> str:
+    compact = re.sub(r"\s+", "", str(text or ""))
+    matched = re.search(r"(?:账单ID|单ID)[）)]?(20\d{14,18})", compact)
+    if matched:
+        return _normalize_platform_bill_id(matched.group(1))
+    ids = re.findall(r"20\d{14,18}", compact)
+    return _normalize_platform_bill_id(ids[-1]) if ids else ""
+
+
+def _normalize_platform_bill_id(value: str) -> str:
+    digits = re.sub(r"\D", "", str(value or ""))
+    if digits.startswith("20") and len(digits) > 18:
+        return digits[:18]
+    return digits
+
+
+def _create_platform_history_drafts(
+    *,
+    batch_id: str,
+    case_id: str,
+    draft_dir: Path,
+    company_name: str,
+    raw_text: str,
+    note: str,
+    attachments: list[DraftAttachment],
+    document_result,
+    ocr_result,
+    fallback_invoice_profile: dict[str, str],
+    units: list[ReissueDraftUnit],
+) -> InvoiceDraft | DraftBatch:
+    if len(units) == 1:
+        return _create_platform_history_single_draft(
+            draft_id=batch_id,
+            case_id=case_id,
+            draft_dir=draft_dir,
+            company_name=company_name,
+            raw_text=raw_text,
+            note=note,
+            attachments=attachments,
+            document_result=document_result,
+            ocr_result=ocr_result,
+            fallback_invoice_profile=fallback_invoice_profile,
+            unit=units[0],
+        )
+    material_tags = _material_tags_from_context(raw_text, attachments, document_result)
+    items: list[DraftBatchItem] = []
+    batch_issues = [
+        "当前材料命中“平台开票截图 + 历史导出”规则；系统已按实际平台开票截图生成草稿，群聊说明截图不会单独生成发票。",
+        "请重点复核每张草稿的金额、购买方、项目、备注账单 ID、税率和税收编码。",
+    ]
+    for unit in units:
+        child_draft_id = uuid4().hex[:10]
+        child_dir = draft_directory(child_draft_id)
+        child_dir.mkdir(parents=True, exist_ok=True)
+        child_attachments = _clone_attachments_to_directory(source_dir=draft_dir, target_dir=child_dir, attachments=attachments)
+        merged_note = _merge_extracted_note(note, unit.note)
+        child_issues = _build_draft_issues(
+            company_name=company_name,
+            raw_text=unit.source_excerpt or raw_text,
+            attachments=child_attachments,
+            buyer=unit.buyer,
+            lines=unit.lines,
+            special_business=fallback_invoice_profile.get("special_business", ""),
+            document_status=document_result.status,
+            document_note=document_result.note,
+            ocr_status=ocr_result.status,
+            ocr_note=ocr_result.note,
+        )
+        child_issues.insert(0, f"本草稿由平台截图 `{unit.source_name}` 匹配历史导出生成；请复核截图金额和备注账单 ID。")
+        child_draft = InvoiceDraft(
+            draft_id=child_draft_id,
+            case_id=case_id,
+            company_name=company_name.strip(),
+            buyer=unit.buyer,
+            lines=unit.lines,
+            raw_text=unit.source_excerpt or raw_text,
+            note=merged_note,
+            issues=child_issues,
+            source_images=child_attachments,
+            workbook_name="开票明细表.xlsx",
+            created_at=datetime.now().isoformat(timespec="seconds"),
+            invoice_kind=unit.invoice_kind or fallback_invoice_profile.get("invoice_kind", "普通发票"),
+            invoice_medium=fallback_invoice_profile.get("invoice_medium", "电子发票"),
+            special_business=fallback_invoice_profile.get("special_business", ""),
+            ocr_status=ocr_result.status,
+            ocr_engine=ocr_result.engine,
+            ocr_text=ocr_result.combined_text,
+            ocr_note=ocr_result.note,
+            source_doc_status=document_result.status,
+            source_doc_text=unit.source_excerpt,
+            source_doc_note=document_result.note,
+            extract_strategy="rules_plus_platform_history_batch",
+            extract_warnings=["平台截图金额/账单 ID 来自 OCR 和历史导出匹配，需人工复核。"],
+            material_tags=material_tags,
+        )
+        save_draft(child_draft)
+        record_case_event(case_id=case_id, draft_id=child_draft_id, batch_id=batch_id, event_type="platform_history_child_draft_created", payload=draft_snapshot(child_draft))
+        items.append(
+            DraftBatchItem(
+                draft_id=child_draft_id,
+                buyer_name=unit.buyer.name or "待补全购买方名称",
+                invoice_kind=unit.invoice_kind or fallback_invoice_profile.get("invoice_kind", "普通发票"),
+                amount_total=_sum_line_amounts(unit.lines),
+                project_summary=_summarize_projects(unit.lines),
+                line_count=len(unit.lines),
+                issue_summary=child_issues[0] if child_issues else "",
+            )
+        )
+        batch_issues.extend(child_issues)
+    batch = DraftBatch(
+        batch_id=batch_id,
+        case_id=case_id,
+        company_name=company_name.strip(),
+        created_at=datetime.now().isoformat(timespec="seconds"),
+        items=items,
+        raw_text=raw_text,
+        note=note.strip(),
+        issues=batch_issues,
+        source_images=attachments,
+        invoice_kind=_common_reissue_invoice_kind(units) or fallback_invoice_profile.get("invoice_kind", "普通发票"),
+        invoice_medium=fallback_invoice_profile.get("invoice_medium", "电子发票"),
+        special_business=fallback_invoice_profile.get("special_business", ""),
+        extract_strategy="rules_plus_platform_history_batch",
+        llm_provider="",
+        extract_warnings=["平台开票截图 + 历史导出匹配生成草稿；请人工复核金额与备注。"],
+        material_tags=material_tags,
+    )
+    save_draft_batch(batch)
+    record_case_event(case_id=case_id, batch_id=batch_id, event_type="platform_history_draft_batch_created", payload=batch_snapshot(batch))
+    return batch
+
+
+def _create_platform_history_single_draft(
+    *,
+    draft_id: str,
+    case_id: str,
+    draft_dir: Path,
+    company_name: str,
+    raw_text: str,
+    note: str,
+    attachments: list[DraftAttachment],
+    document_result,
+    ocr_result,
+    fallback_invoice_profile: dict[str, str],
+    unit: ReissueDraftUnit,
+) -> InvoiceDraft:
+    merged_note = _merge_extracted_note(note, unit.note)
+    issues = _build_draft_issues(
+        company_name=company_name,
+        raw_text=unit.source_excerpt or raw_text,
+        attachments=attachments,
+        buyer=unit.buyer,
+        lines=unit.lines,
+        special_business=fallback_invoice_profile.get("special_business", ""),
+        document_status=document_result.status,
+        document_note=document_result.note,
+        ocr_status=ocr_result.status,
+        ocr_note=ocr_result.note,
+    )
+    issues.insert(0, f"本草稿由平台截图 `{unit.source_name}` 匹配历史导出生成；请复核截图金额和备注账单 ID。")
+    draft = InvoiceDraft(
+        draft_id=draft_id,
+        case_id=case_id,
+        company_name=company_name.strip(),
+        buyer=unit.buyer,
+        lines=unit.lines,
+        raw_text=unit.source_excerpt or raw_text,
+        note=merged_note,
+        issues=issues,
+        source_images=list(attachments),
+        workbook_name="开票明细表.xlsx",
+        created_at=datetime.now().isoformat(timespec="seconds"),
+        invoice_kind=unit.invoice_kind or fallback_invoice_profile.get("invoice_kind", "普通发票"),
+        invoice_medium=fallback_invoice_profile.get("invoice_medium", "电子发票"),
+        special_business=fallback_invoice_profile.get("special_business", ""),
+        ocr_status=ocr_result.status,
+        ocr_engine=ocr_result.engine,
+        ocr_text=ocr_result.combined_text,
+        ocr_note=ocr_result.note,
+        source_doc_status=document_result.status,
+        source_doc_text=unit.source_excerpt,
+        source_doc_note=document_result.note,
+        extract_strategy="rules_plus_platform_history",
+        extract_warnings=["平台截图金额/账单 ID 来自 OCR 和历史导出匹配，需人工复核。"],
+        material_tags=_material_tags_from_context(raw_text, attachments, document_result),
+    )
+    save_draft(draft)
+    record_case_event(case_id=case_id, draft_id=draft_id, event_type="platform_history_draft_created", payload=draft_snapshot(draft))
+    return draft
 
 def _extract_reissue_draft_units(
     *,

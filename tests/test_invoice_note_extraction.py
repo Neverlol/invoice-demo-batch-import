@@ -20,6 +20,14 @@ class InvoiceNoteExtractionTest(unittest.TestCase):
             "项目地址:辽宁省沈阳市浑南区长安桥南街中铁二局项目部",
         )
 
+    def test_ignores_platform_project_selector_noise(self) -> None:
+        text = """
+        购买方信息(平台) 销售方信息(您公司) 开票信息
+        项目名称(4选1) URS ARSE O)
+        备注(账单ID) 202604302202361041
+        """
+        self.assertEqual(_extract_invoice_note_from_context(text), "")
+
 
 if __name__ == "__main__":
     unittest.main()
