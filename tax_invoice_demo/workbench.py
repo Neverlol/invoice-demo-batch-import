@@ -36,6 +36,32 @@ class WorkbookInvoiceUnit:
     source_excerpt: str
 
 
+@dataclass(frozen=True)
+class HistoryInvoiceRecord:
+    invoice_no: str
+    seller_name: str
+    buyer: BuyerInfo
+    invoice_kind: str
+    total_amount: str
+    is_positive: bool
+    status: str
+    issued_at: str
+    note: str
+    lines: list[InvoiceLine]
+    source_name: str
+
+
+@dataclass(frozen=True)
+class ReissueDraftUnit:
+    source_name: str
+    buyer: BuyerInfo
+    invoice_kind: str
+    note: str
+    lines: list[InvoiceLine]
+    target_amount: str
+    source_excerpt: str
+
+
 def default_workbench_form() -> dict[str, str]:
     return {
         "company_name": "",
@@ -150,6 +176,27 @@ def create_draft_from_workbench(
     early_parse_source = _compose_parse_source(raw_text, document_result.combined_text, ocr_result.combined_text)
     note = _merge_extracted_note(note, _extract_invoice_note_from_context(early_parse_source))
     invoice_profile = _infer_invoice_profile(early_parse_source, note=note)
+    reissue_units = _extract_reissue_draft_units(
+        draft_dir=draft_dir,
+        attachments=attachments,
+        instruction_text=_compose_parse_source(raw_text, "", ocr_result.combined_text),
+        fallback_context=early_parse_source,
+        company_name=company_name,
+    )
+    if reissue_units:
+        return _create_reissue_drafts(
+            batch_id=draft_id,
+            case_id=case_id,
+            draft_dir=draft_dir,
+            company_name=company_name,
+            raw_text=raw_text,
+            note=note,
+            attachments=attachments,
+            document_result=document_result,
+            ocr_result=ocr_result,
+            fallback_invoice_profile=invoice_profile,
+            units=reissue_units,
+        )
     if force_batch:
         workbook_units = _extract_workbook_invoice_units(draft_dir, attachments)
         if len(workbook_units) >= 1:
@@ -1367,6 +1414,492 @@ def _create_split_draft_batch(
     )
     return batch
 
+
+
+def _extract_reissue_draft_units(
+    *,
+    draft_dir: Path,
+    attachments: list[DraftAttachment],
+    instruction_text: str,
+    fallback_context: str,
+    company_name: str,
+) -> list[ReissueDraftUnit]:
+    if not _looks_like_reissue_instruction(instruction_text):
+        return []
+    invoice_numbers = _extract_invoice_numbers(instruction_text) or _extract_invoice_numbers(fallback_context)
+    target_amounts = _extract_reissue_target_amounts(instruction_text)
+    if not invoice_numbers or not target_amounts:
+        return []
+    records: list[HistoryInvoiceRecord] = []
+    for attachment in attachments:
+        suffix = Path(attachment.stored_name).suffix.lower()
+        if suffix not in {".xlsx", ".xls"}:
+            continue
+        source_path = draft_dir / attachment.stored_name
+        try:
+            records.extend(_history_invoice_records_from_workbook(source_path, attachment.original_name))
+        except Exception:  # noqa: BLE001
+            continue
+    if not records:
+        return []
+    by_invoice = {record.invoice_no: record for record in records if record.invoice_no}
+    original = next((by_invoice[number] for number in invoice_numbers if number in by_invoice), None)
+    if original is None:
+        return []
+    matched_records = _match_positive_history_records_for_amounts(
+        records=records,
+        target_amounts=target_amounts,
+        original=original,
+        company_name=company_name,
+    )
+    if matched_records:
+        return [_reissue_unit_from_record(record, f"按客户重开金额 {amount} 匹配历史正数发票") for record, amount in zip(matched_records, target_amounts)]
+    fallback_line_groups = _fallback_reissue_line_groups(original.lines, target_amounts)
+    units: list[ReissueDraftUnit] = []
+    for amount, lines in zip(target_amounts, fallback_line_groups):
+        units.append(
+            ReissueDraftUnit(
+                source_name=f"原票 {original.invoice_no} 重开 {amount}",
+                buyer=original.buyer,
+                invoice_kind=original.invoice_kind,
+                note=original.note,
+                lines=lines,
+                target_amount=amount,
+                source_excerpt=(
+                    f"红冲后重开：从历史发票 {original.invoice_no} 复用购买方、票种、税率、税收编码和明细；"
+                    f"本次目标含税金额 {amount}。"
+                ),
+            )
+        )
+    return units
+
+
+def _looks_like_reissue_instruction(text: str) -> bool:
+    compact = re.sub(r"\s+", "", str(text or ""))
+    if not compact:
+        return False
+    has_invoice_no = bool(_extract_invoice_numbers(compact))
+    has_reissue_word = bool(re.search(r"重开|重新开|再开|分[两二三四五六七八九十0-9]+(?:笔|张)|作废|红冲|冲红", compact))
+    return has_invoice_no and has_reissue_word
+
+
+def _extract_invoice_numbers(text: str) -> list[str]:
+    seen: set[str] = set()
+    numbers: list[str] = []
+    for matched in re.findall(r"(?<!\d)(\d{20})(?!\d)", str(text or "")):
+        if matched not in seen:
+            seen.add(matched)
+            numbers.append(matched)
+    return numbers
+
+
+def _extract_reissue_target_amounts(text: str) -> list[str]:
+    source = str(text or "")
+    amount_texts: list[str] = []
+    amount_list_match = re.search(r"金额\s*分别\s*(?:为|是)?\s*([0-9.,，、\s和及]+)", source)
+    if amount_list_match:
+        amount_texts.extend(re.findall(r"\d{2,}(?:\.\d{1,2})?", amount_list_match.group(1)))
+    single_patterns = [
+        r"开这个数\s*(\d{2,}(?:\.\d{1,2})?)",
+        r"按(?:这个|新)?(?:金额|数)\s*(\d{2,}(?:\.\d{1,2})?)\s*重开",
+        r"重开[^\d]{0,10}(\d{2,}(?:\.\d{1,2})?)",
+    ]
+    for pattern in single_patterns:
+        for matched in re.findall(pattern, source):
+            amount_texts.append(matched)
+    amounts: list[str] = []
+    seen: set[str] = set()
+    for raw in amount_texts:
+        parsed = _decimal_from_text(raw)
+        if parsed is None or parsed <= 0 or parsed >= Decimal("100000000"):
+            continue
+        text_value = f"{parsed:.2f}"
+        if text_value not in seen:
+            seen.add(text_value)
+            amounts.append(text_value)
+    return amounts[:10]
+
+
+def _history_invoice_records_from_workbook(path: Path, source_name: str) -> list[HistoryInvoiceRecord]:
+    rows_by_sheet = _workbook_rows_by_sheet(path)
+    base_rows: list[list[str]] = []
+    line_rows: list[list[str]] = []
+    for rows in rows_by_sheet:
+        header_index, header = _find_history_header(rows, ["数电发票号码", "货物或应税劳务名称", "税收分类编码", "价税合计"])
+        if header_index is not None and header is not None:
+            line_rows = [header, *rows[header_index + 1 :]]
+            continue
+        header_index, header = _find_history_header(rows, ["数电发票号码", "购买方名称", "发票票种", "是否正数发票"])
+        if header_index is not None and header is not None:
+            base_rows = [header, *rows[header_index + 1 :]]
+    if not base_rows or not line_rows:
+        return []
+    line_header = line_rows[0]
+    line_index = {name: _first_header_index(line_header, [name]) for name in line_header if name}
+    grouped_lines: dict[str, list[InvoiceLine]] = {}
+    for row in line_rows[1:]:
+        invoice_no = _row_value(row, line_index.get("数电发票号码"))
+        if not invoice_no:
+            continue
+        line = _history_line_from_row(row, line_index)
+        if line is None:
+            continue
+        grouped_lines.setdefault(invoice_no, []).append(line)
+    base_header = base_rows[0]
+    base_index = {name: _first_header_index(base_header, [name]) for name in base_header if name}
+    records: list[HistoryInvoiceRecord] = []
+    for row in base_rows[1:]:
+        invoice_no = _row_value(row, base_index.get("数电发票号码"))
+        if not invoice_no:
+            continue
+        total = _money_text(_row_value(row, base_index.get("价税合计")))
+        positive_text = _row_value(row, base_index.get("是否正数发票"))
+        kind_text = _row_value(row, base_index.get("发票票种"))
+        records.append(
+            HistoryInvoiceRecord(
+                invoice_no=invoice_no,
+                seller_name=_row_value(row, base_index.get("销方名称")),
+                buyer=BuyerInfo(
+                    name=_row_value(row, base_index.get("购买方名称")),
+                    tax_id=_row_value(row, base_index.get("购方识别号")),
+                ),
+                invoice_kind="增值税专用发票" if "专用" in kind_text else "普通发票",
+                total_amount=total,
+                is_positive=positive_text != "否" and not str(total).startswith("-"),
+                status=_row_value(row, base_index.get("发票状态")),
+                issued_at=_row_value(row, base_index.get("开票日期")),
+                note=_row_value(row, base_index.get("备注")),
+                lines=grouped_lines.get(invoice_no, []),
+                source_name=source_name,
+            )
+        )
+    return records
+
+
+def _find_history_header(rows: list[list[str]], required: list[str]) -> tuple[int | None, list[str] | None]:
+    for index, row in enumerate(rows[:20]):
+        normalized = [cell.strip() for cell in row]
+        if all(_first_header_index(normalized, [name]) is not None for name in required):
+            return index, normalized
+    return None, None
+
+
+def _history_line_from_row(row: list[str], index: dict[str, int | None]) -> InvoiceLine | None:
+    amount = _money_text(_row_value(row, index.get("价税合计")))
+    if not amount:
+        return None
+    raw_name = _row_value(row, index.get("货物或应税劳务名称"))
+    tax_category, project_name = _split_history_item_name(raw_name)
+    if not project_name:
+        return None
+    return InvoiceLine(
+        project_name=project_name,
+        tax_category=tax_category,
+        specification=_row_value(row, index.get("规格型号")),
+        unit=_row_value(row, index.get("单位")),
+        quantity=_number_text(_row_value(row, index.get("数量"))),
+        unit_price=_money_text(_row_value(row, index.get("单价"))),
+        amount_with_tax=amount,
+        tax_rate=_workbook_tax_rate_text(_row_value(row, index.get("税率"))) or "1%",
+        tax_code=_row_value(row, index.get("税收分类编码")),
+        coding_reference="历史发票明细复用：红冲后重开草稿按原票/历史正数票保留税收编码，需人工复核。",
+    )
+
+
+def _split_history_item_name(raw_name: str) -> tuple[str, str]:
+    text = str(raw_name or "").strip()
+    parts = [part.strip() for part in text.split("*") if part.strip()]
+    if len(parts) >= 2:
+        return parts[0], parts[-1]
+    return "", text.strip("*")
+
+
+def _match_positive_history_records_for_amounts(
+    *,
+    records: list[HistoryInvoiceRecord],
+    target_amounts: list[str],
+    original: HistoryInvoiceRecord,
+    company_name: str,
+) -> list[HistoryInvoiceRecord]:
+    matched: list[HistoryInvoiceRecord] = []
+    used: set[str] = set()
+    for amount in target_amounts:
+        amount_decimal = _decimal_from_text(amount)
+        candidates = []
+        for record in records:
+            if record.invoice_no == original.invoice_no or record.invoice_no in used:
+                continue
+            if not record.is_positive or not record.lines:
+                continue
+            if company_name.strip() and record.seller_name.strip() and company_name.strip() not in record.seller_name.strip() and record.seller_name.strip() not in company_name.strip():
+                continue
+            if original.buyer.name and record.buyer.name != original.buyer.name:
+                continue
+            if amount_decimal is None or _decimal_from_text(record.total_amount) != amount_decimal:
+                continue
+            candidates.append(record)
+        if not candidates:
+            return []
+        candidates.sort(key=lambda item: item.issued_at, reverse=True)
+        selected = candidates[0]
+        used.add(selected.invoice_no)
+        matched.append(selected)
+    return matched
+
+
+def _fallback_reissue_line_groups(original_lines: list[InvoiceLine], target_amounts: list[str]) -> list[list[InvoiceLine]]:
+    if not original_lines:
+        return []
+    if len(target_amounts) == 1:
+        target = target_amounts[0]
+        lines = [replace(line) for line in original_lines]
+        if len(lines) == 1:
+            lines[0].amount_with_tax = target
+            lines[0].quantity = lines[0].quantity or "1"
+            lines[0].unit_price = ""
+        return [lines]
+    groups: list[list[InvoiceLine]] = []
+    cursor = 0
+    for amount in target_amounts:
+        target = _decimal_from_text(amount)
+        running = Decimal("0")
+        group: list[InvoiceLine] = []
+        while cursor < len(original_lines):
+            line = replace(original_lines[cursor])
+            line_amount = _decimal_from_text(line.resolved_amount_with_tax()) or Decimal("0")
+            running += abs(line_amount)
+            group.append(line)
+            cursor += 1
+            if target is not None and abs(running - target) <= Decimal("0.01"):
+                break
+        if group:
+            groups.append(group)
+    return groups if len(groups) == len(target_amounts) else []
+
+
+def _reissue_unit_from_record(record: HistoryInvoiceRecord, reason: str) -> ReissueDraftUnit:
+    return ReissueDraftUnit(
+        source_name=f"历史正数发票 {record.invoice_no}",
+        buyer=record.buyer,
+        invoice_kind=record.invoice_kind,
+        note=record.note,
+        lines=[replace(line) for line in record.lines],
+        target_amount=record.total_amount,
+        source_excerpt=(
+            f"红冲后重开：{reason}；购买方 {record.buyer.name}；"
+            f"票种 {record.invoice_kind}；含税合计 {record.total_amount}。"
+        ),
+    )
+
+
+def _create_reissue_drafts(
+    *,
+    batch_id: str,
+    case_id: str,
+    draft_dir: Path,
+    company_name: str,
+    raw_text: str,
+    note: str,
+    attachments: list[DraftAttachment],
+    document_result,
+    ocr_result,
+    fallback_invoice_profile: dict[str, str],
+    units: list[ReissueDraftUnit],
+) -> InvoiceDraft | DraftBatch:
+    if len(units) == 1:
+        return _create_single_reissue_draft(
+            draft_id=batch_id,
+            case_id=case_id,
+            draft_dir=draft_dir,
+            company_name=company_name,
+            raw_text=raw_text,
+            note=note,
+            attachments=attachments,
+            document_result=document_result,
+            ocr_result=ocr_result,
+            fallback_invoice_profile=fallback_invoice_profile,
+            unit=units[0],
+        )
+    return _create_reissue_draft_batch(
+        batch_id=batch_id,
+        case_id=case_id,
+        draft_dir=draft_dir,
+        company_name=company_name,
+        raw_text=raw_text,
+        note=note,
+        attachments=attachments,
+        document_result=document_result,
+        ocr_result=ocr_result,
+        fallback_invoice_profile=fallback_invoice_profile,
+        units=units,
+    )
+
+
+def _create_single_reissue_draft(
+    *,
+    draft_id: str,
+    case_id: str,
+    draft_dir: Path,
+    company_name: str,
+    raw_text: str,
+    note: str,
+    attachments: list[DraftAttachment],
+    document_result,
+    ocr_result,
+    fallback_invoice_profile: dict[str, str],
+    unit: ReissueDraftUnit,
+) -> InvoiceDraft:
+    child_attachments = list(attachments)
+    merged_note = _merge_extracted_note(note, unit.note)
+    issues = _build_draft_issues(
+        company_name=company_name,
+        raw_text=unit.source_excerpt or raw_text,
+        attachments=child_attachments,
+        buyer=unit.buyer,
+        lines=unit.lines,
+        special_business=fallback_invoice_profile.get("special_business", ""),
+        document_status=document_result.status,
+        document_note=document_result.note,
+        ocr_status=ocr_result.status,
+        ocr_note=ocr_result.note,
+    )
+    issues.insert(0, "本草稿由“红冲后重开”规则生成；系统只生成新的正数发票草稿，不处理红冲动作。")
+    draft = InvoiceDraft(
+        draft_id=draft_id,
+        case_id=case_id,
+        company_name=company_name.strip(),
+        buyer=unit.buyer,
+        lines=unit.lines,
+        raw_text=unit.source_excerpt or raw_text,
+        note=merged_note,
+        issues=issues,
+        source_images=child_attachments,
+        workbook_name="开票明细表.xlsx",
+        created_at=datetime.now().isoformat(timespec="seconds"),
+        invoice_kind=unit.invoice_kind or fallback_invoice_profile.get("invoice_kind", "普通发票"),
+        invoice_medium=fallback_invoice_profile.get("invoice_medium", "电子发票"),
+        special_business=fallback_invoice_profile.get("special_business", ""),
+        ocr_status=ocr_result.status,
+        ocr_engine=ocr_result.engine,
+        ocr_text=ocr_result.combined_text,
+        ocr_note=ocr_result.note,
+        source_doc_status=document_result.status,
+        source_doc_text=unit.source_excerpt,
+        source_doc_note=document_result.note,
+        extract_strategy="rules_plus_reissue_history",
+        extract_warnings=["检测到红冲后重开场景：红冲动作暂不自动处理；本页只生成新的正数发票草稿。"],
+        material_tags=_material_tags_from_context(raw_text, attachments, document_result),
+    )
+    save_draft(draft)
+    record_case_event(case_id=case_id, draft_id=draft_id, event_type="reissue_draft_created", payload=draft_snapshot(draft))
+    return draft
+
+
+def _common_reissue_invoice_kind(units: list[ReissueDraftUnit]) -> str:
+    kinds = {unit.invoice_kind for unit in units if unit.invoice_kind}
+    return kinds.pop() if len(kinds) == 1 else ""
+
+
+def _create_reissue_draft_batch(
+    *,
+    batch_id: str,
+    case_id: str,
+    draft_dir: Path,
+    company_name: str,
+    raw_text: str,
+    note: str,
+    attachments: list[DraftAttachment],
+    document_result,
+    ocr_result,
+    fallback_invoice_profile: dict[str, str],
+    units: list[ReissueDraftUnit],
+) -> DraftBatch:
+    material_tags = _material_tags_from_context(raw_text, attachments, document_result)
+    items: list[DraftBatchItem] = []
+    batch_issues = [
+        "当前材料命中了“红冲后拆分重开”规则；系统只生成新的正数发票草稿，不处理红冲动作。",
+        "请重点复核每张重开草稿的拆分金额、明细归属、购买方、备注、税率和税收编码。",
+    ]
+    for unit in units:
+        child_draft_id = uuid4().hex[:10]
+        child_dir = draft_directory(child_draft_id)
+        child_dir.mkdir(parents=True, exist_ok=True)
+        child_attachments = _clone_attachments_to_directory(source_dir=draft_dir, target_dir=child_dir, attachments=attachments)
+        merged_note = _merge_extracted_note(note, unit.note)
+        child_issues = _build_draft_issues(
+            company_name=company_name,
+            raw_text=unit.source_excerpt or raw_text,
+            attachments=child_attachments,
+            buyer=unit.buyer,
+            lines=unit.lines,
+            special_business=fallback_invoice_profile.get("special_business", ""),
+            document_status=document_result.status,
+            document_note=document_result.note,
+            ocr_status=ocr_result.status,
+            ocr_note=ocr_result.note,
+        )
+        child_issues.insert(0, f"本草稿由红冲后重开金额 `{unit.target_amount}` 匹配生成；请复核是否对应客户要求的其中一笔。")
+        child_draft = InvoiceDraft(
+            draft_id=child_draft_id,
+            case_id=case_id,
+            company_name=company_name.strip(),
+            buyer=unit.buyer,
+            lines=unit.lines,
+            raw_text=unit.source_excerpt or raw_text,
+            note=merged_note,
+            issues=child_issues,
+            source_images=child_attachments,
+            workbook_name="开票明细表.xlsx",
+            created_at=datetime.now().isoformat(timespec="seconds"),
+            invoice_kind=unit.invoice_kind or fallback_invoice_profile.get("invoice_kind", "普通发票"),
+            invoice_medium=fallback_invoice_profile.get("invoice_medium", "电子发票"),
+            special_business=fallback_invoice_profile.get("special_business", ""),
+            ocr_status=ocr_result.status,
+            ocr_engine=ocr_result.engine,
+            ocr_text=ocr_result.combined_text,
+            ocr_note=ocr_result.note,
+            source_doc_status=document_result.status,
+            source_doc_text=unit.source_excerpt,
+            source_doc_note=document_result.note,
+            extract_strategy="rules_plus_reissue_history_batch",
+            extract_warnings=["检测到红冲后拆分重开场景：红冲动作暂不自动处理；本页只生成新的正数发票草稿。"],
+            material_tags=material_tags,
+        )
+        save_draft(child_draft)
+        record_case_event(case_id=case_id, draft_id=child_draft_id, batch_id=batch_id, event_type="reissue_child_draft_created", payload=draft_snapshot(child_draft))
+        items.append(
+            DraftBatchItem(
+                draft_id=child_draft_id,
+                buyer_name=unit.buyer.name or "待补全购买方名称",
+                invoice_kind=unit.invoice_kind or fallback_invoice_profile.get("invoice_kind", "普通发票"),
+                amount_total=_sum_line_amounts(unit.lines),
+                project_summary=_summarize_projects(unit.lines),
+                line_count=len(unit.lines),
+                issue_summary=child_issues[0] if child_issues else "",
+            )
+        )
+        batch_issues.extend(child_issues)
+    batch = DraftBatch(
+        batch_id=batch_id,
+        case_id=case_id,
+        company_name=company_name.strip(),
+        created_at=datetime.now().isoformat(timespec="seconds"),
+        items=items,
+        raw_text=raw_text,
+        note=note.strip(),
+        issues=batch_issues,
+        source_images=attachments,
+        invoice_kind=_common_reissue_invoice_kind(units) or fallback_invoice_profile.get("invoice_kind", "普通发票"),
+        invoice_medium=fallback_invoice_profile.get("invoice_medium", "电子发票"),
+        special_business=fallback_invoice_profile.get("special_business", ""),
+        extract_strategy="rules_plus_reissue_history_batch",
+        llm_provider="",
+        extract_warnings=["检测到红冲后拆分重开场景：红冲动作暂不自动处理；本页只生成新的正数发票草稿。"],
+        material_tags=material_tags,
+    )
+    save_draft_batch(batch)
+    record_case_event(case_id=case_id, batch_id=batch_id, event_type="reissue_draft_batch_created", payload=batch_snapshot(batch))
+    return batch
 
 def _extract_workbook_invoice_units(draft_dir: Path, attachments: list[DraftAttachment]) -> list[WorkbookInvoiceUnit]:
     units: list[WorkbookInvoiceUnit] = []
