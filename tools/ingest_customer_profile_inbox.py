@@ -17,6 +17,7 @@ import argparse
 import csv
 import hashlib
 import json
+import os
 import re
 import shutil
 import sys
@@ -34,7 +35,34 @@ except Exception:  # pragma: no cover - deployment diagnostic
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_PROFILE_ROOT = PROJECT_ROOT.parent / "测试组客户档案储备"
+
+
+def default_profile_root() -> Path:
+    """Return the runtime customer-profile workspace.
+
+    Development historically keeps `测试组客户档案储备` next to the code project.
+    Windows full-install packages should keep it inside the installed product
+    folder, so the inbox/profile workflow is covered by the package and does not
+    accidentally write to `C:\` when the zip is flattened into C:\InvoiceAssistant.
+    """
+
+    env_root = os.environ.get("TAX_INVOICE_PROFILE_ROOT", "").strip()
+    if env_root:
+        return Path(env_root).expanduser()
+    bundled_root = PROJECT_ROOT / "测试组客户档案储备"
+    legacy_sibling_root = PROJECT_ROOT.parent / "测试组客户档案储备"
+    legacy_active = legacy_sibling_root / "_档案库" / "customer_profiles_active.json"
+    # 本地开发环境已有完整历史档案源，优先继续使用；安装包环境则使用包内工作区。
+    if legacy_active.exists():
+        return legacy_sibling_root
+    if bundled_root.exists():
+        return bundled_root
+    if legacy_sibling_root.exists():
+        return legacy_sibling_root
+    return bundled_root
+
+
+DEFAULT_PROFILE_ROOT = default_profile_root()
 HISTORY_SHEET_NAME = "信息汇总表"
 BASIC_SHEET_NAME = "发票基础信息"
 REQUIRED_HISTORY_HEADERS = {

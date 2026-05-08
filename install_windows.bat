@@ -129,7 +129,11 @@ if defined TESS_EXE (
 )
 
 echo.
-echo [6/6] Create desktop shortcut...
+echo [6/7] 准备本地客户档案工作区...
+call :ensure_profile_workspace
+
+echo.
+echo [7/7] Create desktop shortcut...
 call "%~dp0REPAIR_DESKTOP_SHORTCUT.bat"
 if errorlevel 1 (
   echo Desktop shortcut creation failed. You can run 02_START_INVOICE_ASSISTANT.bat manually.
@@ -147,6 +151,25 @@ echo   双击桌面“智能开票助手”
 echo   或双击当前文件夹里的“启动智能开票助手.bat”
 echo.
 pause
+exit /b 0
+
+:ensure_profile_workspace
+set "PROFILE_ROOT=%BUNDLE_ROOT%测试组客户档案储备"
+if not exist "%PROFILE_ROOT%" mkdir "%PROFILE_ROOT%" >nul 2>nul
+if not exist "%PROFILE_ROOT%\_收件箱\待处理" mkdir "%PROFILE_ROOT%\_收件箱\待处理" >nul 2>nul
+if not exist "%PROFILE_ROOT%\_收件箱\已处理" mkdir "%PROFILE_ROOT%\_收件箱\已处理" >nul 2>nul
+if not exist "%PROFILE_ROOT%\_收件箱\解析失败" mkdir "%PROFILE_ROOT%\_收件箱\解析失败" >nul 2>nul
+if not exist "%PROFILE_ROOT%\_收件箱\重复文件" mkdir "%PROFILE_ROOT%\_收件箱\重复文件" >nul 2>nul
+if not exist "%PROFILE_ROOT%\_档案库" mkdir "%PROFILE_ROOT%\_档案库" >nul 2>nul
+if not exist "%PROFILE_ROOT%\_待确认" mkdir "%PROFILE_ROOT%\_待确认" >nul 2>nul
+if errorlevel 1 (
+  echo 客户档案工作区创建失败：%PROFILE_ROOT%
+  echo 请确认安装目录有写入权限，建议使用 C:\InvoiceAssistant。
+  pause
+  exit /b 1
+)
+echo 客户档案工作区已就绪：
+echo   %PROFILE_ROOT%
 exit /b 0
 
 :detect_python
