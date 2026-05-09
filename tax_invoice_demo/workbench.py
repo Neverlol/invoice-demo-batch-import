@@ -281,11 +281,18 @@ def create_draft_from_workbench(
     if force_batch:
         workbook_units = _extract_workbook_invoice_units(draft_dir, attachments)
         if len(workbook_units) >= 1:
+            workbook_ocr_result = ocr_result
+            # 批量 Excel + 历史发票样张是现场主路径：即使图片后续会交给视觉模型，
+            # 也必须先跑一次本地 OCR，把样张里的购买方税号/备注栏作为强结构化线索。
+            if image_attachment_paths and not workbook_ocr_result.combined_text.strip():
+                workbook_ocr_result = _run_draft_ocr(draft_dir, attachments, defer_to_vision=False)
+            workbook_parse_text = _compose_parse_source(raw_text, document_result.combined_text, workbook_ocr_result.combined_text)
+            note = _merge_extracted_note(note, _extract_invoice_note_from_context(workbook_parse_text))
             buyer_extraction = extract_invoice_structured_data(
                 raw_text=raw_text,
                 note=note,
                 document_text=document_result.combined_text,
-                ocr_text=ocr_result.combined_text,
+                ocr_text=workbook_ocr_result.combined_text,
                 image_paths=image_attachment_paths[:BATCH_LLM_MAX_ATTACHMENTS],
                 force_llm_review=bool(image_attachment_paths),
                 material_tags=material_tags,
@@ -302,7 +309,7 @@ def create_draft_from_workbench(
                 buyer=batch_buyer,
                 attachments=attachments,
                 document_result=document_result,
-                ocr_result=ocr_result,
+                ocr_result=workbook_ocr_result,
                 invoice_profile=invoice_profile,
                 workbook_units=workbook_units,
                 extract_warnings=buyer_extraction.warnings,
@@ -3218,21 +3225,42 @@ def _enrich_buyer_from_history_profile(company_name: str, buyer: BuyerInfo, pars
     history_match = resolve_buyer_from_history(parse_source, company_name=company_name)
     if history_match is None:
         return buyer
-    if buyer.name and buyer.tax_id and buyer.tax_id == history_match.buyer.tax_id:
+    normalized_name = buyer.name.replace(" ", "")
+    normalized_history = history_match.buyer.name.replace(" ", "")
+    name_matches = (
+        not buyer.name
+        or history_match.matched_alias in normalized_name
+        or normalized_name in normalized_history
+        or normalized_history in normalized_name
+    )
+    if buyer.name and not name_matches:
         return buyer
-    if buyer.name and not buyer.tax_id:
-        normalized_name = buyer.name.replace(" ", "")
-        normalized_history = history_match.buyer.name.replace(" ", "")
-        if history_match.matched_alias not in normalized_name and normalized_name not in normalized_history:
-            return buyer
+    if buyer.tax_id and buyer.tax_id == history_match.buyer.tax_id:
+        return buyer
+    tax_id = buyer.tax_id
+    if not tax_id or _looks_like_unreliable_buyer_tax_id(tax_id):
+        tax_id = history_match.buyer.tax_id
     return BuyerInfo(
-        name=history_match.buyer.name if not buyer.name or not buyer.tax_id else buyer.name,
-        tax_id=buyer.tax_id or history_match.buyer.tax_id,
+        name=history_match.buyer.name if not buyer.name or _looks_like_unreliable_buyer_tax_id(buyer.tax_id) else buyer.name,
+        tax_id=tax_id,
         address=buyer.address,
         phone=buyer.phone,
         bank_name=buyer.bank_name,
         bank_account=buyer.bank_account,
     )
+
+
+def _looks_like_unreliable_buyer_tax_id(value: str) -> bool:
+    compact = re.sub(r"\s+", "", str(value or "").upper())
+    if not compact:
+        return True
+    if len(compact) != 18:
+        return True
+    if len(set(compact)) <= 4:
+        return True
+    if re.fullmatch(r"(?:0{6,}|1{6,}|2{6,}|3{6,}|4{6,}|5{6,}|9{6,}).*", compact):
+        return True
+    return False
 
 
 

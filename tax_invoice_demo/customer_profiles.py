@@ -104,14 +104,36 @@ def _apply_single_line_history_hint(line: InvoiceLine, rows: list[dict[str, str]
     if exact_match is not None:
         return _apply_history_match_to_line(line, exact_match, exact=True)
 
-    # 弱简称（服务/服务费/代理等）再用相似历史兜底；明确项目名如果没有精确历史，
-    # 不让历史高频项目直接覆盖，避免“本行商品”被其它上下文项目污染。
-    if not _is_weak_project_name(line.project_name):
-        return line
     match = _match_line_history(line, rows, raw_text=raw_text)
     if match is None:
         return line
+    # 明确项目名也允许用客户档案补品类/税码，但不能把当前项目名称替换成历史项目名，
+    # 避免“历史答案倒灌”；只做项目名称相似/包含时的赋码候选。
+    if not _is_weak_project_name(line.project_name):
+        return _apply_history_code_hint_to_line(line, match)
     return _apply_history_match_to_line(line, match, exact=False)
+
+
+def _apply_history_code_hint_to_line(line: InvoiceLine, match: LineHistoryMatch) -> InvoiceLine:
+    if not match.tax_category and not match.tax_code:
+        return line
+    if not _history_match_safe_for_explicit_project(line.project_name, match.project_name):
+        return line
+    if not line.tax_category and match.tax_category:
+        line.tax_category = match.tax_category
+    if not line.tax_code and match.tax_code:
+        line.tax_code = match.tax_code
+    if (not line.tax_rate or line.tax_rate == "3%") and match.tax_rate:
+        line.tax_rate = match.tax_rate
+    if not line.unit and match.unit:
+        line.unit = match.unit
+    _append_history_reference(
+        line,
+        "历史开票档案相似项目候选，需人工复核: "
+        f"{match.matched_source} -> {match.tax_category or '未记录大类'} / {match.tax_code or '未记录编码'}"
+        f" / {match.tax_rate or '未记录税率'}",
+    )
+    return line
 
 
 def _apply_history_match_to_line(line: InvoiceLine, match: LineHistoryMatch, *, exact: bool) -> InvoiceLine:
@@ -317,6 +339,16 @@ def _dominant_line_profile(rows: list[dict[str, str]]) -> LineHistoryMatch | Non
         confidence="high" if _count >= 2 else "medium",
     )
 
+
+
+def _history_match_safe_for_explicit_project(current: str, historical: str) -> bool:
+    left = _normalize(current)
+    right = _normalize(historical)
+    if not left or not right:
+        return False
+    if left == right or left in right or right in left:
+        return True
+    return _token_overlap_score(left, right) >= 22
 
 
 def _match_line_history(line: InvoiceLine, rows: list[dict[str, str]], *, raw_text: str) -> LineHistoryMatch | None:

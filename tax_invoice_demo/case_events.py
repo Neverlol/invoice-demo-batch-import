@@ -162,7 +162,12 @@ def _event_capabilities(event_type: str, payload: dict) -> list[str]:
 
 def _event_llm_summary(event_type: str, payload: dict) -> dict:
     metrics = payload.get("llm_metrics") if isinstance(payload.get("llm_metrics"), list) else []
-    attempted = bool(metrics) or bool(payload.get("llm_provider")) or (event_type == "batch_smart_code_completed" and int(payload.get("smart") or 0) > 0)
+    attempted = (
+        bool(metrics)
+        or bool(payload.get("llm_provider"))
+        or bool(payload.get("llm_attempted_or_ready_for_taxonomy"))
+        or (event_type == "batch_smart_code_completed" and int(payload.get("smart") or 0) > 0)
+    )
     success_count = sum(1 for item in metrics if isinstance(item, dict) and item.get("status") == "success")
     failed_count = sum(1 for item in metrics if isinstance(item, dict) and item.get("status") == "failed")
     if event_type == "batch_smart_code_completed" and int(payload.get("smart") or 0) > 0:

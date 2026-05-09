@@ -1154,6 +1154,66 @@ A4复印纸 10包 240元
         self.assertIn("命中 客户规则", next_draft.lines[0].coding_reference)
 
 
+    def test_cloud_profile_matches_similar_explicit_excel_item_without_replacing_name(self):
+        customer_profiles_module.PROFILE_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        customer_profiles_module.PROFILE_CACHE_PATH.write_text(
+            json.dumps(
+                [
+                    {
+                        "seller_name": "沈阳市铁西区聚腾商贸商行（个体工商户）",
+                        "seller_tax_id": "92210106TESTSELLER1",
+                        "project_profiles": [
+                            {
+                                "project_name": "干混抹灰砂浆",
+                                "tax_category": "非金属矿物制品",
+                                "tax_code": "1080107000000000000",
+                                "tax_rate": "1%",
+                                "unit": "吨",
+                                "line_count": 4,
+                            }
+                        ],
+                        "buyer_profiles": [
+                            {"buyer_name": "中铁二局第四工程有限公司", "buyer_tax_id": "91510100TESTBUYER1", "line_count": 4}
+                        ],
+                    }
+                ],
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        line = InvoiceLine(project_name="网采材料-干混抹灰砂浆", amount_with_tax="100.00", tax_rate="1%")
+
+        [updated] = customer_profiles_module.apply_line_history_hints(
+            [line],
+            company_name="沈阳市铁西区聚腾商贸商行（个体工商户）",
+            buyer=BuyerInfo(name="中铁二局第四工程有限公司", tax_id="544554455445944554"),
+            raw_text="网采材料-干混抹灰砂浆",
+        )
+
+        self.assertEqual(updated.project_name, "网采材料-干混抹灰砂浆")
+        self.assertEqual(updated.tax_category, "非金属矿物制品")
+        self.assertEqual(updated.tax_code, "1080107000000000000")
+        self.assertIn("历史开票档案相似项目候选", updated.coding_reference)
+
+    def test_history_profile_replaces_unreliable_ocr_tax_id_when_buyer_name_matches(self):
+        _seed_history_profile_row(
+            company_name="沈阳市铁西区聚腾商贸商行（个体工商户）",
+            buyer_name="中铁二局第四工程有限公司",
+            buyer_tax_id="91510100TESTBUYER1",
+            project_name="干混抹灰砂浆",
+            tax_category="非金属矿物制品",
+            tax_code="1080107000000000000",
+            tax_rate="1%",
+        )
+
+        buyer = workbench_module._enrich_buyer_from_history_profile(
+            "沈阳市铁西区聚腾商贸商行（个体工商户）",
+            BuyerInfo(name="中铁二局第四工程有限公司", tax_id="544554455445944554"),
+            "中铁二局第四工程有限公司 发票样张",
+        )
+
+        self.assertEqual(buyer.tax_id, "91510100TESTBUYER1")
+
     def test_cloud_profile_cache_supplies_seller_project_profile(self):
         customer_profiles_module.PROFILE_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
         customer_profiles_module.PROFILE_CACHE_PATH.write_text(

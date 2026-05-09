@@ -611,6 +611,7 @@ def smart_code_batch(batch_id: str):
     smart_code_result = _smart_code_result_message(scope, target_lines, before_refs, before_codes)
     _rebuild_batch_items_from_drafts(batch)
     export = export_batch_template(batch_id)
+    llm_diagnostic = diagnose_llm_config()
     record_case_event(
         case_id=batch.case_id,
         batch_id=batch.batch_id,
@@ -621,6 +622,11 @@ def smart_code_batch(batch_id: str):
             "smart": smart_code_result.get("smart", 0),
             "failed": smart_code_result.get("failed", 0),
             "changed": smart_code_result.get("changed", 0),
+            "llm_ready": llm_diagnostic.ready,
+            "llm_provider": llm_diagnostic.provider,
+            "llm_model": llm_diagnostic.model,
+            "llm_attempted_or_ready_for_taxonomy": bool(target_lines and llm_diagnostic.ready),
+            "llm_issues": llm_diagnostic.issues,
         },
     )
     return render_template(
