@@ -1543,12 +1543,16 @@ body:has(#batch-sheet-form) .card-head p {
 }
 .review-field input,
 .review-field select,
+.review-field textarea,
 .invoice-chip-row input,
 .invoice-chip-row select {
   min-height: 34px;
   border-radius: 10px;
   padding: 7px 9px;
   font-size: 13px;
+}
+.review-field textarea {
+  min-height: 88px;
 }
 .invoice-chip-row {
   gap: 10px;

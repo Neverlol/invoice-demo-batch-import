@@ -175,6 +175,20 @@ class TextInputParsingTest(unittest.TestCase):
         self.assertEqual(lines[0].tax_code, "")
         self.assertEqual(lines[0].normalized_tax_rate(), "3%")
 
+    def test_standard_invoice_ocr_prefers_buyer_tax_id_not_seller_tax_id(self):
+        text = """电子发票（增值税专用发票）
+购买方信息                                      销售方信息
+名称 中铁二局集团有限公司                         名称 沈阳市铁西区聚腾商贸商行（个体工商户）
+纳税人识别号 9151010073481642XK                  纳税人识别号 92210106MA0ABCDEF1
+项目名称:中铁二局集团有限公司沈阳市王家湾项目经理部
+项目地址:辽宁省沈阳市浑南区长安桥南街中铁二局项目部
+"""
+
+        buyer = extract_buyer_info_from_text(text)
+
+        self.assertEqual(buyer.name, "中铁二局集团有限公司")
+        self.assertEqual(buyer.tax_id, "9151010073481642XK")
+
     def test_real_business_excel_style_table_extracts_buyer_lines_and_global_tax_code(self):
         text = """物料名称\t规格型号\t数量\t开票金额\t税率
 一次性使用微针电极\tCONSUMABLE TIP\t150\t35625\t0.13

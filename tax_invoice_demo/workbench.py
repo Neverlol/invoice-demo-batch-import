@@ -686,8 +686,10 @@ def _build_field_review_reasons(draft: InvoiceDraft) -> dict[str, list[str]]:
         add("购买方名称", "购买方名称未可靠识别；请从客户开票信息、样票或聊天截图核对。")
     if not draft.buyer.tax_id.strip():
         add("购买方税号", "购买方税号缺失；上传税局前必须补全或确认客户不需要税号。")
-    if has_ocr_risk or has_image_material:
-        add("购买方税号", "图片/OCR 容易把发票号、二维码数字或车架号误当税号；请重点核对。")
+    elif _tax_id_needs_field_review(draft.buyer.tax_id):
+        add("购买方税号", "购买方税号格式可疑；请对照客户开票信息或发票样张逐位核对。")
+    if has_ocr_risk or has_image_material or "样票" in tags_text or "发票" in tags_text:
+        add("购买方税号", "图片/OCR 容易把销售方税号、发票号码或二维码数字误当购买方税号；请对照原图逐位核对。")
 
     if not draft.lines:
         add("开票明细", "本地规则未形成明细；需要人工补充或等待智能识别结果。")
@@ -706,6 +708,12 @@ def _build_field_review_reasons(draft: InvoiceDraft) -> dict[str, list[str]]:
         if low_conf_lines:
             add("开票明细", f"{len(low_conf_lines)} 行来自兜底、OCR、异常表或需人工复核来源；请逐行看命中来源。")
 
+    note_required_by_context = any(token in f"{draft.raw_text}\n{draft.source_doc_text}\n{draft.ocr_text}\n{warnings_text}" for token in ["发票对象", "备注", "项目名称", "项目地址", "样张", "样票"])
+    if note_required_by_context and not draft.note.strip():
+        add("备注", "客户材料提到发票对象/备注/样张要求，但草稿备注为空；请对照样张补全。")
+    elif note_required_by_context:
+        add("备注", "客户要求备注或发票对象按样张一致；请逐字核对备注内容。")
+
     if "样票 PDF" in tags_text or "样票" in warnings_text:
         add("金额", "样票里的金额可能是历史金额；以本次文字/聊天/Excel 明确金额为准。")
     if "多个金额" in warnings_text:
@@ -720,6 +728,17 @@ def _build_field_review_reasons(draft: InvoiceDraft) -> dict[str, list[str]]:
 
     return {field: messages[:4] for field, messages in reasons.items()}
 
+
+
+def _tax_id_needs_field_review(value: str) -> bool:
+    compact = re.sub(r"[^0-9A-Z]", "", str(value or "").upper())
+    if not compact:
+        return True
+    if len(compact) not in {15, 18, 20}:
+        return True
+    if len(compact) == 18 and re.search(r"[IOSVZ]", compact):
+        return True
+    return False
 
 
 def _line_needs_field_review(line: InvoiceLine) -> bool:

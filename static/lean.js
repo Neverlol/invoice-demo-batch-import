@@ -129,27 +129,29 @@ if (draftLiveStatus) {
   const detailNode = draftLiveStatus.querySelector("[data-draft-live-detail]");
   const elapsedNode = draftLiveStatus.querySelector("[data-draft-live-elapsed]");
   const hasActiveWork = draftLiveStatus.dataset.hasActiveWork === "1";
-  const startedAt = Date.now();
-  const activeMessages = [
-    "可以先核对已填出的购买方、金额和明细。",
-    "如果有图片或样票，请重点看黄色高亮字段。",
-    "未命中赋码的行建议先用“一键智能赋码”。",
-    "后台识别失败也不会影响你手工复核和保存。",
-  ];
-  let messageIndex = 0;
-  const tick = () => {
-    const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-    if (elapsedNode) elapsedNode.textContent = `${elapsed} 秒`;
-    if (hasActiveWork && detailNode && elapsed > 0 && elapsed % 4 === 0) {
-      messageIndex = (messageIndex + 1) % activeMessages.length;
-      detailNode.textContent = activeMessages[messageIndex];
-    }
-    if (!hasActiveWork && titleNode && elapsed > 6) {
-      titleNode.textContent = "草稿已就绪，请按高亮提示复核";
-    }
-  };
-  tick();
-  window.setInterval(tick, 1000);
+  if (!hasActiveWork) {
+    if (elapsedNode) elapsedNode.textContent = "已就绪";
+    if (titleNode) titleNode.textContent = titleNode.textContent || "草稿已就绪，请按高亮提示复核";
+  } else {
+    const startedAt = Date.now();
+    const activeMessages = [
+      "可以先核对已填出的购买方、金额和明细。",
+      "如果有图片或样票，请重点看黄色高亮字段。",
+      "未命中赋码的行建议先用“一键智能赋码”。",
+      "后台识别失败也不会影响你手工复核和保存。",
+    ];
+    let messageIndex = 0;
+    const tick = () => {
+      const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+      if (elapsedNode) elapsedNode.textContent = `复核已打开 ${elapsed} 秒`;
+      if (detailNode && elapsed > 0 && elapsed % 4 === 0) {
+        messageIndex = (messageIndex + 1) % activeMessages.length;
+        detailNode.textContent = activeMessages[messageIndex];
+      }
+    };
+    tick();
+    window.setInterval(tick, 1000);
+  }
 }
 
 const draftForm = document.querySelector("[data-draft-form]");

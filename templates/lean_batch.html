@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>批量模板 {{ batch.batch_id }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-assistant-copy') }}">
-    <script defer src="{{ url_for('static', filename='lean.js', v='20260504-batch-recommendation') }}"></script>
+    <script defer src="{{ url_for('static', filename='lean.js', v='20260509-batch-smart-code') }}"></script>
   </head>
   <body class="operator-body">
     {% set ns = namespace(review=0, ready=0) %}
@@ -43,6 +43,7 @@
         </section>
 
         {% if saved %}<section class="success-box" style="margin-top:22px;">本批修改已保存，并已重新校验模板。</section>{% endif %}
+        {% if smart_code_result %}<section class="success-box" style="margin-top:22px;"><strong>{{ smart_code_result.title }}</strong><p>{{ smart_code_result.message }}</p></section>{% endif %}
         {% if run_blocked %}<section class="danger-box" style="margin-top:22px;">{{ run_block_reason or '当前批量模板还有错误，已阻止上传税局。请先修复下方高亮字段，再保存并重新校验。' }}</section>{% endif %}
         {% if export.error_count %}
           <section class="danger-box" style="margin-top:22px;"><strong>模板校验未通过：{{ export.error_count }} 个错误</strong>{% for issue in export.validation_issues %}{% if issue.level == 'error' %}<p>{{ issue.sheet }} 第 {{ issue.row }} 行 {{ issue.header }}：{{ issue.message }}</p>{% endif %}{% endfor %}</section>
@@ -55,8 +56,14 @@
         <form method="post" action="{{ url_for('save_batch_sheet', batch_id=batch.batch_id) }}" id="batch-sheet-form" class="stack" style="margin-top:22px">
           <input type="hidden" name="batch_recommendation_applied" value="0" data-batch-recommendation-applied>
           <div class="card">
-            <div class="card-head"><div><h2>整批处理</h2><p>请先保存本页修改并重新校验，再下载或上传同一个税局批量模板。</p></div><span class="badge {% if export.error_count %}error{% elif ns.review %}warn{% else %}ok{% endif %}">{% if export.error_count %}有阻断{% elif ns.review %}待补全{% else %}可上传{% endif %}</span></div>
-            <div class="actions" style="justify-content:flex-start"><button class="btn" type="submit">保存本批修改 / 重新校验</button><a class="btn primary" href="{{ url_for('download_batch_template', batch_id=batch.batch_id) }}">下载本批税局 Excel</a></div>
+            <div class="card-head"><div><h2>整批处理</h2><p>先在本页集中修复本批草稿；需要大模型时，直接在批量页一次性智能赋码/复核，不必逐张进入高级编辑。</p></div><span class="badge {% if export.error_count %}error{% elif ns.review %}warn{% else %}ok{% endif %}">{% if export.error_count %}有阻断{% elif ns.review %}待补全{% else %}可上传{% endif %}</span></div>
+            <div class="actions" style="justify-content:flex-start">
+              <button class="btn" type="submit">保存本批修改 / 重新校验</button>
+              <button class="btn primary" type="submit" formaction="{{ url_for('smart_code_batch', batch_id=batch.batch_id) }}" name="smart_code_scope" value="missing">智能赋码本批未命中明细</button>
+              <button class="btn" type="submit" formaction="{{ url_for('smart_code_batch', batch_id=batch.batch_id) }}" name="smart_code_scope" value="all">智能复核本批全部明细</button>
+              <a class="btn" href="{{ url_for('download_batch_template', batch_id=batch.batch_id) }}">下载本批税局 Excel</a>
+            </div>
+            <p class="cost-hint">批量智能赋码会先保存本页修改，再合并处理所有子草稿中的未命中行；完成后仍回到本批复核页统一提交。</p>
           </div>
 
           <div class="card recommendation-card">
@@ -129,7 +136,7 @@
           <div class="card-head"><div><h2>Sheet 3：待补全 / 异常项</h2><p>这是本批检查清单，不是开票表。请按提示回到 Sheet 1 / Sheet 2 补字段；高级编辑只是备用入口。</p></div><span class="badge {% if ns.review %}warn{% else %}ok{% endif %}">{{ ns.review }} 项需处理</span></div>
           <div class="table-wrap"><table class="sheet-table"><thead><tr><th>#</th><th>来源</th><th>状态</th><th>提示</th><th>备用入口</th></tr></thead><tbody>
             {% for row in batch_rows %}
-              <tr class="{% if row.has_issues %}row-needs-review{% endif %}"><td>{{ row.index }}</td><td>{{ row.source_name or row.draft_id }}</td><td>{% if row.has_issues %}<span class="badge warn">待修补</span>{% else %}<span class="badge ok">可入模板</span>{% endif %}</td><td>{% if row.issues %}{% for issue in row.issues[:3] %}<p class="issue-line">{{ issue }}</p>{% endfor %}{% else %}<p>暂无异常。</p>{% endif %}</td><td><a href="{{ url_for('draft_detail', draft_id=row.draft_id) }}">高级编辑</a></td></tr>
+              <tr class="{% if row.has_issues %}row-needs-review{% endif %}"><td>{{ row.index }}</td><td>{{ row.source_name or row.draft_id }}</td><td>{% if row.has_issues %}<span class="badge warn">待修补</span>{% else %}<span class="badge ok">可入模板</span>{% endif %}</td><td>{% if row.issues %}{% for issue in row.issues[:3] %}<p class="issue-line">{{ issue }}</p>{% endfor %}{% else %}<p>暂无异常。</p>{% endif %}</td><td><a href="{{ url_for('draft_detail', draft_id=row.draft_id, batch_id=batch.batch_id) }}">高级编辑</a></td></tr>
             {% endfor %}
           </tbody></table></div>
         </section>

@@ -318,6 +318,11 @@ def serialize_invoice_lines(lines: list[InvoiceLine]) -> str:
 def extract_buyer_info_from_text(raw_text: str) -> BuyerInfo:
     buyer = BuyerInfo(name="", tax_id="")
     lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+    standard_invoice_buyer = _extract_buyer_info_from_standard_invoice_layout(lines)
+    if standard_invoice_buyer.name:
+        buyer.name = standard_invoice_buyer.name
+    if standard_invoice_buyer.tax_id:
+        buyer.tax_id = standard_invoice_buyer.tax_id
     tabular_buyer = _extract_buyer_info_from_tabular_text(lines)
     for line in lines:
         for pattern in BUYER_NAME_PATTERNS:
@@ -977,6 +982,48 @@ def _looks_like_tabular_label(value: str) -> bool:
         "电话",
         "证明材料",
     }
+
+
+
+def _extract_buyer_info_from_standard_invoice_layout(lines: list[str]) -> BuyerInfo:
+    buyer = BuyerInfo(name="", tax_id="")
+    joined = "\n".join(lines)
+    if "购买方" not in joined and "购方" not in joined:
+        return buyer
+    if "销售方" not in joined and "销方" not in joined:
+        return buyer
+
+    company_tail_pattern = r"(?:公司|中心|医院|学校|大学|研究所|研究院|商店|经销店|配送中心|修理部|商行|门市部|超市|合作社|项目部|经理部)"
+    in_buyer_block = False
+    for line in lines:
+        compact = re.sub(r"\s+", " ", line).strip()
+        if not compact:
+            continue
+        if re.search(r"购买方|购\s*方|购买方信息|购方信息", compact):
+            in_buyer_block = True
+        if in_buyer_block and not buyer.name and "名称" in compact:
+            name_part = compact
+            if "销售方" in name_part:
+                name_part = re.split(r"销售方|销\s*方|销售方信息|销方信息", name_part, maxsplit=1)[0]
+            matched = re.search(r"名称[：:\s]*([^：:]+?)(?:\s{2,}|纳税人识别号|统一社会信用代码|$)", name_part)
+            if matched:
+                candidate = _trim_inline_field_value(matched.group(1).strip())
+                company_match = re.search(rf"([\u4e00-\u9fffA-Za-z0-9()（）·]+?{company_tail_pattern})", candidate)
+                buyer.name = (company_match.group(1) if company_match else candidate).strip()
+        if in_buyer_block and not buyer.tax_id and re.search(r"识别号|信用代码|税号", compact):
+            tax_part = compact
+            if "销售方" in tax_part:
+                tax_part = re.split(r"销售方|销\s*方|销售方信息|销方信息", tax_part, maxsplit=1)[0]
+            matches = re.findall(r"([0-9A-ZO]{15,20})", tax_part.upper().replace(" ", ""))
+            if matches:
+                buyer.tax_id = _normalize_tax_id_ocr_noise(matches[0])
+        if in_buyer_block and re.search(r"销售方|销\s*方|销售方信息|销方信息", compact) and (buyer.name or buyer.tax_id):
+            # In two-column invoice screenshots the buyer and seller fields often share a line.
+            # We already consumed the left-side buyer fields above; stop before seller-only lines.
+            break
+        if buyer.name and buyer.tax_id:
+            break
+    return buyer
 
 
 

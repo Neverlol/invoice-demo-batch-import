@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>发票草稿 {{ draft.draft_id }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260507-live-progress') }}">
-    <script defer src="{{ url_for('static', filename='lean.js', v='20260507-live-progress') }}"></script>
+    <script defer src="{{ url_for('static', filename='lean.js', v='20260509-batch-return') }}"></script>
   </head>
   <body class="operator-body">
     <div class="app-shell draft-console-shell">
@@ -17,7 +17,7 @@
         <nav class="nav">
           <a href="{{ url_for('index') }}"><span class="nav-dot">台</span>开票工作台</a>
           <a class="active" href="{{ url_for('draft_detail', draft_id=draft.draft_id) }}"><span class="nav-dot">稿</span>发票草稿</a>
-          <span class="nav-item disabled"><span class="nav-dot">批</span>批量复核</span>
+          {% if parent_batch %}<a href="{{ url_for('batch_detail', batch_id=parent_batch.batch_id) }}"><span class="nav-dot">批</span>批量复核</a>{% else %}<span class="nav-item disabled"><span class="nav-dot">批</span>批量复核</span>{% endif %}
           <span class="nav-item disabled"><span class="nav-dot">跑</span>税局执行</span>
           <a href="{{ url_for('profiles_page', draft_id=draft.draft_id) }}"><span class="nav-dot">档</span>主体与档案</a>
           <a href="{{ url_for('ledger_page', draft_id=draft.draft_id) }}"><span class="nav-dot">记</span>执行记录</a>
@@ -30,7 +30,6 @@
 
       <form class="draft-console" method="post" action="{{ url_for('save_draft', draft_id=draft.draft_id) }}" enctype="multipart/form-data" data-draft-form data-initial-action="{% if needs_rebuild %}save{% else %}invoice{% endif %}">
         <input type="hidden" name="raw_text" value="{{ draft.raw_text }}">
-        <input type="hidden" name="note" value="{{ draft.note }}">
 
         <header class="draft-console-head">
           <div>
@@ -39,8 +38,13 @@
             <p>本页把材料来源、发票字段和下一步操作分开展示，方便你逐项核对。</p>
           </div>
           <div class="actions">
-            <a class="btn" href="{{ url_for('download_template', draft_id=draft.draft_id) }}">下载税局文件</a>
-            <button class="btn primary" data-invoice-action formaction="{{ url_for('execute_draft', draft_id=draft.draft_id) }}" type="submit">启动开票</button>
+            {% if parent_batch %}
+              <button class="btn" type="submit">保存本页修改</button>
+              <a class="btn primary" href="{{ url_for('batch_detail', batch_id=parent_batch.batch_id) }}">返回批量复核</a>
+            {% else %}
+              <a class="btn" href="{{ url_for('download_template', draft_id=draft.draft_id) }}">下载税局文件</a>
+              <button class="btn primary" data-invoice-action formaction="{{ url_for('execute_draft', draft_id=draft.draft_id) }}" type="submit">启动开票</button>
+            {% endif %}
           </div>
         </header>
 
@@ -51,15 +55,16 @@
           <div class="env-item"><span>明细</span><strong>{{ draft.lines|length }} 行</strong><small>你修正后可辅助下次推荐</small></div>
         </section>
 
-        {% set has_async_like_work = draft.ocr_status in ['vision_deferred', 'partial'] or draft.source_doc_status in ['partial'] or draft.llm_provider or draft.extract_warnings %}
+        {% set has_async_like_work = (not saved and not smart_code_result) and (draft.ocr_status in ['vision_deferred', 'partial'] or draft.source_doc_status in ['partial'] or draft.llm_provider or draft.extract_warnings) %}
         <section class="banner live-draft-banner {% if has_async_like_work %}is-active{% else %}is-ready{% endif %}" data-draft-live-status data-has-active-work="{{ '1' if has_async_like_work else '0' }}">
           <div class="live-status-orb"><span></span></div>
           <div>
-            <strong data-draft-live-title>{% if has_async_like_work %}智能解析结果已进入草稿，请边核对边看重点提醒{% else %}草稿已生成，当前没有阻塞中的后台识别{% endif %}</strong>
-            <p><span data-draft-live-detail>{% if draft.ocr_status == 'vision_deferred' %}图片材料已交给视觉识别链路；请先核对已映射出的购买方、金额和明细。{% elif draft.extract_warnings %}智能识别有差异提醒，请优先查看高亮字段和命中来源。{% elif draft.source_doc_status in ['partial'] or draft.ocr_status in ['partial'] %}部分材料已解析，部分附件保留待人工复核。{% else %}请按高亮提示核对购买方、金额、税率和未命中赋码。{% endif %}</span> <b data-draft-live-elapsed>0 秒</b></p>
+            <strong data-draft-live-title>{% if has_async_like_work %}智能解析结果已进入草稿，请边核对边看重点提醒{% else %}{% if parent_batch %}本张草稿已就绪，请保存后返回批量复核{% else %}草稿已生成，当前没有阻塞中的后台识别{% endif %}{% endif %}</strong>
+            <p><span data-draft-live-detail>{% if has_async_like_work %}{% if draft.ocr_status == 'vision_deferred' %}图片材料已交给视觉识别链路；请先核对已映射出的购买方、金额和明细。{% elif draft.extract_warnings %}智能识别有差异提醒，请优先查看高亮字段和命中来源。{% elif draft.source_doc_status in ['partial'] or draft.ocr_status in ['partial'] %}部分材料已解析，部分附件保留待人工复核。{% else %}请按高亮提示核对购买方、金额、税率和未命中赋码。{% endif %}{% elif smart_code_result %}智能赋码已返回结果；本页不再计时，请核对后返回批量复核或保存。{% elif parent_batch %}单张高级编辑只是修补入口，最终应回到批量复核页统一提交本批。{% else %}请按高亮提示核对购买方、金额、税率和未命中赋码。{% endif %}</span>{% if has_async_like_work %} <b data-draft-live-elapsed>复核已打开 0 秒</b>{% endif %}</p>
           </div>
         </section>
 
+        {% if parent_batch %}<section class="banner notice"><strong>当前是批量中的单张高级编辑</strong><p>本页只用于修补这一张的复杂字段；修完请保存并返回“批量复核”，最后在批量页面统一下载或发起本批开票。</p><p><a class="btn primary" href="{{ url_for('batch_detail', batch_id=parent_batch.batch_id) }}">返回批量复核</a></p></section>{% endif %}
         {% if saved and not smart_code_result %}<section class="banner ok"><p>修改已保存。</p></section>{% endif %}
         {% if smart_code_result %}<section class="banner {{ 'alert' if smart_code_result.level == 'warn' else 'ok' }}"><strong>{{ smart_code_result.title }}</strong><p>{{ smart_code_result.message }}</p></section>{% endif %}
         {% if success_recorded %}<section class="banner ok"><p>已记录本次开票结果。</p></section>{% endif %}
@@ -97,8 +102,11 @@
             <section class="card compact-party-card">
               <div class="card-head"><div><h2>主体与购买方</h2><p>提交前请重点核对，避免主体或购买方填错。</p></div></div>
               <label class="review-field {% if not draft.company_name %}needs-review{% endif %}"><span>销售方 / 纳税主体</span><input name="company_name" value="{{ draft.company_name }}" placeholder="销售方主体"></label>
+              {% set buyer_tax_reasons = draft.field_review_reasons.get('购买方税号') if draft.field_review_reasons else [] %}
+              {% set note_reasons = draft.field_review_reasons.get('备注') if draft.field_review_reasons else [] %}
               <label class="review-field {% if not draft.buyer.name %}needs-review{% endif %}"><span>购买方名称</span><input name="buyer_name" value="{{ draft.buyer.name }}" placeholder="购买方名称"></label>
-              <label class="review-field {% if not draft.buyer.tax_id %}needs-review{% endif %}"><span>购买方税号</span><input name="buyer_tax_id" value="{{ draft.buyer.tax_id }}" placeholder="购买方税号"></label>
+              <label class="review-field {% if buyer_tax_reasons or not draft.buyer.tax_id %}needs-review{% endif %}"><span>购买方税号</span><input name="buyer_tax_id" value="{{ draft.buyer.tax_id }}" placeholder="购买方税号">{% if buyer_tax_reasons %}{% for reason in buyer_tax_reasons[:2] %}<small>{{ reason }}</small>{% endfor %}{% endif %}</label>
+              <label class="review-field {% if note_reasons or not draft.note %}needs-review{% endif %}"><span>备注 / 发票对象</span><textarea name="note" rows="4" placeholder="客户要求的发票对象、项目名称、项目地址、车牌号或账单 ID 等备注内容">{{ draft.note }}</textarea>{% if note_reasons %}{% for reason in note_reasons[:2] %}<small>{{ reason }}</small>{% endfor %}{% else %}<small>备注会写入税局批量导入模板，请对照客户样张/文字要求核对。</small>{% endif %}</label>
               <details class="mini-details"><summary>更多购买方字段</summary>
                 <label class="review-field"><span>地址</span><input name="buyer_address" value="{{ draft.buyer.address }}"></label>
                 <label class="review-field"><span>电话</span><input name="buyer_phone" value="{{ draft.buyer.phone }}"></label>
@@ -168,7 +176,7 @@
 
           <aside class="draft-action-rail">
             <section class="card action-panel-card">
-              <div class="card-head"><div><span class="eyebrow">Action Panel</span><h2>下一步操作</h2><p>{% if export.error_count %}先修正阻断项{% else %}当前可发起开票{% endif %}</p></div></div>
+              <div class="card-head"><div><span class="eyebrow">Action Panel</span><h2>下一步操作</h2><p>{% if parent_batch %}修完本张后回到批量复核统一提交{% elif export.error_count %}先修正阻断项{% else %}当前可发起开票{% endif %}</p></div></div>
               <div class="result-list">
                 <div><span>票种</span><strong>{{ draft.invoice_kind or '未定' }}</strong></div>
                 <div><span>购买方</span><strong>{{ draft.buyer.name or '未识别' }}</strong></div>
@@ -177,9 +185,14 @@
               </div>
               <div class="status-actions" data-action-panel>
                 <!-- compatibility markers: <button class="secondary" data-invoice-action / <button class="primary" data-save-action -->
-                <button class="btn primary" data-invoice-action formaction="{{ url_for('execute_draft', draft_id=draft.draft_id) }}" type="submit">启动开票</button>
-                <button class="btn" data-save-action type="submit">保存修改</button>
-                <a class="btn" href="{{ url_for('download_template', draft_id=draft.draft_id) }}">下载税局文件</a>
+                {% if parent_batch %}
+                  <button class="btn" data-save-action type="submit">保存本张修改</button>
+                  <a class="btn primary" href="{{ url_for('batch_detail', batch_id=parent_batch.batch_id) }}">返回批量复核</a>
+                {% else %}
+                  <button class="btn primary" data-invoice-action formaction="{{ url_for('execute_draft', draft_id=draft.draft_id) }}" type="submit">启动开票</button>
+                  <button class="btn" data-save-action type="submit">保存修改</button>
+                  <a class="btn" href="{{ url_for('download_template', draft_id=draft.draft_id) }}">下载税局文件</a>
+                {% endif %}
               </div>
               <details class="mini-details"><summary>浏览器连接设置</summary><label class="review-field"><span>本机浏览器地址</span><input name="cdp_endpoint" value="http://127.0.0.1:9222"></label></details>
             </section>

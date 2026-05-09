@@ -13,7 +13,7 @@ import tax_invoice_demo.case_events as case_events_module
 import tax_invoice_demo.ledger as ledger_module
 import tax_invoice_demo.tax_rule_engine as tax_rule_engine_module
 import tax_invoice_demo.workbench as workbench_module
-from tax_invoice_demo.models import BuyerInfo, InvoiceDraft, InvoiceLine
+from tax_invoice_demo.models import BuyerInfo, DraftBatch, DraftBatchItem, InvoiceDraft, InvoiceLine
 
 
 MINIMAL_TEXT_INPUT = """辽宁恒润电力科技有限公司
@@ -207,6 +207,122 @@ class LeanUIRenderingTest(unittest.TestCase):
         self.assertIn("发起本批开票 / 上传税局", html)
         self.assertIn("保存本批修改 / 重新校验", html)
         self.assertIn("高级编辑", html)
+        self.assertIn("智能赋码本批未命中明细", html)
+        self.assertIn("智能复核本批全部明细", html)
+
+    def test_draft_page_surfaces_note_and_buyer_tax_id_review(self):
+        draft = InvoiceDraft(
+            draft_id="draft-note-tax-review",
+            case_id="note-tax-review",
+            company_name="沈阳市铁西区聚腾商贸商行（个体工商户）",
+            buyer=BuyerInfo(name="中铁二局集团有限公司", tax_id="91210100BADTAXID"),
+            lines=[InvoiceLine(project_name="压板", amount_with_tax="100.00", tax_rate="1%", tax_category="金属制品", tax_code="1080413010000000000")],
+            raw_text="客户要求：发票对象和备注必须跟发票样张保持一致。",
+            note="项目名称:中铁二局集团有限公司沈阳市王家湾项目经理部",
+            material_tags=["图片材料", "样票"],
+            created_at="2026-05-09T10:00:00",
+            workbook_name="draft-note-tax-review.xlsx",
+        )
+        workbench_module.save_draft(draft)
+
+        response = app.test_client().get(f"/drafts/{draft.draft_id}")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn("备注 / 发票对象", html)
+        self.assertIn("项目名称:中铁二局集团有限公司沈阳市王家湾项目经理部", html)
+        self.assertIn("购买方税号格式可疑", html)
+        self.assertIn("对照原图逐位核对", html)
+
+    def test_draft_inside_batch_links_back_and_hides_single_submit(self):
+        draft = InvoiceDraft(
+            draft_id="draft-in-batch-ui",
+            case_id="batch-ui",
+            company_name="吉林省风生水起商贸有限公司",
+            buyer=BuyerInfo(name="中铁二局第四工程有限公司", tax_id="544554455445944554"),
+            lines=[InvoiceLine(project_name="压板", amount_with_tax="126420.00", tax_rate="1%", tax_category="木制品", tax_code="1050101990000000000")],
+            raw_text="批量中的单张草稿",
+            created_at="2026-05-09T10:00:00",
+            workbook_name="draft-in-batch-ui.xlsx",
+        )
+        workbench_module.save_draft(draft)
+        batch = DraftBatch(
+            batch_id="batch-return-ui",
+            case_id="batch-ui",
+            company_name=draft.company_name,
+            created_at="2026-05-09T10:00:00",
+            items=[DraftBatchItem(draft_id=draft.draft_id, buyer_name=draft.buyer.name, invoice_kind=draft.invoice_kind, amount_total="126420.00", project_summary="压板", line_count=1)],
+        )
+        workbench_module.save_draft_batch(batch)
+
+        response = app.test_client().get(f"/drafts/{draft.draft_id}")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn("当前是批量中的单张高级编辑", html)
+        self.assertIn("返回批量复核", html)
+        self.assertIn(f"/batches/{batch.batch_id}", html)
+        self.assertNotIn('formaction="/drafts/draft-in-batch-ui/execute"', html)
+
+    def test_batch_smart_code_fills_missing_lines_and_returns_to_batch_page(self):
+        draft = InvoiceDraft(
+            draft_id="draft-batch-smart-code",
+            case_id="batch-smart-code",
+            company_name="吉林省风生水起商贸有限公司",
+            buyer=BuyerInfo(name="中铁二局第四工程有限公司", tax_id="544554455445944554"),
+            lines=[
+                InvoiceLine(project_name="压板", amount_with_tax="100.00", tax_rate="1%", tax_category="", tax_code="", coding_reference="未命中本地规则"),
+                InvoiceLine(project_name="钢爬梯", amount_with_tax="200.00", tax_rate="1%", tax_category="", tax_code="", coding_reference="未命中本地规则"),
+            ],
+            raw_text="批量智能赋码测试",
+            created_at="2026-05-09T10:00:00",
+            workbook_name="draft-batch-smart-code.xlsx",
+        )
+        workbench_module.save_draft(draft)
+        batch = DraftBatch(
+            batch_id="batch-smart-code-ui",
+            case_id="batch-smart-code",
+            company_name=draft.company_name,
+            created_at="2026-05-09T10:00:00",
+            items=[DraftBatchItem(draft_id=draft.draft_id, buyer_name=draft.buyer.name, invoice_kind=draft.invoice_kind, amount_total="100.00", project_summary="压板", line_count=2)],
+        )
+        workbench_module.save_draft_batch(batch)
+
+        def fake_smart_code(lines):
+            for line in lines:
+                line.tax_category = "金属制品"
+                line.tax_code = "1080413010000000000"
+                line.coding_reference = "智能推荐，需人工复核"
+
+        old_smart_code = app_module.smart_code_invoice_lines
+        app_module.smart_code_invoice_lines = fake_smart_code
+        try:
+            response = app.test_client().post(
+                f"/batches/{batch.batch_id}/smart-code",
+                data={
+                    "draft_id": draft.draft_id,
+                    "buyer_name": draft.buyer.name,
+                    "buyer_tax_id": draft.buyer.tax_id,
+                    "invoice_kind": draft.invoice_kind,
+                    "amount_with_tax": "100.00",
+                    "project_name": "压板",
+                    "tax_category": "",
+                    "tax_code": "",
+                    "tax_rate": "1%",
+                    "unit": "项",
+                    "quantity": "1",
+                    "smart_code_scope": "missing",
+                },
+            )
+        finally:
+            app_module.smart_code_invoice_lines = old_smart_code
+
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn("智能赋码已完成", html)
+        self.assertIn("批量导入模板复核", html)
+        updated = workbench_module.load_draft(draft.draft_id)
+        self.assertEqual([line.tax_code for line in updated.lines], ["1080413010000000000", "1080413010000000000"])
 
     def test_taxonomy_search_api_returns_official_code_options(self):
         response = app.test_client().get("/api/taxonomy/search?q=医疗")

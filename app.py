@@ -150,6 +150,7 @@ def draft_detail(draft_id: str):
         applied_failure_repairs=None,
         needs_rebuild=bool(failure_report and failure_report.get("needs_confirmation_rebuild")),
         current_draft_id=draft.draft_id,
+        parent_batch=_find_parent_batch_for_draft(draft.draft_id),
     )
 
 
@@ -174,6 +175,7 @@ def save_draft(draft_id: str):
         applied_failure_repairs=None,
         needs_rebuild=False,
         current_draft_id=draft.draft_id,
+        parent_batch=_find_parent_batch_for_draft(draft.draft_id),
     )
 
 
@@ -214,6 +216,7 @@ def smart_code_draft(draft_id: str):
         smart_code_result=smart_code_result,
         needs_rebuild=False,
         current_draft_id=draft.draft_id,
+        parent_batch=_find_parent_batch_for_draft(draft.draft_id),
     )
 
 
@@ -550,6 +553,55 @@ def save_batch_sheet(batch_id: str):
     )
 
 
+@app.post("/batches/<batch_id>/smart-code")
+def smart_code_batch(batch_id: str):
+    batch = load_draft_batch(batch_id)
+    if batch is None:
+        abort(404)
+    _save_batch_sheet_form(batch, request.form)
+    scope = (request.form.get("smart_code_scope") or "missing").strip()
+    target_lines: list[InvoiceLine] = []
+    target_drafts = []
+    for item in batch.items:
+        draft = load_draft(item.draft_id)
+        if draft is None:
+            continue
+        selected = list(draft.lines) if scope == "all" else [line for line in draft.lines if not line.tax_category or not line.tax_code]
+        if selected:
+            target_drafts.append(draft)
+            target_lines.extend(selected)
+    before_refs = [line.coding_reference or "" for line in target_lines]
+    before_codes = [(line.tax_category or "", line.tax_code or "") for line in target_lines]
+    if target_lines:
+        smart_code_invoice_lines(target_lines)
+        for draft in target_drafts:
+            workbench_module.save_draft(draft)
+    smart_code_result = _smart_code_result_message(scope, target_lines, before_refs, before_codes)
+    _rebuild_batch_items_from_drafts(batch)
+    export = export_batch_template(batch_id)
+    record_case_event(
+        case_id=batch.case_id,
+        batch_id=batch.batch_id,
+        event_type="batch_smart_code_completed",
+        payload={
+            "scope": scope,
+            "total": smart_code_result.get("total", 0),
+            "smart": smart_code_result.get("smart", 0),
+            "failed": smart_code_result.get("failed", 0),
+            "changed": smart_code_result.get("changed", 0),
+        },
+    )
+    return render_template(
+        "lean_batch.html",
+        batch=batch,
+        export=export,
+        batch_rows=_batch_sheet_rows(batch),
+        line_recommendation=_batch_line_recommendation(batch),
+        saved=True,
+        smart_code_result=smart_code_result,
+    )
+
+
 @app.get("/batches/<batch_id>/download-template")
 def download_batch_template(batch_id: str):
     batch = load_draft_batch(batch_id)
@@ -798,6 +850,61 @@ def _save_batch_sheet_form(batch, form):
         event_type="batch_sheet_saved",
         payload={"invoice_count": len(batch.items), "issue_count": len(batch.issues)},
     )
+
+
+def _rebuild_batch_items_from_drafts(batch) -> None:
+    batch_items: list[DraftBatchItem] = []
+    batch_issues: list[str] = []
+    for item in batch.items:
+        draft = load_draft(item.draft_id)
+        if draft is None:
+            continue
+        line = draft.lines[0] if draft.lines else InvoiceLine(project_name="", amount_with_tax="")
+        issue_map = _batch_field_issue_map(draft, line)
+        line_issue_count = sum(1 for candidate in draft.lines if _line_needs_batch_review(candidate))
+        issues = list(issue_map.values())
+        if line_issue_count:
+            issues.append(f"明细中仍有 {line_issue_count} 行缺少税收分类、税收编码、税率或金额，请在批量页智能赋码/修复后复核。")
+        draft.issues = issues
+        workbench_module.save_draft(draft)
+        issue_summary = next(iter(issues), "")
+        batch_items.append(
+            DraftBatchItem(
+                draft_id=draft.draft_id,
+                buyer_name=draft.buyer.name or "待补全购买方名称",
+                invoice_kind=draft.invoice_kind,
+                amount_total=line.resolved_amount_with_tax(),
+                project_summary=line.project_name,
+                line_count=len(draft.lines),
+                issue_summary=issue_summary,
+            )
+        )
+        batch_issues.extend(issues)
+    batch.items = batch_items
+    batch.issues = batch_issues
+    workbench_module.save_draft_batch(batch)
+
+
+def _line_needs_batch_review(line: InvoiceLine) -> bool:
+    return not (line.project_name.strip() and line.resolved_amount_with_tax() and line.tax_rate.strip() and line.tax_code.strip())
+
+
+def _find_parent_batch_for_draft(draft_id: str):
+    draft_id = (draft_id or "").strip()
+    if not draft_id:
+        return None
+    try:
+        batch_paths = sorted(workbench_module.WORKBENCH_ROOT.glob("*/batch.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+    except OSError:
+        return None
+    for batch_path in batch_paths:
+        try:
+            batch = load_draft_batch(batch_path.parent.name)
+        except (OSError, json.JSONDecodeError, TypeError, KeyError):
+            continue
+        if batch and any(item.draft_id == draft_id for item in batch.items):
+            return batch
+    return None
 
 
 def _form_list_value(form, name: str, index: int) -> str:
