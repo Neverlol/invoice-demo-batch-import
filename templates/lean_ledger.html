@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>执行记录</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260509-batch-smart-code-fix') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260509-execution-observability-v1') }}">
   </head>
   <body class="operator-body">
     <div class="app-shell">
@@ -53,41 +53,53 @@
           <section class="stack">
             <section class="card execution-table-card">
               <div class="card-head">
-                <div><h2>最近执行记录</h2><p>每一行是一单或一批任务。你可以看它停在识别、复核、模板还是税局执行。</p></div>
+                <div><h2>最近执行记录</h2><p>每张卡是一单或一批任务：先看“当前卡点”，再看标准化环节、材料、能力调用和 LLM 状态。</p></div>
                 <span class="badge info">{{ execution_records|length }} 条</span>
               </div>
               {% if execution_records %}
-                <div class="table-wrap execution-table-wrap">
-                  <table class="execution-table">
-                    <thead>
-                      <tr>
-                        <th>时间</th>
-                        <th>Case</th>
-                        <th>主体 / 购买方</th>
-                        <th>材料</th>
-                        <th>识别</th>
-                        <th>人工修改</th>
-                        <th>模板</th>
-                        <th>税局执行</th>
-                        <th>状态</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {% for record in execution_records %}
-                        <tr>
-                          <td><span class="mono">{{ record.last_at[5:16] if record.last_at else '-' }}</span></td>
-                          <td><span class="mono">{{ record.case_id }}</span><small>{{ record.draft_id or record.batch_id }}</small>{% if record.batch_id %}<a class="inline-link" href="{{ url_for('batch_detail', batch_id=record.batch_id) }}">回批量复核</a>{% elif record.draft_id %}<a class="inline-link" href="{{ url_for('draft_detail', draft_id=record.draft_id) }}">回草稿</a>{% endif %}</td>
-                          <td><strong>{{ record.company_name or '未记录主体' }}</strong><small>{{ record.buyer_name or (record.invoice_count ~ ' 张票') }}</small></td>
-                          <td>{{ record.material_type }}<small>{% if record.invoice_count and record.invoice_count > 1 %}{{ record.invoice_count }} 张{% else %}{{ record.line_count }} 行{% endif %}</small></td>
-                          <td>{{ record.extract_strategy or '未记录' }}<small>{{ record.llm_provider or '-' }}</small></td>
-                          <td>{{ record.manual_edit_count }} 处<small>字段 diff</small></td>
-                          <td>{% if record.export_error_count %}<span class="badge error">{{ record.export_error_count }} 阻断</span>{% elif record.export_warning_count %}<span class="badge warn">{{ record.export_warning_count }} 提醒</span>{% else %}<span class="badge neutral">{{ record.export_error_count }} 错误</span>{% endif %}</td>
-                          <td>{% if record.run_id %}<span class="mono">{{ record.run_id }}</span><small>{{ record.run_status or 'queued' }}{% if record.failure_count %} / {{ record.failure_count }} 失败{% endif %}</small>{% else %}<span class="muted">未执行</span>{% endif %}</td>
-                          <td><span class="badge {% if record.status == 'assistant_confirmed' %}ok{% elif record.status == 'tax_preview_reached' %}info{% elif record.status == 'tax_run_failed' or record.status == 'needs_review' %}error{% else %}neutral{% endif %}">{{ record.status_label }}</span></td>
-                        </tr>
-                      {% endfor %}
-                    </tbody>
-                  </table>
+                <div class="execution-record-list">
+                  {% for record in execution_records %}
+                    <article class="execution-record-card">
+                      <header class="execution-record-head">
+                        <div>
+                          <div class="eyebrow">{{ record.last_at[5:16] if record.last_at else '-' }} · {{ record.case_id }}</div>
+                          <h3>{{ record.company_name or '未记录主体' }}</h3>
+                          <p>{{ record.buyer_name or (record.invoice_count ~ ' 张票') }} · {{ record.material_type }} · {{ record.line_count }} 行明细</p>
+                        </div>
+                        <div class="execution-record-actions">
+                          <span class="badge {% if record.status == 'assistant_confirmed' %}ok{% elif record.status == 'tax_preview_reached' %}info{% elif record.status == 'tax_run_failed' or record.status == 'needs_review' %}error{% else %}neutral{% endif %}">{{ record.status_label }}</span>
+                          {% if record.problem_label %}<span class="badge warn">当前卡点：{{ record.problem_label }}</span>{% endif %}
+                          {% if record.batch_id %}<a class="inline-link" href="{{ url_for('batch_detail', batch_id=record.batch_id) }}">回批量复核</a>{% elif record.draft_id %}<a class="inline-link" href="{{ url_for('draft_detail', draft_id=record.draft_id) }}">回草稿</a>{% endif %}
+                        </div>
+                      </header>
+
+                      <div class="workflow-step-grid">
+                        {% for step in record.workflow_steps %}
+                          <div class="workflow-step-card status-{{ step.status }}">
+                            <strong>{{ step.label }}</strong>
+                            <span>{{ step.status_label }}</span>
+                            {% if step.actions %}<small>{{ step.actions|last }}</small>{% endif %}
+                          </div>
+                        {% endfor %}
+                      </div>
+
+                      <div class="execution-observe-grid">
+                        <section><h4>助理点击/动作</h4>{% if record.operator_actions %}{% for action in record.operator_actions[-5:] %}<p>{{ action }}</p>{% endfor %}{% else %}<p class="muted">暂无动作记录</p>{% endif %}</section>
+                        <section><h4>上传材料</h4>{% if record.material_files %}{% for file_name in record.material_files[:5] %}<p title="{{ file_name }}">{{ file_name }}</p>{% endfor %}{% else %}<p>{{ record.material_type }}</p>{% endif %}</section>
+                        <section><h4>调用能力</h4>{% if record.capability_summary %}<div class="chip-list">{% for cap in record.capability_summary %}<span class="chip">{{ cap }}</span>{% endfor %}</div>{% else %}<p class="muted">未记录</p>{% endif %}</section>
+                        <section><h4>大模型</h4><p>{{ record.llm_summary.status_label }}{% if record.llm_summary.providers %} · {{ record.llm_summary.providers|join(' / ') }}{% endif %}</p><small>成功 {{ record.llm_summary.success_count }} / 失败 {{ record.llm_summary.failed_count }}</small></section>
+                      </div>
+
+                      <details class="execution-event-details">
+                        <summary>查看环节事件明细</summary>
+                        <div class="event-timeline-list">
+                          {% for obs in record.observability_events %}
+                            <div class="event-timeline-row"><span class="mono">{{ obs.created_at[11:19] if obs.created_at else '-' }}</span><strong>{{ obs.phase_label }}</strong><p>{{ obs.operator_action }}</p><small>{{ obs.capabilities|join(' / ') }}</small></div>
+                          {% endfor %}
+                        </div>
+                      </details>
+                    </article>
+                  {% endfor %}
                 </div>
               {% else %}
                 <div class="notice">暂无执行记录。你生成草稿、保存修改、导出模板或发起税局执行后，这里会自动出现记录。</div>

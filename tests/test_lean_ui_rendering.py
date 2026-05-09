@@ -500,6 +500,53 @@ class LeanUIRenderingTest(unittest.TestCase):
         self.assertEqual(updated.lines[2].tax_code, "1080401010000000000")
         self.assertIn("工程材料规则", updated.lines[2].coding_reference)
 
+    def test_execution_ledger_shows_workflow_observability_cards(self):
+        case_events_module.record_case_event(
+            case_id="obs-case",
+            event_type="draft_created",
+            draft_id="obs-draft",
+            payload={
+                "case_id": "obs-case",
+                "draft_id": "obs-draft",
+                "company_name": "沈阳市铁西区聚腾商贸商行（个体工商户）",
+                "buyer": {"name": "中铁二局集团有限公司", "tax_id": ""},
+                "lines": [{"project_name": "压板", "tax_code": ""}],
+                "extract_strategy": "rules_plus_vision",
+                "llm_provider": "MiniMax-M2.7",
+                "llm_metrics": [{"task_type": "vision_extract_invoice", "status": "success", "provider": "MiniMax"}],
+                "material_summary": {"file_count": 2, "file_types": {".png": 1, ".xls": 1}, "file_names": ["样张.png", "压板.xls"]},
+                "attachment_count": 2,
+                "ocr_status": "completed",
+            },
+        )
+        case_events_module.record_case_event(
+            case_id="obs-case",
+            event_type="batch_smart_code_completed",
+            batch_id="obs-batch",
+            payload={"scope": "missing", "total": 16, "smart": 0, "failed": 0, "changed": 16},
+        )
+        case_events_module.record_case_event(
+            case_id="obs-case",
+            event_type="batch_template_exported",
+            batch_id="obs-batch",
+            payload={"batch_id": "obs-batch", "error_count": 2, "warning_count": 1},
+        )
+
+        response = app.test_client().get("/ledger?batch_id=obs-batch")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn("当前卡点：模板校验", html)
+        self.assertIn("材料输入", html)
+        self.assertIn("材料解析", html)
+        self.assertIn("智能赋码", html)
+        self.assertIn("样张.png", html)
+        self.assertIn("压板.xls", html)
+        self.assertIn("rules_plus_vision", html)
+        self.assertIn("llm_extraction", html)
+        self.assertIn("大模型", html)
+        self.assertIn("成功", html)
+
     def test_ledger_from_batch_keeps_return_to_batch_review_link(self):
         batch = DraftBatch(
             batch_id="batch-ledger-return-ui",
