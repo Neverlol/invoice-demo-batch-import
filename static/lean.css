@@ -1390,11 +1390,16 @@ th,
 }
 td { font-size: 13px; }
 .sheet-table .editable-cell { min-width: 126px; }
-.sheet-table .editable-cell input {
+.sheet-table .editable-cell input,
+.sheet-table .editable-cell textarea {
   min-height: 30px;
   padding: 5px 8px 5px 24px;
   border-radius: 9px;
   font-size: 13px;
+}
+.sheet-table .editable-cell textarea {
+  min-width: 220px;
+  min-height: 72px;
 }
 .sheet-table .edit-mark {
   margin: 7px 0 0 8px;
@@ -1406,12 +1411,34 @@ td { font-size: 13px; }
   color: #7f2f28;
 }
 .field-error input,
-.field-warning input {
+.field-warning input,
+.field-error textarea,
+.field-warning textarea {
   background: #fffdfa;
   box-shadow: inset 3px 0 0 rgba(168,59,50,.58);
 }
-.field-warning input {
+.field-warning input,
+.field-warning textarea {
   box-shadow: inset 3px 0 0 rgba(166,106,0,.5);
+}
+.batch-invoice-lines {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+  margin-top: 12px;
+  background: #fffdfa;
+}
+.batch-invoice-lines-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.batch-invoice-lines-head small {
+  display: block;
+  color: var(--faint);
+  margin-top: 3px;
 }
 .row-needs-review {
   background: rgba(173,124,43,.045);

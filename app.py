@@ -746,8 +746,38 @@ def _batch_sheet_rows(batch):
         draft = load_draft(item.draft_id)
         if draft is None:
             continue
-        line = draft.lines[0] if draft.lines else InvoiceLine(project_name="", amount_with_tax="")
-        issue_map = _batch_field_issue_map(draft, line)
+        first_line = draft.lines[0] if draft.lines else InvoiceLine(project_name="", amount_with_tax="")
+        issue_map = _batch_field_issue_map(draft, first_line)
+        note_issues = list((draft.field_review_reasons or {}).get("备注", []))
+        buyer_tax_issues = list((draft.field_review_reasons or {}).get("购买方税号", []))
+        if buyer_tax_issues and "buyer_tax_id" not in issue_map:
+            issue_map["buyer_tax_id"] = buyer_tax_issues[0]
+        if note_issues:
+            issue_map["note"] = note_issues[0]
+        line_rows = []
+        for line_index, line in enumerate(draft.lines or [first_line]):
+            line_issue_map = _batch_line_issue_map(line)
+            line_rows.append(
+                {
+                    "line_index": line_index,
+                    "display_index": line_index + 1,
+                    "field_prefix": f"line_{draft.draft_id}_{line_index}",
+                    "project_name": line.project_name,
+                    "tax_category": line.tax_category,
+                    "tax_code": line.tax_code,
+                    "amount_with_tax": line.resolved_amount_with_tax() or line.amount_with_tax,
+                    "tax_rate": line.normalized_tax_rate() if line.tax_rate else "",
+                    "unit": line.unit,
+                    "quantity": line.quantity,
+                    "coding_reference": line.coding_reference,
+                    "issue_map": line_issue_map,
+                    "has_issues": bool(line_issue_map),
+                }
+            )
+        row_issues = list(draft.issues or [])
+        for reason in note_issues + buyer_tax_issues:
+            if reason not in row_issues:
+                row_issues.append(reason)
         rows.append(
             {
                 "index": index,
@@ -756,17 +786,14 @@ def _batch_sheet_rows(batch):
                 "buyer_name": draft.buyer.name,
                 "buyer_tax_id": draft.buyer.tax_id,
                 "invoice_kind": draft.invoice_kind or batch.invoice_kind or "普通发票",
-                "project_name": line.project_name,
-                "tax_category": line.tax_category,
-                "tax_code": line.tax_code,
-                "amount_with_tax": line.resolved_amount_with_tax() or line.amount_with_tax,
-                "tax_rate": line.normalized_tax_rate() if line.tax_rate else "",
-                "unit": line.unit,
-                "quantity": line.quantity,
-                "coding_reference": line.coding_reference,
-                "issues": draft.issues,
+                "amount_with_tax": _draft_amount_total(draft),
+                "note": draft.note,
+                "note_preview": (draft.note or "").replace("\n", "；"),
+                "line_count": len(draft.lines),
+                "line_rows": line_rows,
+                "issues": row_issues,
                 "issue_map": issue_map,
-                "has_issues": bool(issue_map or draft.issues),
+                "has_issues": bool(issue_map or row_issues or any(line["has_issues"] for line in line_rows)),
             }
         )
     return rows
@@ -783,6 +810,11 @@ def _batch_field_issue_map(draft, line: InvoiceLine) -> dict[str, str]:
         issues["buyer_name"] = "必填：请补全购买方名称"
     if not draft.buyer.tax_id.strip():
         issues["buyer_tax_id"] = "必填：请补全购买方税号"
+    return issues
+
+
+def _batch_line_issue_map(line: InvoiceLine) -> dict[str, str]:
+    issues: dict[str, str] = {}
     if not line.project_name.strip():
         issues["project_name"] = "必填：请补全项目名称"
     if not line.resolved_amount_with_tax():
@@ -792,6 +824,21 @@ def _batch_field_issue_map(draft, line: InvoiceLine) -> dict[str, str]:
     if not line.tax_code.strip():
         issues["tax_code"] = "需复核：请确认税收编码"
     return issues
+
+
+def _draft_amount_total(draft) -> str:
+    total = 0.0
+    found = False
+    for line in draft.lines:
+        value = line.resolved_amount_with_tax()
+        if not value:
+            continue
+        try:
+            total += float(value.replace(",", ""))
+            found = True
+        except ValueError:
+            continue
+    return f"{total:.2f}" if found else ""
 
 
 def _save_batch_sheet_form(batch, form):
@@ -811,36 +858,51 @@ def _save_batch_sheet_form(batch, form):
             bank_account=draft.buyer.bank_account,
         )
         draft.invoice_kind = _form_list_value(form, "invoice_kind", index) or draft.invoice_kind or "普通发票"
-        line = draft.lines[0] if draft.lines else InvoiceLine(project_name="", amount_with_tax="")
-        line.project_name = _form_list_value(form, "project_name", index)
-        line.tax_category = _form_list_value(form, "tax_category", index)
-        line.tax_code = _form_list_value(form, "tax_code", index)
-        line.amount_with_tax = _form_list_value(form, "amount_with_tax", index)
-        line.tax_rate = _form_list_value(form, "tax_rate", index) or line.tax_rate
-        line.unit = _form_list_value(form, "unit", index) or line.unit
-        line.quantity = _form_list_value(form, "quantity", index) or line.quantity
-        if form.get("batch_recommendation_applied") == "1" and (line.project_name or line.tax_category or line.tax_code):
-            line.coding_reference = "批量页一键导入推荐，需人工复核"
-        if draft.lines:
-            draft.lines[0] = line
-        else:
-            draft.lines = [line]
-        issue_map = _batch_field_issue_map(draft, line)
-        draft.issues = list(issue_map.values())
+        draft.note = _form_list_value(form, "note", index) or draft.note
+        if not draft.lines:
+            draft.lines = [InvoiceLine(project_name="", amount_with_tax="")]
+        legacy_first_line_values_present = any(_form_list_value(form, name, index) for name in ["project_name", "tax_category", "tax_code", "amount_with_tax", "tax_rate", "unit", "quantity"])
+        for line_index, line in enumerate(draft.lines):
+            prefix = f"line_{draft.draft_id}_{line_index}"
+            if f"{prefix}_project_name" in form:
+                line.project_name = (form.get(f"{prefix}_project_name") or "").strip()
+                line.tax_category = (form.get(f"{prefix}_tax_category") or "").strip()
+                line.tax_code = (form.get(f"{prefix}_tax_code") or "").strip()
+                line.amount_with_tax = (form.get(f"{prefix}_amount_with_tax") or "").strip()
+                line.tax_rate = (form.get(f"{prefix}_tax_rate") or "").strip() or line.tax_rate
+                line.unit = (form.get(f"{prefix}_unit") or "").strip() or line.unit
+                line.quantity = (form.get(f"{prefix}_quantity") or "").strip() or line.quantity
+            elif line_index == 0 and legacy_first_line_values_present:
+                line.project_name = _form_list_value(form, "project_name", index)
+                line.tax_category = _form_list_value(form, "tax_category", index)
+                line.tax_code = _form_list_value(form, "tax_code", index)
+                line.amount_with_tax = _form_list_value(form, "amount_with_tax", index)
+                line.tax_rate = _form_list_value(form, "tax_rate", index) or line.tax_rate
+                line.unit = _form_list_value(form, "unit", index) or line.unit
+                line.quantity = _form_list_value(form, "quantity", index) or line.quantity
+            if form.get("batch_recommendation_applied") == "1" and (line.project_name or line.tax_category or line.tax_code):
+                line.coding_reference = "批量页一键导入推荐，需人工复核"
+        first_line = draft.lines[0]
+        issue_map = _batch_field_issue_map(draft, first_line)
+        line_issues = []
+        for line_index, line in enumerate(draft.lines, start=1):
+            for issue in _batch_line_issue_map(line).values():
+                line_issues.append(f"第 {line_index} 行：{issue}")
+        draft.issues = list(issue_map.values()) + line_issues
         workbench_module.save_draft(draft)
-        issue_summary = next(iter(issue_map.values()), "")
+        issue_summary = next(iter(draft.issues), "")
         batch_items.append(
             DraftBatchItem(
                 draft_id=draft.draft_id,
                 buyer_name=draft.buyer.name or "待补全购买方名称",
                 invoice_kind=draft.invoice_kind,
-                amount_total=line.resolved_amount_with_tax(),
-                project_summary=line.project_name,
+                amount_total=_draft_amount_total(draft),
+                project_summary=first_line.project_name,
                 line_count=len(draft.lines),
                 issue_summary=issue_summary,
             )
         )
-        batch_issues.extend(issue_map.values())
+        batch_issues.extend(draft.issues)
     batch.items = batch_items
     batch.issues = batch_issues
     workbench_module.save_draft_batch(batch)
@@ -873,7 +935,7 @@ def _rebuild_batch_items_from_drafts(batch) -> None:
                 draft_id=draft.draft_id,
                 buyer_name=draft.buyer.name or "待补全购买方名称",
                 invoice_kind=draft.invoice_kind,
-                amount_total=line.resolved_amount_with_tax(),
+                amount_total=_draft_amount_total(draft),
                 project_summary=line.project_name,
                 line_count=len(draft.lines),
                 issue_summary=issue_summary,
@@ -950,7 +1012,7 @@ def run_detail(run_id: str):
         run = RUNS.get(run_id)
     if run is None:
         abort(404)
-    return render_template("lean_run.html", run=run)
+    return render_template("lean_run.html", run=run, run_batch=_batch_for_run(run))
 
 
 @app.post("/runs/<run_id>/focus-tax-window")
@@ -974,7 +1036,7 @@ def run_focus_tax_window(run_id: str):
         RUNS[run_id] = {**current, "focus_notice": notice, "error": error}
         run = RUNS[run_id]
     status_code = 200 if result.get("status") == "ok" else 400
-    return render_template("lean_run.html", run=run), status_code
+    return render_template("lean_run.html", run=run, run_batch=_batch_for_run(run)), status_code
 
 
 @app.post("/runs/<run_id>/record-success")
@@ -986,6 +1048,7 @@ def run_record_success(run_id: str):
     return render_template(
         "lean_run.html",
         run={**run, "error": "请进入税局预览，并在税局页面完成后续操作。"},
+        run_batch=_batch_for_run(run),
     ), 400
 
 
@@ -1004,12 +1067,22 @@ def run_apply_failure_repairs(run_id: str):
         run = RUNS.get(run_id)
     if run is None:
         abort(404)
+    run_batch = _batch_for_run(run)
+    if run_batch is not None:
+        return redirect(url_for("batch_detail", batch_id=run_batch.batch_id))
     draft_id = str(run.get("draft_id") or "")
     draft = load_draft(draft_id) if draft_id else None
     if draft is None:
         abort(404)
     apply_failure_repairs_to_draft(draft)
     return redirect(url_for("draft_detail", draft_id=draft.draft_id))
+
+
+def _batch_for_run(run: dict | None):
+    if not run:
+        return None
+    draft_id = str(run.get("draft_id") or "")
+    return load_draft_batch(draft_id) if draft_id else None
 
 
 def _render_profiles_page(*, upload_result: dict[str, object] | None = None, download_result: dict[str, object] | None = None, current_draft_id: str = ""):

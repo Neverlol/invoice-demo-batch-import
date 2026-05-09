@@ -256,7 +256,7 @@ if (batchRecommendationButton) {
       if (!value) {
         return;
       }
-      document.querySelectorAll(`input[name="${name}"]`).forEach((input) => {
+      document.querySelectorAll(`input[name="${name}"], input[name$="_${name}"]`).forEach((input) => {
         input.value = value;
         input.dispatchEvent(new Event("input", { bubbles: true }));
       });

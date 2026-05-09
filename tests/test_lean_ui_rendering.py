@@ -324,6 +324,129 @@ class LeanUIRenderingTest(unittest.TestCase):
         updated = workbench_module.load_draft(draft.draft_id)
         self.assertEqual([line.tax_code for line in updated.lines], ["1080413010000000000", "1080413010000000000"])
 
+    def test_batch_page_shows_all_lines_note_and_tax_id_warning(self):
+        draft = InvoiceDraft(
+            draft_id="draft-batch-all-lines",
+            case_id="batch-all-lines",
+            company_name="沈阳市铁西区聚腾商贸商行（个体工商户）",
+            buyer=BuyerInfo(name="中铁二局集团有限公司", tax_id="91210100BADTAXID"),
+            lines=[
+                InvoiceLine(project_name="压板", amount_with_tax="100.00", tax_rate="1%", tax_category="金属制品", tax_code="1080413010000000000"),
+                InvoiceLine(project_name="预埋钢板", amount_with_tax="200.00", tax_rate="1%", tax_category="", tax_code="", coding_reference="未命中本地规则"),
+            ],
+            raw_text="客户要求：发票对象和备注必须跟发票样张保持一致。",
+            note="项目名称:中铁二局集团有限公司沈阳市王家湾项目经理部",
+            material_tags=["图片材料", "样票"],
+            created_at="2026-05-09T11:00:00",
+            workbook_name="draft-batch-all-lines.xlsx",
+        )
+        workbench_module.save_draft(draft)
+        batch = DraftBatch(
+            batch_id="batch-all-lines-ui",
+            case_id="batch-all-lines",
+            company_name=draft.company_name,
+            created_at="2026-05-09T11:00:00",
+            items=[DraftBatchItem(draft_id=draft.draft_id, buyer_name=draft.buyer.name, invoice_kind=draft.invoice_kind, amount_total="300.00", project_summary="压板", line_count=2)],
+        )
+        workbench_module.save_draft_batch(batch)
+
+        response = app.test_client().get(f"/batches/{batch.batch_id}")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn("全部明细可改", html)
+        self.assertIn("1-2", html)
+        self.assertIn("预埋钢板", html)
+        self.assertIn("备注 / 发票对象", html)
+        self.assertIn("项目名称:中铁二局集团有限公司沈阳市王家湾项目经理部", html)
+        self.assertIn("对照原图逐位核对", html)
+
+    def test_batch_page_saves_second_line_edits(self):
+        draft = InvoiceDraft(
+            draft_id="draft-batch-save-line2",
+            case_id="batch-save-line2",
+            company_name="沈阳市铁西区聚腾商贸商行（个体工商户）",
+            buyer=BuyerInfo(name="中铁二局集团有限公司", tax_id="9151010073481642XK"),
+            lines=[
+                InvoiceLine(project_name="压板", amount_with_tax="100.00", tax_rate="1%", tax_category="金属制品", tax_code="1080413010000000000"),
+                InvoiceLine(project_name="预埋钢板", amount_with_tax="200.00", tax_rate="1%", tax_category="", tax_code=""),
+            ],
+            note="项目地址:辽宁省沈阳市浑南区",
+            created_at="2026-05-09T11:00:00",
+            workbook_name="draft-batch-save-line2.xlsx",
+        )
+        workbench_module.save_draft(draft)
+        batch = DraftBatch(
+            batch_id="batch-save-line2-ui",
+            case_id="batch-save-line2",
+            company_name=draft.company_name,
+            created_at="2026-05-09T11:00:00",
+            items=[DraftBatchItem(draft_id=draft.draft_id, buyer_name=draft.buyer.name, invoice_kind=draft.invoice_kind, amount_total="300.00", project_summary="压板", line_count=2)],
+        )
+        workbench_module.save_draft_batch(batch)
+
+        response = app.test_client().post(
+            f"/batches/{batch.batch_id}/save",
+            data={
+                "draft_id": draft.draft_id,
+                "buyer_name": draft.buyer.name,
+                "buyer_tax_id": draft.buyer.tax_id,
+                "invoice_kind": draft.invoice_kind,
+                "note": "项目地址:辽宁省沈阳市浑南区长安桥南街",
+                "line_draft-batch-save-line2_0_project_name": "压板",
+                "line_draft-batch-save-line2_0_amount_with_tax": "100.00",
+                "line_draft-batch-save-line2_0_tax_category": "金属制品",
+                "line_draft-batch-save-line2_0_tax_code": "1080413010000000000",
+                "line_draft-batch-save-line2_0_tax_rate": "1%",
+                "line_draft-batch-save-line2_0_unit": "项",
+                "line_draft-batch-save-line2_0_quantity": "1",
+                "line_draft-batch-save-line2_1_project_name": "预埋钢板",
+                "line_draft-batch-save-line2_1_amount_with_tax": "200.00",
+                "line_draft-batch-save-line2_1_tax_category": "金属制品",
+                "line_draft-batch-save-line2_1_tax_code": "1080413010000000000",
+                "line_draft-batch-save-line2_1_tax_rate": "1%",
+                "line_draft-batch-save-line2_1_unit": "项",
+                "line_draft-batch-save-line2_1_quantity": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        updated = workbench_module.load_draft(draft.draft_id)
+        self.assertEqual(updated.lines[1].tax_code, "1080413010000000000")
+        self.assertEqual(updated.note, "项目地址:辽宁省沈阳市浑南区长安桥南街")
+
+    def test_failed_batch_run_returns_to_batch_review_not_single_draft(self):
+        batch = DraftBatch(
+            batch_id="batch-run-failed-ui",
+            case_id="batch-run-failed",
+            company_name="沈阳市铁西区聚腾商贸商行（个体工商户）",
+            created_at="2026-05-09T11:00:00",
+            items=[DraftBatchItem(draft_id="child-1", buyer_name="中铁二局集团有限公司", invoice_kind="增值税专用发票", amount_total="300.00", project_summary="压板", line_count=2)],
+        )
+        workbench_module.save_draft_batch(batch)
+        app_module.RUNS["run-batch-failed"] = {
+            "run_id": "run-batch-failed",
+            "draft_id": batch.batch_id,
+            "status": "failed",
+            "current_step": "failed",
+            "logs": ["failed: 税局导入失败"],
+            "error": "",
+            "downloaded_failure_path": "",
+            "failure_report": None,
+            "preview_clicked": False,
+        }
+        try:
+            response = app.test_client().get("/runs/run-batch-failed")
+        finally:
+            app_module.RUNS.pop("run-batch-failed", None)
+
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn("本批整体退回", html)
+        self.assertIn("回到批量复核修改", html)
+        self.assertIn(f"/batches/{batch.batch_id}", html)
+        self.assertNotIn("回到本次草稿修改", html)
+
     def test_taxonomy_search_api_returns_official_code_options(self):
         response = app.test_client().get("/api/taxonomy/search?q=医疗")
 

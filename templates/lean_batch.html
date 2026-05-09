@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>批量模板 {{ batch.batch_id }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-assistant-copy') }}">
-    <script defer src="{{ url_for('static', filename='lean.js', v='20260509-batch-smart-code') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260509-batch-review-loop-v2') }}">
+    <script defer src="{{ url_for('static', filename='lean.js', v='20260509-batch-review-loop-v2') }}"></script>
   </head>
   <body class="operator-body">
     {% set ns = namespace(review=0, ready=0) %}
@@ -88,8 +88,8 @@
           </div>
 
           <div class="card">
-            <div class="card-head"><div><h2>Sheet 1：发票基本信息</h2><p>一行代表一张发票；缺失或不确定的字段会高亮，方便你补全。</p></div><span class="badge warn">{{ ns.review }} 项待复核</span></div>
-            <div class="table-wrap"><table class="sheet-table"><thead><tr><th>#</th><th>来源</th><th>购买方名称</th><th>购买方税号</th><th>票种</th><th>含税金额</th><th>状态</th></tr></thead><tbody>
+            <div class="card-head"><div><h2>Sheet 1：发票基本信息</h2><p>一行代表一张发票；购买方税号、备注/发票对象和金额是批量提交前的重点核对字段。</p></div><span class="badge warn">{{ ns.review }} 项待复核</span></div>
+            <div class="table-wrap"><table class="sheet-table"><thead><tr><th>#</th><th>来源</th><th>购买方名称</th><th>购买方税号</th><th>票种</th><th>价税合计</th><th>备注 / 发票对象</th><th>状态</th></tr></thead><tbody>
               {% for row in batch_rows %}
                 <tr class="{% if row.has_issues %}row-needs-review{% endif %}">
                   <td>{{ row.index }}<input type="hidden" name="draft_id" value="{{ row.draft_id }}"></td>
@@ -97,7 +97,8 @@
                   <td class="editable-cell {% if row.issue_map.buyer_name %}field-error{% endif %}"><span class="edit-mark">✎</span><input name="buyer_name" value="{{ row.buyer_name }}" placeholder="待补全购买方名称">{% if row.issue_map.buyer_name %}<small>{{ row.issue_map.buyer_name }}</small>{% endif %}</td>
                   <td class="editable-cell {% if row.issue_map.buyer_tax_id %}field-error{% endif %}"><span class="edit-mark">✎</span><input name="buyer_tax_id" value="{{ row.buyer_tax_id }}" placeholder="待补全税号">{% if row.issue_map.buyer_tax_id %}<small>{{ row.issue_map.buyer_tax_id }}</small>{% endif %}</td>
                   <td class="editable-cell"><span class="edit-mark">✎</span><input name="invoice_kind" value="{{ row.invoice_kind }}"></td>
-                  <td class="editable-cell {% if row.issue_map.amount_with_tax %}field-error{% endif %}"><span class="edit-mark">✎</span><input name="amount_with_tax" value="{{ row.amount_with_tax }}" placeholder="待补全金额">{% if row.issue_map.amount_with_tax %}<small>{{ row.issue_map.amount_with_tax }}</small>{% endif %}</td>
+                  <td><strong>{{ row.amount_with_tax or '待补全' }}</strong><small>{{ row.line_count }} 行明细合计</small></td>
+                  <td class="editable-cell {% if row.issue_map.note %}field-warning{% endif %}"><span class="edit-mark">✎</span><textarea name="note" rows="3" placeholder="客户要求的发票对象、项目名称、项目地址、车牌号或账单 ID 等备注内容">{{ row.note }}</textarea>{% if row.issue_map.note %}<small>{{ row.issue_map.note }}</small>{% endif %}</td>
                   <td>{% if row.has_issues %}<span class="badge warn">待复核</span>{% else %}<span class="badge ok">可入模板</span>{% endif %}</td>
                 </tr>
               {% endfor %}
@@ -105,30 +106,39 @@
           </div>
 
           <div class="card">
-            <div class="card-head"><div><h2>Sheet 2：发票明细信息</h2><p>请集中核对项目名称、税收分类、税收编码和税率；如果本批项目一致，可先用上方推荐一键导入。</p></div><span class="badge info">规则 / 档案推荐</span></div>
-            <div class="table-wrap"><table class="sheet-table"><thead><tr><th>#</th><th>项目名称</th><th>税收分类</th><th>税收编码</th><th>税率</th><th>单位</th><th>数量</th><th>推荐来源</th></tr></thead><tbody>
-              {% for row in batch_rows %}
-                <tr class="{% if row.has_issues %}row-needs-review{% endif %}">
-                  <td>{{ row.index }}</td>
-                  <td class="editable-cell {% if row.issue_map.project_name %}field-error{% endif %}"><span class="edit-mark">✎</span><input name="project_name" value="{{ row.project_name }}" placeholder="待补全项目">{% if row.issue_map.project_name %}<small>{{ row.issue_map.project_name }}</small>{% endif %}</td>
-                  <td class="editable-cell"><span class="edit-mark">✎</span><input name="tax_category" value="{{ row.tax_category }}" placeholder="例如：餐饮服务"></td>
-                  <td class="editable-cell {% if row.issue_map.tax_code %}field-warning{% endif %}"><span class="edit-mark">✎</span><input name="tax_code" value="{{ row.tax_code }}" placeholder="待确认税收编码">{% if row.issue_map.tax_code %}<small>{{ row.issue_map.tax_code }}</small>{% endif %}</td>
-                  <td class="editable-cell {% if row.issue_map.tax_rate %}field-error{% endif %}"><span class="edit-mark">✎</span><input name="tax_rate" value="{{ row.tax_rate }}" placeholder="1%">{% if row.issue_map.tax_rate %}<small>{{ row.issue_map.tax_rate }}</small>{% endif %}</td>
-                  <td class="editable-cell"><span class="edit-mark">✎</span><input name="unit" value="{{ row.unit }}" placeholder="项"></td>
-                  <td class="editable-cell"><span class="edit-mark">✎</span><input name="quantity" value="{{ row.quantity }}" placeholder="1"></td>
-                  <td class="coding-reference-cell">
-                    {% set ref = row.coding_reference or '' %}
-                    {% if ref %}
-                      <span class="badge {% if '客户' in ref or '规则' in ref %}ok{% elif '历史' in ref or '档案' in ref %}info{% elif 'LLM' in ref or '智能' in ref or '候选' in ref %}warn{% else %}neutral{% endif %}" title="{{ ref }}">
-                        {% if '客户' in ref or '规则' in ref %}客户规则{% elif '历史' in ref or '档案' in ref %}历史命中{% elif 'LLM' in ref or '智能' in ref or '候选' in ref %}LLM候选{% else %}推荐{% endif %}
-                      </span>
-                    {% else %}
-                      <span class="badge neutral" title="无推荐来源，请人工确认">无推荐</span>
-                    {% endif %}
-                  </td>
-                </tr>
-              {% endfor %}
-            </tbody></table></div>
+            <div class="card-head"><div><h2>Sheet 2：发票明细信息</h2><p>按每张发票展开全部明细行。批量上传前，请集中核对项目名称、金额、税率和税收编码。</p></div><span class="badge info">全部明细可改</span></div>
+            {% for row in batch_rows %}
+              <section class="batch-invoice-lines {% if row.has_issues %}row-needs-review{% endif %}" id="draft-{{ row.draft_id }}">
+                <div class="batch-invoice-lines-head">
+                  <div><strong>第 {{ row.index }} 张：{{ row.source_name or row.draft_id }}</strong><small>{{ row.line_count }} 行明细；合计 {{ row.amount_with_tax or '待补全' }}</small></div>
+                  <a href="{{ url_for('draft_detail', draft_id=row.draft_id, batch_id=batch.batch_id) }}">高级编辑</a>
+                </div>
+                <div class="table-wrap"><table class="sheet-table"><thead><tr><th>行</th><th>项目名称</th><th>含税金额</th><th>税收分类</th><th>税收编码</th><th>税率</th><th>单位</th><th>数量</th><th>推荐来源</th></tr></thead><tbody>
+                  {% for line in row.line_rows %}
+                    <tr class="{% if line.has_issues %}row-needs-review{% endif %}">
+                      <td>{{ row.index }}-{{ line.display_index }}</td>
+                      <td class="editable-cell {% if line.issue_map.project_name %}field-error{% endif %}"><span class="edit-mark">✎</span><input name="{{ line.field_prefix }}_project_name" value="{{ line.project_name }}" placeholder="待补全项目">{% if line.issue_map.project_name %}<small>{{ line.issue_map.project_name }}</small>{% endif %}</td>
+                      <td class="editable-cell {% if line.issue_map.amount_with_tax %}field-error{% endif %}"><span class="edit-mark">✎</span><input name="{{ line.field_prefix }}_amount_with_tax" value="{{ line.amount_with_tax }}" placeholder="待补全金额">{% if line.issue_map.amount_with_tax %}<small>{{ line.issue_map.amount_with_tax }}</small>{% endif %}</td>
+                      <td class="editable-cell"><span class="edit-mark">✎</span><input name="{{ line.field_prefix }}_tax_category" value="{{ line.tax_category }}" placeholder="例如：餐饮服务"></td>
+                      <td class="editable-cell {% if line.issue_map.tax_code %}field-warning{% endif %}"><span class="edit-mark">✎</span><input name="{{ line.field_prefix }}_tax_code" value="{{ line.tax_code }}" placeholder="待确认税收编码">{% if line.issue_map.tax_code %}<small>{{ line.issue_map.tax_code }}</small>{% endif %}</td>
+                      <td class="editable-cell {% if line.issue_map.tax_rate %}field-error{% endif %}"><span class="edit-mark">✎</span><input name="{{ line.field_prefix }}_tax_rate" value="{{ line.tax_rate }}" placeholder="1%">{% if line.issue_map.tax_rate %}<small>{{ line.issue_map.tax_rate }}</small>{% endif %}</td>
+                      <td class="editable-cell"><span class="edit-mark">✎</span><input name="{{ line.field_prefix }}_unit" value="{{ line.unit }}" placeholder="项"></td>
+                      <td class="editable-cell"><span class="edit-mark">✎</span><input name="{{ line.field_prefix }}_quantity" value="{{ line.quantity }}" placeholder="1"></td>
+                      <td class="coding-reference-cell">
+                        {% set ref = line.coding_reference or '' %}
+                        {% if ref %}
+                          <span class="badge {% if '客户' in ref or '规则' in ref %}ok{% elif '历史' in ref or '档案' in ref %}info{% elif 'LLM' in ref or '智能' in ref or '候选' in ref %}warn{% else %}neutral{% endif %}" title="{{ ref }}">
+                            {% if '客户' in ref or '规则' in ref %}客户规则{% elif '历史' in ref or '档案' in ref %}历史命中{% elif 'LLM' in ref or '智能' in ref or '候选' in ref %}LLM候选{% else %}推荐{% endif %}
+                          </span>
+                        {% else %}
+                          <span class="badge neutral" title="无推荐来源，请人工确认">无推荐</span>
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody></table></div>
+              </section>
+            {% endfor %}
           </div>
         </form>
 

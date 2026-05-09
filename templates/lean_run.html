@@ -7,7 +7,7 @@
       <meta http-equiv="refresh" content="2">
     {% endif %}
     <title>执行 {{ run.run_id }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-assistant-copy') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260509-batch-review-loop-v2') }}">
   </head>
   <body class="operator-body">
     <main class="dashboard-shell run-shell">
@@ -22,12 +22,16 @@
 
         <nav class="sidebar-nav">
           <a class="nav-item" href="{{ url_for('index') }}"><span class="nav-dot">台</span><span>开票工作台</span></a>
-          {% if run.draft_id %}
+          {% if run_batch %}
+            <span class="nav-item disabled"><span class="nav-dot">稿</span><span>发票草稿</span></span>
+            <a class="nav-item" href="{{ url_for('batch_detail', batch_id=run_batch.batch_id) }}"><span class="nav-dot">批</span><span>批量复核</span></a>
+          {% elif run.draft_id %}
             <a class="nav-item" href="{{ url_for('draft_detail', draft_id=run.draft_id) }}"><span class="nav-dot">稿</span><span>发票草稿</span></a>
+            <span class="nav-item disabled"><span class="nav-dot">批</span><span>批量复核</span></span>
           {% else %}
             <span class="nav-item disabled"><span class="nav-dot">稿</span><span>发票草稿</span></span>
+            <span class="nav-item disabled"><span class="nav-dot">批</span><span>批量复核</span></span>
           {% endif %}
-          <span class="nav-item disabled"><span class="nav-dot">批</span><span>批量复核</span></span>
           <a class="nav-item active" href="{{ url_for('run_detail', run_id=run.run_id) }}"><span class="nav-dot">跑</span><span>税局执行</span></a>
           <a class="nav-item" href="{{ url_for('profiles_page') }}"><span class="nav-dot">档</span><span>主体与档案</span></a>
           <a class="nav-item" href="{{ url_for('ledger_page') }}"><span class="nav-dot">记</span><span>执行记录</span></a>
@@ -47,7 +51,9 @@
             <p>查看当前步骤、税局结果和下一步动作。</p>
           </div>
           <div class="hy-actions">
-            {% if run.draft_id %}
+            {% if run_batch %}
+              <a class="secondary button-like" href="{{ url_for('batch_detail', batch_id=run_batch.batch_id) }}">返回批量复核</a>
+            {% elif run.draft_id %}
               <a class="secondary button-like" href="{{ url_for('draft_detail', draft_id=run.draft_id) }}">返回草稿修改</a>
             {% else %}
               <a class="secondary button-like" href="{{ url_for('index') }}">返回工作台</a>
@@ -65,21 +71,21 @@
             <small>{{ run.current_step or 'queued' }}</small>
           </div>
           <div class="hy-env-item"><span>税局页面</span><strong>Edge 已连接</strong><small>保持税局页面开启</small></div>
-          <div class="hy-env-item"><span>失败明细</span><strong>{% if run.failure_report %}已解析{% elif run.downloaded_failure_path %}已下载{% else %}暂无{% endif %}</strong><small>失败后回填草稿</small></div>
+          <div class="hy-env-item"><span>失败明细</span><strong>{% if run.failure_report %}已解析{% elif run.downloaded_failure_path %}已下载{% else %}暂无{% endif %}</strong><small>{% if run_batch %}失败后回到批量复核修整本批{% else %}失败后回填草稿{% endif %}</small></div>
           <div class="hy-env-item"><span>预览确认</span><strong>税局页面核对</strong><small>确认后再开具</small></div>
         </section>
 
         {% if run.error %}<section class="banner alert"><p>{{ run.error }}</p></section>{% endif %}
         {% if run.focus_notice %}<section class="banner ok"><p>{{ run.focus_notice }}</p></section>{% endif %}
         {% if run.status == "done" %}
-          <section class="banner ok"><p>执行完成。{% if run.preview_clicked %}税局预览已准备好，请核对发票内容。{% else %}请打开税局页面查看预览结果。{% endif %}</p></section>
+          <section class="banner ok"><p>{% if run_batch %}本批模板已被税局接收。{% if run.preview_clicked %}税局预览/待确认页面已准备好，请按本批清单逐张核对。{% else %}请打开税局页面查看本批预览/待确认结果。{% endif %}{% else %}执行完成。{% if run.preview_clicked %}税局预览已准备好，请核对发票内容。{% else %}请打开税局页面查看预览结果。{% endif %}{% endif %}</p></section>
         {% endif %}
         {% if run.status == "failed" %}
           <section class="banner alert">
             {% if run.downloaded_failure_path %}
-              <p>开票未通过；失败明细 Excel 已下载并解析。<a href="{{ url_for('run_failure_download', run_id=run.run_id) }}">下载原始失败明细</a></p>
+              <p>{% if run_batch %}本批未通过税局校验，税局退回了整个批量模板；失败明细 Excel 已下载并解析。请回到批量复核页定点修复后，重新上传本批。{% else %}开票未通过；失败明细 Excel 已下载并解析。{% endif %}<a href="{{ url_for('run_failure_download', run_id=run.run_id) }}">下载原始失败明细</a></p>
             {% else %}
-              <p>开票未通过；本次未自动获取失败明细。请在税局页面手动下载失败明细后，回到草稿页上传解析。</p>
+              <p>{% if run_batch %}本批未通过税局校验；本次未自动获取失败明细。请在税局页面手动下载失败明细后，回到批量复核页按本批整体修复。{% else %}开票未通过；本次未自动获取失败明细。请在税局页面手动下载失败明细后，回到草稿页上传解析。{% endif %}</p>
             {% endif %}
           </section>
         {% endif %}
@@ -92,7 +98,7 @@
                   <span class="card-icon">进</span>
                   <div>
                     <h2>当前进度与下一步</h2>
-                    <p>{% if run.status == 'failed' %}本次未通过税局校验，请先处理失败原因，确认后再重新发起开票。{% elif run.status == 'done' %}本次已到达税局处理完成状态，请进入税局预览核对发票内容。{% else %}正在执行，请保持 Edge 和税局页面打开。{% endif %}</p>
+                    <p>{% if run.status == 'failed' %}{% if run_batch %}本批作为一个模板被税局整体退回，请先处理失败原因，确认后重新上传本批。{% else %}本次未通过税局校验，请先处理失败原因，确认后再重新发起开票。{% endif %}{% elif run.status == 'done' %}{% if run_batch %}本批模板已被税局接收，请进入税局预览/待确认页面逐张核对。{% else %}本次已到达税局处理完成状态，请进入税局预览核对发票内容。{% endif %}{% else %}正在执行，请保持 Edge 和税局页面打开。{% endif %}</p>
                   </div>
                 </div>
               </header>
@@ -142,6 +148,19 @@
               </section>
             {% endif %}
 
+            {% if run_batch %}
+              <section class="work-card batch-preview-checklist">
+                <header class="card-head"><div class="card-title"><span class="card-icon">批</span><div><h2>本批预览核对清单</h2><p>税局接收后，请按这份清单在税局页面逐张预览核对；系统不会自动最终开具。</p></div></div></header>
+                <div class="table-wrap" style="margin-top:12px;">
+                  <table class="line-table"><thead><tr><th>#</th><th>购买方</th><th>票种</th><th>金额</th><th>明细行</th></tr></thead><tbody>
+                    {% for item in run_batch.items %}
+                      <tr><td>{{ loop.index }}</td><td>{{ item.buyer_name }}</td><td>{{ item.invoice_kind }}</td><td>{{ item.amount_total }}</td><td>{{ item.line_count }}</td></tr>
+                    {% endfor %}
+                  </tbody></table>
+                </div>
+              </section>
+            {% endif %}
+
             <section class="work-card hy-quiet-log">
               <header class="card-head"><div class="card-title"><span class="card-icon">志</span><div><h2>执行日志</h2><p>平时不用看；遇到问题时，可把这里的日志提供给技术人员定位。</p></div></div></header>
               <details {% if run.status in ['failed', 'running'] %}open{% endif %}>
@@ -155,15 +174,18 @@
             <section class="work-card">
               <header class="card-head"><div><h2>下一步建议</h2><p>这里会根据税局当前状态，提示你下一步该做什么。</p></div></header>
               <div class="hy-panel-list">
-                {% if run.status == 'failed' and run.draft_id %}
+                {% if run.status == 'failed' and run_batch %}
+                  <div class="hy-panel-item"><span class="hy-badge error">本批整体退回</span><p>税局退回的是整个批量模板。请回到批量复核页，按失败明细定位到具体发票/明细行修复后，重新上传本批。</p></div>
+                  <a class="secondary button-like" href="{{ url_for('batch_detail', batch_id=run_batch.batch_id) }}">回到批量复核修改</a>
+                {% elif run.status == 'failed' and run.draft_id %}
                   <div class="hy-panel-item"><span class="hy-badge error">税局退回</span><p>优先查看失败明细，应用安全建议或回草稿人工修改。</p></div>
                   {% if run.failure_report and run.failure_report.actionable_count %}
                     <form method="post" action="{{ url_for('run_apply_failure_repairs', run_id=run.run_id) }}"><button class="primary" type="submit">应用安全建议并回草稿</button></form>
                   {% endif %}
                   <a class="secondary button-like" href="{{ url_for('draft_detail', draft_id=run.draft_id) }}">回到本次草稿修改</a>
                 {% elif run.status == 'done' %}
-                  <div class="hy-panel-item"><span class="hy-badge ok">进入预览</span><p>税局预览已准备好。点击下方按钮，查看本次发票预览结果。</p></div>
-                  <div class="hy-panel-item"><span class="hy-badge warn">请核对内容</span><p>请在税局页面核对购买方、金额、税额和明细，确认无误后再开具。</p></div>
+                  <div class="hy-panel-item"><span class="hy-badge ok">进入预览</span><p>{% if run_batch %}本批模板已被税局接收。点击下方按钮，回到税局预览/待确认页面逐张核对。{% else %}税局预览已准备好。点击下方按钮，查看本次发票预览结果。{% endif %}</p></div>
+                  <div class="hy-panel-item"><span class="hy-badge warn">请核对内容</span><p>{% if run_batch %}请按本批清单在税局页面逐张查看预览，确认无误后再最终开具。{% else %}请在税局页面核对购买方、金额、税额和明细，确认无误后再开具。{% endif %}</p></div>
                   <form method="post" action="{{ url_for('run_focus_tax_window', run_id=run.run_id) }}" data-tax-preview-form><button class="primary" type="submit">进入税局预览</button></form>
                 {% else %}
                   <div class="hy-panel-item"><span class="hy-badge info">执行中</span><p>保持 Edge 与税局页面打开，等待税局返回处理结果。</p></div>
@@ -171,7 +193,7 @@
               </div>
             </section>
             <section class="hy-safe-boundary">
-              <strong>下一步：</strong>进入税局预览后，请核对购买方、金额、税额和明细，确认无误后再开具。
+              <strong>下一步：</strong>{% if run_batch %}本批是一个模板整体上传；进入税局后请逐张预览核对，若被退回则修复后重新上传整批。{% else %}进入税局预览后，请核对购买方、金额、税额和明细，确认无误后再开具。{% endif %}
             </section>
           </aside>
         </div>
