@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>执行记录</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260503-assistant-copy') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260509-batch-smart-code-fix') }}">
   </head>
   <body class="operator-body">
     <div class="app-shell">
@@ -16,7 +16,7 @@
         <nav class="nav">
           <a href="{{ url_for('index') }}"><span class="nav-dot">台</span>开票工作台</a>
           {% if current_draft_id %}<a href="{{ url_for('draft_detail', draft_id=current_draft_id) }}"><span class="nav-dot">稿</span>发票草稿</a>{% else %}<span class="nav-item disabled"><span class="nav-dot">稿</span>发票草稿</span>{% endif %}
-          <span class="nav-item disabled"><span class="nav-dot">批</span>批量复核</span>
+          {% if current_batch_id %}<a href="{{ url_for('batch_detail', batch_id=current_batch_id) }}"><span class="nav-dot">批</span>批量复核</a>{% else %}<span class="nav-item disabled"><span class="nav-dot">批</span>批量复核</span>{% endif %}
           <span class="nav-item disabled"><span class="nav-dot">跑</span>税局执行</span>
           <a href="{{ url_for('profiles_page') }}"><span class="nav-dot">档</span>主体与档案</a>
           <a class="active" href="{{ url_for('ledger_page') }}"><span class="nav-dot">记</span>执行记录</a>
@@ -35,7 +35,7 @@
             <p>这里会记录材料识别、草稿修改、模板生成、税局执行和你的人工确认，方便你回看每一单走到了哪一步。</p>
           </div>
           <div class="actions">
-            {% if current_draft_id %}<a class="btn" href="{{ url_for('draft_detail', draft_id=current_draft_id) }}">返回当前草稿</a>{% endif %}<a class="btn" href="{{ url_for('index') }}">返回工作台</a>
+            {% if current_batch_id %}<a class="btn primary" href="{{ url_for('batch_detail', batch_id=current_batch_id) }}">返回当前批量复核</a>{% endif %}{% if current_draft_id %}<a class="btn" href="{{ url_for('draft_detail', draft_id=current_draft_id) }}">返回当前草稿</a>{% endif %}<a class="btn" href="{{ url_for('index') }}">返回工作台</a>
             {% if ledger_exists %}
               <a class="btn primary" href="{{ url_for('success_ledger') }}">下载确认明细 Excel</a>
             {% endif %}
@@ -76,7 +76,7 @@
                       {% for record in execution_records %}
                         <tr>
                           <td><span class="mono">{{ record.last_at[5:16] if record.last_at else '-' }}</span></td>
-                          <td><span class="mono">{{ record.case_id }}</span><small>{{ record.draft_id or record.batch_id }}</small></td>
+                          <td><span class="mono">{{ record.case_id }}</span><small>{{ record.draft_id or record.batch_id }}</small>{% if record.batch_id %}<a class="inline-link" href="{{ url_for('batch_detail', batch_id=record.batch_id) }}">回批量复核</a>{% elif record.draft_id %}<a class="inline-link" href="{{ url_for('draft_detail', draft_id=record.draft_id) }}">回草稿</a>{% endif %}</td>
                           <td><strong>{{ record.company_name or '未记录主体' }}</strong><small>{{ record.buyer_name or (record.invoice_count ~ ' 张票') }}</small></td>
                           <td>{{ record.material_type }}<small>{% if record.invoice_count and record.invoice_count > 1 %}{{ record.invoice_count }} 张{% else %}{{ record.line_count }} 行{% endif %}</small></td>
                           <td>{{ record.extract_strategy or '未记录' }}<small>{{ record.llm_provider or '-' }}</small></td>

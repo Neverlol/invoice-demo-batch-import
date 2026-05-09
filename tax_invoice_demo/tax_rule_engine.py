@@ -776,7 +776,13 @@ def _apply_local_safe_coding_hint(line: InvoiceLine) -> None:
 
 
 def _can_replace_smart_status(line: InvoiceLine) -> bool:
-    return not line.coding_reference or line.coding_reference.startswith("未命中规则") or line.coding_reference.startswith("待智能赋码")
+    return (
+        not line.tax_category.strip()
+        or not line.tax_code.strip()
+        or not line.coding_reference
+        or line.coding_reference.startswith("未命中规则")
+        or line.coding_reference.startswith("待智能赋码")
+    )
 
 
 

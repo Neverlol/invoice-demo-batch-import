@@ -447,6 +447,70 @@ class LeanUIRenderingTest(unittest.TestCase):
         self.assertIn(f"/batches/{batch.batch_id}", html)
         self.assertNotIn("回到本次草稿修改", html)
 
+    def test_batch_smart_code_fills_engineering_steel_lines_without_llm(self):
+        draft = InvoiceDraft(
+            draft_id="draft-batch-engineering-steel",
+            case_id="batch-engineering-steel",
+            company_name="沈阳市铁西区聚腾商贸商行（个体工商户）",
+            buyer=BuyerInfo(name="中铁二局集团有限公司", tax_id="9151010073481642XK"),
+            lines=[
+                InvoiceLine(project_name="伸缩缝不锈钢压舌", amount_with_tax="45000.00", tax_rate="1%", tax_category="", tax_code="", unit="套", quantity="75", coding_reference="推荐"),
+                InvoiceLine(project_name="预埋钢板", amount_with_tax="200200.00", tax_rate="1%", tax_category="", tax_code="", unit="块", quantity="91", coding_reference="推荐"),
+                InvoiceLine(project_name="压板", amount_with_tax="41880.00", tax_rate="1%", tax_category="木制品", tax_code="1050101990000000000", unit="块", quantity="6980", coding_reference="官方分类候选"),
+            ],
+            note="项目名称:需求单位 全编码；来源 Excel：压板.xls",
+            created_at="2026-05-09T12:00:00",
+            workbook_name="压板.xls",
+        )
+        workbench_module.save_draft(draft)
+        batch = DraftBatch(
+            batch_id="batch-engineering-steel-ui",
+            case_id="batch-engineering-steel",
+            company_name=draft.company_name,
+            created_at="2026-05-09T12:00:00",
+            items=[DraftBatchItem(draft_id=draft.draft_id, buyer_name=draft.buyer.name, invoice_kind=draft.invoice_kind, amount_total="267080.00", project_summary="压板", line_count=3)],
+        )
+        workbench_module.save_draft_batch(batch)
+
+        missing_response = app.test_client().post(
+            f"/batches/{batch.batch_id}/smart-code",
+            data={"draft_id": draft.draft_id, "buyer_name": draft.buyer.name, "buyer_tax_id": draft.buyer.tax_id, "invoice_kind": draft.invoice_kind, "note": draft.note, "smart_code_scope": "missing"},
+        )
+
+        self.assertEqual(missing_response.status_code, 200)
+        updated = workbench_module.load_draft(draft.draft_id)
+        self.assertEqual(updated.lines[0].tax_code, "1080401010000000000")
+        self.assertEqual(updated.lines[1].tax_code, "1080207070000000000")
+        self.assertEqual(updated.lines[2].tax_code, "1050101990000000000")
+
+        all_response = app.test_client().post(
+            f"/batches/{batch.batch_id}/smart-code",
+            data={"draft_id": draft.draft_id, "buyer_name": draft.buyer.name, "buyer_tax_id": draft.buyer.tax_id, "invoice_kind": draft.invoice_kind, "note": draft.note, "smart_code_scope": "all"},
+        )
+
+        self.assertEqual(all_response.status_code, 200)
+        updated = workbench_module.load_draft(draft.draft_id)
+        self.assertEqual(updated.lines[2].tax_category, "金属制品")
+        self.assertEqual(updated.lines[2].tax_code, "1080401010000000000")
+        self.assertIn("工程材料规则", updated.lines[2].coding_reference)
+
+    def test_ledger_from_batch_keeps_return_to_batch_review_link(self):
+        batch = DraftBatch(
+            batch_id="batch-ledger-return-ui",
+            case_id="batch-ledger-return",
+            company_name="沈阳市铁西区聚腾商贸商行（个体工商户）",
+            created_at="2026-05-09T12:00:00",
+            items=[DraftBatchItem(draft_id="child-ledger", buyer_name="中铁二局集团有限公司", invoice_kind="增值税专用发票", amount_total="300.00", project_summary="压板", line_count=2)],
+        )
+        workbench_module.save_draft_batch(batch)
+
+        response = app.test_client().get(f"/ledger?batch_id={batch.batch_id}")
+
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn("返回当前批量复核", html)
+        self.assertIn(f"/batches/{batch.batch_id}", html)
+
     def test_taxonomy_search_api_returns_official_code_options(self):
         response = app.test_client().get("/api/taxonomy/search?q=医疗")
 

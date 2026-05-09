@@ -573,8 +573,11 @@ def smart_code_batch(batch_id: str):
     before_refs = [line.coding_reference or "" for line in target_lines]
     before_codes = [(line.tax_category or "", line.tax_code or "") for line in target_lines]
     if target_lines:
+        for draft in target_drafts:
+            _apply_batch_context_coding(draft, replace_existing=(scope == "all"))
         smart_code_invoice_lines(target_lines)
         for draft in target_drafts:
+            _apply_batch_context_coding(draft, replace_existing=(scope == "all"))
             workbench_module.save_draft(draft)
     smart_code_result = _smart_code_result_message(scope, target_lines, before_refs, before_codes)
     _rebuild_batch_items_from_drafts(batch)
@@ -738,6 +741,58 @@ def _batch_line_recommendation(batch) -> dict[str, str] | None:
         "source": profile.matched_source,
     }
 
+
+
+def _apply_batch_context_coding(draft, *, replace_existing: bool = False) -> int:
+    """Apply high-confidence batch-context rules before/after smart coding.
+
+    The batch page is the operator's main repair desk. When the uploaded workbook
+    itself is a construction/steel material list, common engineering item names
+    should not remain stuck as "待确认税收编码" just because the LLM call returns no
+    usable candidate. These deterministic fills are still marked as requiring
+    human review.
+    """
+    context = " ".join(
+        part
+        for part in [
+            draft.workbook_name,
+            draft.note,
+            draft.raw_text,
+            " ".join(draft.material_tags or []),
+        ]
+        if part
+    )
+    changed = 0
+    for line in draft.lines:
+        if _apply_engineering_material_code(line, context=context, replace_existing=replace_existing):
+            changed += 1
+    return changed
+
+
+def _apply_engineering_material_code(line: InvoiceLine, *, context: str = "", replace_existing: bool = False) -> bool:
+    text = f"{line.project_name} {line.specification} {context}".strip()
+    item_text = f"{line.project_name} {line.specification}".strip()
+    if not item_text:
+        return False
+    if line.tax_code.strip() and line.tax_category.strip() and not replace_existing:
+        return False
+    target: tuple[str, str, str] | None = None
+    if re.search(r"(预埋钢板|止水钢板|镀锌板|不锈钢板)", item_text):
+        target = ("黑色金属冶炼压延品", "1080207070000000000", "钢板")
+    elif re.search(r"(钢爬梯|爬梯|伸缩缝.*不锈钢|不锈钢.*压舌|压舌)", item_text):
+        target = ("金属制品", "1080401010000000000", "钢结构及其产品")
+    elif re.search(r"(^|[^木])压板", item_text) and re.search(r"(压板\.xls|钢|金属|不锈钢|镀锌|预埋|工程|项目|中铁|施工)", text):
+        target = ("金属制品", "1080401010000000000", "钢结构及其产品")
+    if target is None:
+        return False
+    category, code, official_name = target
+    before = (line.tax_category, line.tax_code, line.coding_reference)
+    if replace_existing or not line.tax_category.strip():
+        line.tax_category = category
+    if replace_existing or not line.tax_code.strip():
+        line.tax_code = code
+    line.coding_reference = f"工程材料规则，需人工复核: {official_name} / {category} / {code}"
+    return before != (line.tax_category, line.tax_code, line.coding_reference)
 
 
 def _batch_sheet_rows(batch):
@@ -983,10 +1038,18 @@ def _valid_nav_draft_id(raw: str) -> str:
     return draft_id if load_draft(draft_id) is not None else ""
 
 
+def _valid_nav_batch_id(raw: str) -> str:
+    batch_id = (raw or "").strip()
+    if not batch_id:
+        return ""
+    return batch_id if load_draft_batch(batch_id) is not None else ""
+
+
 @app.get("/ledger")
 def ledger_page():
     execution_summary = execution_record_summary(limit=200)
     current_draft_id = _valid_nav_draft_id(request.args.get("draft_id") or "")
+    current_batch_id = _valid_nav_batch_id(request.args.get("batch_id") or "")
     return render_template(
         "lean_ledger.html",
         ledger_exists=SUCCESS_LEDGER_XLSX.exists(),
@@ -996,6 +1059,7 @@ def ledger_page():
         execution_records=execution_summary["records"],
         execution_metrics=execution_summary["metrics"],
         current_draft_id=current_draft_id,
+        current_batch_id=current_batch_id,
     )
 
 

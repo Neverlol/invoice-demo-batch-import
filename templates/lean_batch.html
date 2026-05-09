@@ -21,7 +21,7 @@
           <a class="active" href="{{ url_for('batch_detail', batch_id=batch.batch_id) }}"><span class="nav-dot">批</span>批量复核</a>
           <span class="nav-item disabled"><span class="nav-dot">跑</span>税局执行</span>
           <a href="{{ url_for('profiles_page') }}"><span class="nav-dot">档</span>主体与档案</a>
-          <a href="{{ url_for('ledger_page') }}"><span class="nav-dot">记</span>执行记录</a>
+          <a href="{{ url_for('ledger_page', batch_id=batch.batch_id) }}"><span class="nav-dot">记</span>执行记录</a>
         </nav>
         <div class="sidebar-card"><h3>批量复核提示</h3><p>请先处理红色阻断和黄色待补全项，确认后再下载或上传本批税局模板。</p></div>
       </aside>

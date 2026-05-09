@@ -1451,6 +1451,14 @@ td { font-size: 13px; }
 .coding-reference-cell .badge {
   white-space: nowrap;
 }
+.inline-link {
+  display: inline-block;
+  margin-top: 4px;
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: none;
+}
+.inline-link:hover { text-decoration: underline; }
 .sheet-table td:nth-child(6),
 .sheet-table input[name="amount_with_tax"] {
   text-align: right;
