@@ -55,7 +55,7 @@
           <div class="env-item"><span>明细</span><strong>{{ draft.lines|length }} 行</strong><small>你修正后可辅助下次推荐</small></div>
         </section>
 
-        {% set has_async_like_work = (not saved and not smart_code_result) and (draft.ocr_status in ['vision_deferred', 'partial'] or draft.source_doc_status in ['partial'] or draft.llm_provider or draft.extract_warnings) %}
+        {% set has_async_like_work = false %}
         <section class="banner live-draft-banner {% if has_async_like_work %}is-active{% else %}is-ready{% endif %}" data-draft-live-status data-has-active-work="{{ '1' if has_async_like_work else '0' }}">
           <div class="live-status-orb"><span></span></div>
           <div>

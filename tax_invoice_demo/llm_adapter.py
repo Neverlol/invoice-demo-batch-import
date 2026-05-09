@@ -165,7 +165,7 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
                 {"role": "system", "content": "You are a careful invoice vision extraction assistant. Output JSON only."},
                 {"role": "user", "content": content},
             ],
-            timeout_seconds=_task_timeout_seconds("TAX_INVOICE_LLM_VISION_EXTRACT_TIMEOUT", self.timeout_seconds, 18),
+            timeout_seconds=_task_timeout_seconds("TAX_INVOICE_LLM_VISION_EXTRACT_TIMEOUT", self.timeout_seconds, 35),
         )
 
     def classify_tax_code(self, item_name: str, candidates: list[str]) -> LLMResponse:
@@ -177,7 +177,7 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
             f"项目名称：{item_name}\n"
             f"候选：{json.dumps(candidates, ensure_ascii=False)}"
         )
-        return self._chat_json(prompt, timeout_seconds=_task_timeout_seconds("TAX_INVOICE_LLM_TAX_CODE_TIMEOUT", self.timeout_seconds, 20))
+        return self._chat_json(prompt, timeout_seconds=_task_timeout_seconds("TAX_INVOICE_LLM_TAX_CODE_TIMEOUT", self.timeout_seconds, 35))
 
     def classify_tax_codes(self, items: list[dict[str, Any]]) -> LLMResponse:
         prompt = (
@@ -190,7 +190,7 @@ class MiniMaxOpenAICompatibleAdapter(BaseLLMAdapter):
             "只能从对应项目的候选中选择；没有把握也返回最接近候选并降低置信度，不能创造候选外编码。\n"
             f"待赋码项目：{json.dumps(items, ensure_ascii=False)}"
         )
-        return self._chat_json(prompt, timeout_seconds=_task_timeout_seconds("TAX_INVOICE_LLM_TAX_CODE_TIMEOUT", self.timeout_seconds, 20))
+        return self._chat_json(prompt, timeout_seconds=_task_timeout_seconds("TAX_INVOICE_LLM_TAX_CODE_TIMEOUT", self.timeout_seconds, 35))
 
     def extract_text_from_image(self, image_path: Path) -> LLMResponse:
         mime_type = mimetypes.guess_type(str(image_path))[0] or "image/png"

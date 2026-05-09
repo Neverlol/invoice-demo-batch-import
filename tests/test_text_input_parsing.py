@@ -1154,6 +1154,60 @@ A4复印纸 10包 240元
         self.assertIn("命中 客户规则", next_draft.lines[0].coding_reference)
 
 
+    def test_single_workbook_upload_uses_structured_excel_lines_not_text_guessing(self):
+        workbook_path = self.temp_path / "网采材料干混抹灰砂浆4月.xlsx"
+        wb = Workbook()
+        ws = wb.active
+        ws.append(["序号", "名称", "规格型号", "单位", "数量", "单价", "金额", "税率"])
+        ws.append([1, "干混抹灰砂浆", "DPM10", "吨", 3, 84, 252, "1%"])
+        ws.append([2, "外墙抗裂", "", "袋", 4, 27, 108, "1%"])
+        wb.save(workbook_path)
+        with workbook_path.open("rb") as handle:
+            draft = workbench_module.create_draft_from_workbench(
+                "沈阳市铁西区聚腾商贸商行（个体工商户）",
+                "根据发票样张的对象和备注进行开票",
+                "",
+                [FileStorage(stream=handle, filename="网采材料干混抹灰砂浆4月.xlsx")],
+                force_batch=False,
+            )
+
+        self.assertEqual(draft.extract_strategy, "rules_plus_workbook_single")
+        self.assertEqual(draft.lines[0].project_name, "干混抹灰砂浆")
+        self.assertEqual(draft.lines[0].quantity, "3")
+        self.assertEqual(draft.lines[0].unit_price, "84.00")
+        self.assertEqual(draft.lines[0].amount_with_tax, "252.00")
+        self.assertEqual(draft.lines[0].tax_rate, "1%")
+        self.assertEqual(draft.lines[1].project_name, "外墙抗裂")
+        self.assertNotIn("1.0", draft.lines[0].project_name)
+
+    def test_batch_workbook_upload_uses_same_structured_excel_lines_as_single(self):
+        workbook_path = self.temp_path / "网采材料干混抹灰砂浆4月-batch.xlsx"
+        wb = Workbook()
+        ws = wb.active
+        ws.append(["序号", "名称", "规格型号", "单位", "数量", "单价", "金额", "税率"])
+        ws.append([1, "干混抹灰砂浆", "DPM10", "吨", 3, 84, 252, "1%"])
+        ws.append([2, "外墙抗裂", "", "袋", 4, 27, 108, "1%"])
+        wb.save(workbook_path)
+        with workbook_path.open("rb") as handle:
+            batch = workbench_module.create_draft_from_workbench(
+                "沈阳市铁西区聚腾商贸商行（个体工商户）",
+                "根据发票样张的对象和备注进行开票",
+                "",
+                [FileStorage(stream=handle, filename="网采材料干混抹灰砂浆4月-batch.xlsx")],
+                force_batch=True,
+            )
+
+        self.assertEqual(batch.extract_strategy, "rules_plus_workbook_batch")
+        child = workbench_module.load_draft(batch.items[0].draft_id)
+        self.assertIsNotNone(child)
+        self.assertEqual(child.lines[0].project_name, "干混抹灰砂浆")
+        self.assertEqual(child.lines[0].quantity, "3")
+        self.assertEqual(child.lines[0].unit_price, "84.00")
+        self.assertEqual(child.lines[0].amount_with_tax, "252.00")
+        self.assertEqual(child.lines[0].tax_rate, "1%")
+        self.assertEqual(child.lines[1].project_name, "外墙抗裂")
+        self.assertNotIn("1.0", child.lines[0].project_name)
+
     def test_cloud_profile_matches_similar_explicit_excel_item_without_replacing_name(self):
         customer_profiles_module.PROFILE_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
         customer_profiles_module.PROFILE_CACHE_PATH.write_text(

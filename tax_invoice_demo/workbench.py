@@ -351,11 +351,16 @@ def create_draft_from_workbench(
             llm_provider=batch_llm_provider,
             extract_warnings=batch_extract_warnings,
         )
+    single_workbook_units = [] if force_batch else _extract_workbook_invoice_units(draft_dir, attachments)
+    single_workbook_ocr_result = ocr_result
+    if single_workbook_units and image_attachment_paths and not single_workbook_ocr_result.combined_text.strip():
+        # 单张 Excel + 发票样张也必须先本地 OCR 样张字段；Excel 明细本身不交给 OCR/LLM 猜。
+        single_workbook_ocr_result = _run_draft_ocr(draft_dir, attachments, defer_to_vision=False)
     extraction = extract_invoice_structured_data(
         raw_text=raw_text,
         note=note,
         document_text=document_result.combined_text,
-        ocr_text=ocr_result.combined_text,
+        ocr_text=single_workbook_ocr_result.combined_text,
         image_paths=vision_image_paths,
         force_llm_review=False,
         material_tags=material_tags,
@@ -365,8 +370,12 @@ def create_draft_from_workbench(
     buyer = extraction.buyer
     buyer = _enrich_buyer_from_sheet_context(company_name, buyer, parse_source)
     buyer = _enrich_buyer_from_history_profile(company_name, buyer, parse_source)
+    workbook_unit = single_workbook_units[0] if len(single_workbook_units) == 1 else None
+    source_lines = list(workbook_unit.lines) if workbook_unit is not None else extraction.lines
+    if workbook_unit is not None:
+        parse_source = _compose_parse_source(parse_source, workbook_unit.source_excerpt, "")
     lines = _apply_history_profile_to_lines(
-        extraction.lines,
+        source_lines,
         company_name=company_name,
         buyer=buyer,
         parse_source=parse_source,
@@ -425,15 +434,15 @@ def create_draft_from_workbench(
 
     issues = _build_draft_issues(
         company_name=company_name,
-        raw_text=raw_text,
+        raw_text=parse_source,
         attachments=attachments,
         buyer=buyer,
         lines=lines,
         special_business=invoice_profile["special_business"],
         document_status=document_result.status,
         document_note=document_result.note,
-        ocr_status=ocr_result.status,
-        ocr_note=ocr_result.note,
+        ocr_status=single_workbook_ocr_result.status,
+        ocr_note=single_workbook_ocr_result.note,
     )
 
     draft = InvoiceDraft(
@@ -442,8 +451,8 @@ def create_draft_from_workbench(
         company_name=company_name.strip(),
         buyer=buyer,
         lines=lines,
-        raw_text=raw_text,
-        note=draft_note,
+        raw_text=workbook_unit.source_excerpt if workbook_unit is not None else raw_text,
+        note=("；".join(part for part in [draft_note, f"来源 Excel：{workbook_unit.source_name}" if workbook_unit is not None else ""] if part)).strip(),
         issues=issues,
         source_images=attachments,
         workbook_name="开票明细表.xlsx",
@@ -451,14 +460,14 @@ def create_draft_from_workbench(
         invoice_kind=invoice_profile["invoice_kind"],
         invoice_medium=invoice_profile["invoice_medium"],
         special_business=invoice_profile["special_business"],
-        ocr_status=ocr_result.status,
-        ocr_engine=ocr_result.engine,
-        ocr_text=ocr_result.combined_text,
-        ocr_note=ocr_result.note,
+        ocr_status=single_workbook_ocr_result.status,
+        ocr_engine=single_workbook_ocr_result.engine,
+        ocr_text=single_workbook_ocr_result.combined_text,
+        ocr_note=single_workbook_ocr_result.note,
         source_doc_status=document_result.status,
-        source_doc_text=document_result.combined_text,
+        source_doc_text=workbook_unit.source_excerpt if workbook_unit is not None else document_result.combined_text,
         source_doc_note=document_result.note,
-        extract_strategy=extraction.strategy,
+        extract_strategy="rules_plus_workbook_single" if workbook_unit is not None else extraction.strategy,
         llm_provider=extraction.llm_provider,
         extract_warnings=extraction.warnings,
         material_tags=material_tags,
@@ -2529,7 +2538,7 @@ def _purchase_request_lines_from_workbook(path: Path) -> list[InvoiceLine]:
         if index["物资名称"] is None or index["实际金额"] is None:
             continue
         for row in rows[header_index + 1:]:
-            project_name = _row_value(row, index["物资名称"])
+            project_name = _clean_workbook_project_name(_row_value(row, index["物资名称"]))
             if not project_name or "合计" in project_name:
                 continue
             amount = _money_text(_row_value(row, index["实际金额"]))
@@ -2558,6 +2567,10 @@ def _generic_invoice_lines_from_workbook(path: Path) -> list[InvoiceLine]:
     vehicle_lines = _vehicle_missing_certificate_lines_from_rows(rows_by_sheet)
     if vehicle_lines:
         return vehicle_lines
+    # Excel 是强结构化材料，先按表头/列定位解析；只有找不到稳定表头时才退回通用文本解析。
+    structured_lines = _fallback_project_amount_lines_from_rows(rows_by_sheet)
+    if structured_lines:
+        return structured_lines
     parsed: list[InvoiceLine] = []
     for rows in rows_by_sheet:
         text = _rows_to_tab_text(rows)
@@ -2566,7 +2579,7 @@ def _generic_invoice_lines_from_workbook(path: Path) -> list[InvoiceLine]:
         parsed.extend(parse_bulk_invoice_lines(text))
     if parsed:
         return _mark_workbook_lines(parsed)
-    return _fallback_project_amount_lines_from_rows(rows_by_sheet)
+    return []
 
 
 def _vehicle_missing_certificate_lines_from_rows(rows_by_sheet: list[list[list[str]]]) -> list[InvoiceLine]:
@@ -2686,7 +2699,7 @@ def _fallback_project_amount_lines_from_rows(rows_by_sheet: list[list[list[str]]
         tax_rate_index = _first_header_index(header, ["税率", "税率(%)", "税率/征收率"])
         category_index = _first_header_index(header, ["赋码大类", "税收分类", "税目大类", "大类"])
         for row in rows[header_index + 1:]:
-            project_name = _row_value(row, project_index)
+            project_name = _clean_workbook_project_name(_row_value(row, project_index))
             amount = _money_text(_row_value(row, amount_index))
             if not project_name or not amount:
                 continue
@@ -2723,10 +2736,34 @@ def _find_generic_project_amount_header(rows: list[list[str]]) -> tuple[int | No
 
 def _first_header_index(header: list[str], names: list[str]) -> int | None:
     wanted = {name.strip() for name in names}
+    normalized_wanted = {_normalize_header_token(name) for name in wanted if name.strip()}
     for index, value in enumerate(header):
-        if value.strip() in wanted:
+        clean = value.strip()
+        if clean in wanted:
             return index
+        normalized = _normalize_header_token(clean)
+        if normalized and normalized in normalized_wanted:
+            return index
+    for index, value in enumerate(header):
+        normalized = _normalize_header_token(value)
+        if not normalized:
+            continue
+        for target in normalized_wanted:
+            if target and (target in normalized or normalized in target):
+                return index
     return None
+
+
+def _normalize_header_token(value: str) -> str:
+    return re.sub(r"[^0-9A-Za-z\u4e00-\u9fff%]+", "", str(value or "")).lower()
+
+
+def _clean_workbook_project_name(value: str) -> str:
+    text = str(value or "").strip()
+    # 常见 Excel 第一列“序号”被合并/串到名称时，去掉 1 / 1.0 / 1、 等序号前缀。
+    text = re.sub(r"^\s*\d+(?:\.0)?\s*[、.．\-\s]+", "", text)
+    text = re.sub(r"^\s*[（(]?\d+[）)]\s*", "", text)
+    return text.strip()
 
 
 def _cell_text(value) -> str:
