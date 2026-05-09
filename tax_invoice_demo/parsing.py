@@ -1005,9 +1005,12 @@ def _extract_buyer_info_from_standard_invoice_layout(lines: list[str]) -> BuyerI
             name_part = compact
             if "销售方" in name_part:
                 name_part = re.split(r"销售方|销\s*方|销售方信息|销方信息", name_part, maxsplit=1)[0]
-            matched = re.search(r"名称[：:\s]*([^：:]+?)(?:\s{2,}|纳税人识别号|统一社会信用代码|$)", name_part)
-            if matched:
-                candidate = _trim_inline_field_value(matched.group(1).strip())
+            # 标准发票左右两栏经 OCR 后经常变成一行：
+            # 名称:购买方公司 名称:销售方公司。此时必须取第一段，不能把销售方串进购买方。
+            name_part = re.split(r"\s名称[：:\s]", f" {name_part}", maxsplit=2)[1] if len(re.split(r"\s名称[：:\s]", f" {name_part}", maxsplit=2)) > 1 else name_part
+            name_part = re.split(r"\s名称[：:\s]|纳税人识别号|统一社会信用代码|税号", name_part, maxsplit=1)[0]
+            candidate = _trim_inline_field_value(name_part.strip(" ：:"))
+            if candidate:
                 company_match = re.search(rf"([\u4e00-\u9fffA-Za-z0-9()（）·]+?{company_tail_pattern})", candidate)
                 buyer.name = (company_match.group(1) if company_match else candidate).strip()
         if in_buyer_block and not buyer.tax_id and re.search(r"识别号|信用代码|税号", compact):
@@ -1016,6 +1019,7 @@ def _extract_buyer_info_from_standard_invoice_layout(lines: list[str]) -> BuyerI
                 tax_part = re.split(r"销售方|销\s*方|销售方信息|销方信息", tax_part, maxsplit=1)[0]
             matches = re.findall(r"([0-9A-ZO]{15,20})", tax_part.upper().replace(" ", ""))
             if matches:
+                # 标准发票左右两栏同一行时，第一个税号是购买方，第二个通常是销售方。
                 buyer.tax_id = _normalize_tax_id_ocr_noise(matches[0])
         if in_buyer_block and re.search(r"销售方|销\s*方|销售方信息|销方信息", compact) and (buyer.name or buyer.tax_id):
             # In two-column invoice screenshots the buyer and seller fields often share a line.

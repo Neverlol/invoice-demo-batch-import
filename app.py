@@ -220,6 +220,34 @@ def smart_code_draft(draft_id: str):
     )
 
 
+def _coding_source_summary(refs: list[str]) -> str:
+    counts = {
+        "llm": sum(1 for ref in refs if ref.startswith("智能推荐") or "LLM" in ref),
+        "engineering": sum(1 for ref in refs if "工程材料规则" in ref),
+        "local": sum(1 for ref in refs if "本地" in ref),
+        "tenant": sum(1 for ref in refs if "客户规则" in ref),
+        "history": sum(1 for ref in refs if "历史" in ref or "档案" in ref),
+        "official": sum(1 for ref in refs if "官方分类候选" in ref),
+    }
+    parts = []
+    if counts["llm"]:
+        parts.append(f"LLM 智能推荐 {counts['llm']} 行")
+    if counts["engineering"]:
+        parts.append(f"工程材料规则 {counts['engineering']} 行")
+    if counts["local"]:
+        parts.append(f"本地规则 {counts['local']} 行")
+    if counts["tenant"]:
+        parts.append(f"客户规则包 {counts['tenant']} 行")
+    if counts["history"]:
+        parts.append(f"历史/档案候选 {counts['history']} 行")
+    if counts["official"]:
+        parts.append(f"官方候选 {counts['official']} 行")
+    if not parts:
+        return "本次没有产生可归类的智能/规则来源。"
+    llm_note = "；本次没有 LLM 可用推荐。" if counts["llm"] == 0 else "。"
+    return "来源：" + "、".join(parts) + llm_note
+
+
 def _smart_code_result_message(
     scope: str,
     target_lines: list[InvoiceLine],
@@ -243,6 +271,7 @@ def _smart_code_result_message(
 
     after_refs = [line.coding_reference or "" for line in target_lines]
     after_codes = [(line.tax_category or "", line.tax_code or "") for line in target_lines]
+    source_summary = _coding_source_summary(after_refs)
     smart_count = sum(1 for ref in after_refs if ref.startswith("智能推荐"))
     failed_count = sum(
         1
@@ -260,7 +289,7 @@ def _smart_code_result_message(
         return {
             "level": "warn",
             "title": f"{scope_label}已完成，{failed_count} 行需要人工确认",
-            "message": f"本次处理 {total} 行，生成智能推荐 {smart_count} 行；仍有 {failed_count} 行未得到可用推荐，请查看明细中的状态。",
+            "message": f"本次处理 {total} 行，生成智能推荐 {smart_count} 行；仍有 {failed_count} 行未得到可用推荐，请查看明细中的状态。{source_summary}",
             "total": total,
             "smart": smart_count,
             "failed": failed_count,
@@ -270,7 +299,7 @@ def _smart_code_result_message(
         return {
             "level": "ok",
             "title": f"{scope_label}已完成",
-            "message": f"本次处理 {total} 行，生成智能推荐 {smart_count} 行；请继续核对税收分类和税收编码。",
+            "message": f"本次处理 {total} 行，生成智能推荐 {smart_count} 行；请继续核对税收分类和税收编码。{source_summary}",
             "total": total,
             "smart": smart_count,
             "failed": failed_count,
@@ -280,7 +309,7 @@ def _smart_code_result_message(
         return {
             "level": "ok",
             "title": f"{scope_label}已完成",
-            "message": f"本次处理 {total} 行，已更新 {changed_count} 行赋码信息；请继续核对发票内容。",
+            "message": f"本次处理 {total} 行，已更新 {changed_count} 行赋码信息；请继续核对发票内容。{source_summary}",
             "total": total,
             "smart": smart_count,
             "failed": failed_count,
@@ -301,7 +330,7 @@ def _smart_code_result_message(
     return {
         "level": "ok",
         "title": f"{scope_label}已完成",
-        "message": f"本次复核 {total} 行，当前赋码结果未发生变化；请继续人工核对发票内容。",
+        "message": f"本次复核 {total} 行，当前赋码结果未发生变化；请继续人工核对发票内容。{source_summary}",
         "total": total,
         "smart": smart_count,
         "failed": failed_count,

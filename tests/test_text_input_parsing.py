@@ -189,6 +189,32 @@ class TextInputParsingTest(unittest.TestCase):
         self.assertEqual(buyer.name, "中铁二局集团有限公司")
         self.assertEqual(buyer.tax_id, "9151010073481642XK")
 
+    def test_standard_invoice_sample_extracts_buyer_tax_id_and_remark_block(self):
+        text = """电子发票（增值税专用发票）
+购买方信息                                      销售方信息
+名称: 中铁二局集团有限公司                      名称: 沈阳聚腾商贸有限公司
+统一社会信用代码/纳税人识别号: 91510100MA61RKR7X3 统一社会信用代码/纳税人识别号: 91210113MAC2T4WQ68
+项目名称 规格型号 单位 数量 单价 金额 税率/征收率 税额
+电线电缆 米 35 64.35 2252.48 1% 22.52
+合计 ¥11414.56 ¥114.14
+价税合计（大写） 壹万壹仟伍佰贰拾捌圆柒角整 （小写）¥11528.70
+备注
+购买方开户行: 建行成都铁道支行; 银行账号: 51050188083609123456;
+销售方开户行: 中国工商银行股份有限公司沈阳沈北支行; 银行账号: 3301007009200368122;
+项目名称: 中铁二局集团有限公司沈阳市王家湾（冬运）项目经理部
+项目地址: 辽宁省沈阳市浑南区长安桥南街中铁二局项目部
+开票人: 袁玉杰
+"""
+
+        buyer = extract_buyer_info_from_text(text)
+        note = workbench_module._extract_invoice_note_from_context(text)
+
+        self.assertEqual(buyer.name, "中铁二局集团有限公司")
+        self.assertEqual(buyer.tax_id, "91510100MA61RKR7X3")
+        self.assertIn("项目名称:中铁二局集团有限公司沈阳市王家湾（冬运）项目经理部", note)
+        self.assertIn("项目地址:辽宁省沈阳市浑南区长安桥南街中铁二局项目部", note)
+        self.assertIn("购买方开户行", note)
+
     def test_real_business_excel_style_table_extracts_buyer_lines_and_global_tax_code(self):
         text = """物料名称\t规格型号\t数量\t开票金额\t税率
 一次性使用微针电极\tCONSUMABLE TIP\t150\t35625\t0.13

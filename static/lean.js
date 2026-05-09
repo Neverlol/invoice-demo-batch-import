@@ -272,6 +272,37 @@ if (batchRecommendationButton) {
   });
 }
 
+document.querySelectorAll("[data-batch-smart-submit]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const form = button.closest("form");
+    const live = document.querySelector("[data-batch-smart-live]");
+    const title = live?.querySelector("[data-batch-smart-title]");
+    const detail = live?.querySelector("[data-batch-smart-detail]");
+    const elapsedNode = live?.querySelector("[data-batch-smart-elapsed]");
+    const startedAt = Date.now();
+    if (live) {
+      live.hidden = false;
+      live.classList.add("is-live");
+    }
+    if (title) title.textContent = button.value === "all" ? "正在智能复核本批全部明细…" : "正在智能赋码本批未命中明细…";
+    const render = () => {
+      const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+      if (elapsedNode) elapsedNode.textContent = `${elapsed} 秒`;
+      if (detail) {
+        if (elapsed < 4) detail.textContent = "正在保存本页修改，并收集本批所有子草稿明细。";
+        else if (elapsed < 10) detail.textContent = "正在按工程材料规则、官方候选和客户规则包处理可确定明细。";
+        else detail.textContent = "材料较多或需要 LLM 候选时会多花几秒；完成后会回到本批复核页。";
+      }
+      button.textContent = `${button.value === "all" ? "智能复核中" : "智能赋码中"}…${elapsed} 秒`;
+    };
+    render();
+    window.setInterval(render, 1000);
+    form?.querySelectorAll("button").forEach((candidate) => {
+      if (candidate !== button) candidate.disabled = true;
+    });
+  });
+});
+
 const taxonomyPicker = document.querySelector("[data-taxonomy-picker]");
 if (taxonomyPicker) {
   const queryInput = taxonomyPicker.querySelector("[data-taxonomy-query]");

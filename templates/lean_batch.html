@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>批量模板 {{ batch.batch_id }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260509-batch-review-loop-v2') }}">
-    <script defer src="{{ url_for('static', filename='lean.js', v='20260509-batch-review-loop-v2') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='lean.css', v='20260509-sample-invoice-remark-smart-v2') }}">
+    <script defer src="{{ url_for('static', filename='lean.js', v='20260509-sample-invoice-remark-smart-v2') }}"></script>
   </head>
   <body class="operator-body">
     {% set ns = namespace(review=0, ready=0) %}
@@ -59,11 +59,12 @@
             <div class="card-head"><div><h2>整批处理</h2><p>先在本页集中修复本批草稿；需要大模型时，直接在批量页一次性智能赋码/复核，不必逐张进入高级编辑。</p></div><span class="badge {% if export.error_count %}error{% elif ns.review %}warn{% else %}ok{% endif %}">{% if export.error_count %}有阻断{% elif ns.review %}待补全{% else %}可上传{% endif %}</span></div>
             <div class="actions" style="justify-content:flex-start">
               <button class="btn" type="submit">保存本批修改 / 重新校验</button>
-              <button class="btn primary" type="submit" formaction="{{ url_for('smart_code_batch', batch_id=batch.batch_id) }}" name="smart_code_scope" value="missing">智能赋码本批未命中明细</button>
-              <button class="btn" type="submit" formaction="{{ url_for('smart_code_batch', batch_id=batch.batch_id) }}" name="smart_code_scope" value="all">智能复核本批全部明细</button>
+              <button class="btn primary" type="submit" formaction="{{ url_for('smart_code_batch', batch_id=batch.batch_id) }}" name="smart_code_scope" value="missing" data-batch-smart-submit>智能赋码本批未命中明细</button>
+              <button class="btn" type="submit" formaction="{{ url_for('smart_code_batch', batch_id=batch.batch_id) }}" name="smart_code_scope" value="all" data-batch-smart-submit>智能复核本批全部明细</button>
               <a class="btn" href="{{ url_for('download_batch_template', batch_id=batch.batch_id) }}">下载本批税局 Excel</a>
             </div>
             <p class="cost-hint">批量智能赋码会先保存本页修改，再合并处理所有子草稿中的未命中行；完成后仍回到本批复核页统一提交。</p>
+              <div class="batch-smart-live" data-batch-smart-live hidden><strong data-batch-smart-title>正在处理本批赋码…</strong><span data-batch-smart-detail>正在保存本页修改，并按工程规则、官方候选和可用 LLM 候选处理明细。</span><em data-batch-smart-elapsed>0 秒</em></div>
           </div>
 
           <div class="card recommendation-card">
@@ -127,8 +128,8 @@
                       <td class="coding-reference-cell">
                         {% set ref = line.coding_reference or '' %}
                         {% if ref %}
-                          <span class="badge {% if '客户' in ref or '规则' in ref %}ok{% elif '历史' in ref or '档案' in ref %}info{% elif 'LLM' in ref or '智能' in ref or '候选' in ref %}warn{% else %}neutral{% endif %}" title="{{ ref }}">
-                            {% if '客户' in ref or '规则' in ref %}客户规则{% elif '历史' in ref or '档案' in ref %}历史命中{% elif 'LLM' in ref or '智能' in ref or '候选' in ref %}LLM候选{% else %}推荐{% endif %}
+                          <span class="badge {% if '智能推荐' in ref or 'LLM' in ref %}warn{% elif '工程材料规则' in ref or '本地' in ref %}ok{% elif '客户规则' in ref %}info{% elif '历史' in ref or '档案' in ref %}info{% elif '官方分类候选' in ref or '候选' in ref %}warn{% else %}neutral{% endif %}" title="{{ ref }}">
+                            {% if '智能推荐' in ref or 'LLM' in ref %}LLM候选{% elif '工程材料规则' in ref %}工程规则{% elif '本地' in ref %}本地规则{% elif '客户规则' in ref %}规则包{% elif '历史' in ref or '档案' in ref %}历史候选{% elif '官方分类候选' in ref or '候选' in ref %}官方候选{% else %}推荐{% endif %}
                           </span>
                         {% else %}
                           <span class="badge neutral" title="无推荐来源，请人工确认">无推荐</span>

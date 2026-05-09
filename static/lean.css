@@ -1440,6 +1440,21 @@ td { font-size: 13px; }
   color: var(--faint);
   margin-top: 3px;
 }
+.batch-smart-live {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(35,120,91,.25);
+  border-radius: 14px;
+  background: rgba(227, 247, 236, .72);
+  color: #174936;
+  display: grid;
+  gap: 4px;
+}
+.batch-smart-live em {
+  font-style: normal;
+  color: var(--faint);
+  font-weight: 800;
+}
 .row-needs-review {
   background: rgba(173,124,43,.045);
 }

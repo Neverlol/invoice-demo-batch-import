@@ -91,6 +91,7 @@ def _extract_invoice_note_from_context(text: str) -> str:
     extract project name/address style remarks.
     """
 
+    standard_invoice_remark = _extract_standard_invoice_remark_block(text)
     project_name_candidates: list[str] = []
     project_address = ""
     for raw_line in str(text or "").splitlines():
@@ -108,11 +109,49 @@ def _extract_invoice_note_from_context(text: str) -> str:
             project_address = _cleanup_invoice_note_value(value)
     project_name = _select_invoice_note_project_name(project_name_candidates)
     parts = []
-    if project_name:
+    if standard_invoice_remark:
+        parts.append(standard_invoice_remark)
+    if project_name and f"项目名称:{project_name}" not in standard_invoice_remark:
         parts.append(f"项目名称:{project_name}")
-    if project_address:
+    if project_address and f"项目地址:{project_address}" not in standard_invoice_remark:
         parts.append(f"项目地址:{project_address}")
     return "\n".join(parts)
+
+
+def _extract_standard_invoice_remark_block(text: str) -> str:
+    """Extract the dedicated 备注栏 from standard invoice OCR/PDF text.
+
+    Historical invoice samples mainly carry buyer name, buyer tax id and remarks.
+    The remark block is often OCR'd as lines after “备注”, and should be copied as
+    draft note when the user asks to follow the sample invoice.
+    """
+    lines = [re.sub(r"\s+", " ", raw).strip(" |\t") for raw in str(text or "").splitlines()]
+    collected: list[str] = []
+    in_remark = False
+    for line in lines:
+        if not line:
+            continue
+        normalized = line.replace("备 注", "备注").replace("备汪", "备注").replace("备洼", "备注")
+        if not in_remark and re.search(r"^备注[：:]?", normalized):
+            in_remark = True
+            value = re.sub(r"^备注[：:]?\s*", "", normalized).strip()
+            if value:
+                collected.append(value)
+            continue
+        if in_remark:
+            if re.search(r"^(开票人|收款人|复核|销售方信息|购买方信息|合\s*计|价税合计)", normalized):
+                break
+            if re.search(r"(购买方开户行|销售方开户行|银行账号|项目名称|项目地址|项目经理部|项目部|合同|工程|地址)", normalized):
+                collected.append(normalized)
+            elif collected and not re.search(r"(规格型号|数量|单价|金额|税率|税额|电子发票|发票号码|开票日期)", normalized):
+                # 备注栏可能被 OCR 拆成多行，保留紧随其后的非明细行。
+                collected.append(normalized)
+    cleaned: list[str] = []
+    for item in collected:
+        value = _cleanup_invoice_note_value(item)
+        if value and value not in cleaned:
+            cleaned.append(value)
+    return "\n".join(cleaned[:6])
 
 
 def _select_invoice_note_project_name(candidates: list[str]) -> str:
